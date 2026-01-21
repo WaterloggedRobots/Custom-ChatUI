@@ -1,0 +1,87 @@
+
+        dark_style = """
+        /* Generic widget */
+        QWidget {
+            background:#2b2b2b;
+            color:#e0e0e0;
+        }
+        
+        /* Menus */
+        QMenuBar { background:#2b2b2b; }
+        QMenuBar::item:selected { background:#3c3c3c; }
+        QMenu { background:#2b2b2b; }
+        QMenu::item:selected { background:#3c3c3c; }
+        
+        /* Buttons */
+        QPushButton {
+            background-color:#3c3c3c;
+            border:1px solid #555;
+            border-radius:4px;
+            padding:4px 8px;
+            color:#e0e0e0;
+        }
+        QPushButton:hover {
+            background-color:#4c4c4c;
+        }
+        QPushButton:pressed {
+            background-color:#2c2c2c;
+        }
+        
+        /* Line edit */
+        QLineEdit {
+            background:#3c3c3c;
+            border:1px solid #555;
+            border-radius:4px;
+            padding:4px;
+            color:#e0e0e0;
+        }
+
+        """
+        app.setStyleSheet(dark_style)
+
+        self.setWindowTitle("ChatUI")
+        self.resize(700, 500)
+
+        self.layout = QVBoxLayout(self)
+
+        self.chat = QTextEdit()
+        self.chat.setReadOnly(True)
+
+        self.input = QLineEdit()
+        self.input.setPlaceholderText("Type your message…")
+
+        # --
+        btn_row = QHBoxLayout()
+        self.layout.addLayout(btn_row)
+
+        self.edit_btn = QPushButton("Edit last prompt")
+        self.delete_btn = QPushButton("Delete last prompt")
+        #--
+
+        self.send_btn = QPushButton("Send")
+        self.status = QLabel("Idle")
+
+        self.save_btn = QPushButton("💾 Save Chat")
+        self.load_btn = QPushButton("📂 Load Chat")
+
+        self.layout.addWidget(self.chat)
+        self.layout.addWidget(self.input)
+        self.layout.addWidget(self.send_btn)
+        btn_row.addWidget(self.edit_btn)
+        btn_row.addWidget(self.delete_btn)
+        btn_row.addWidget(self.save_btn)
+        btn_row.addWidget(self.load_btn)
+        self.layout.addWidget(self.status)
+
+        self.send_btn.clicked.connect(self.send_message)
+        self.input.returnPressed.connect(self.send_message)
+
+        self.emitter = StreamEmitter()
+        self.emitter.token.connect(self.append_token)
+        self.emitter.done.connect(self.finish_response)
+        
+        self.save_btn.clicked.connect(self.save_chat_manual)
+        self.load_btn.clicked.connect(self.load_chat_manual)
+
+        self.edit_btn.clicked.connect(self.edit_last_prompt)
+        self.delete_btn.clicked.connect(self.delete_last_prompt)

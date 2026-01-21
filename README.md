@@ -1,6 +1,7 @@
 # Custom ChatUI At Home
 # 1. Introduction
 LLM chatbots are all the rage now a days.  I feel like it would be fun to make my own chat bot.
+![Chatbot Client UI](Img/MainChatWindow.png)
 
 # 2. The LLM
 This project WILL NOT focus on the LLM itself.  I didn't train my own LLM. I don't have the hardware or knowledge to pull of such a feat.
@@ -27,17 +28,21 @@ Despite the whole project being about AI chatbots, the AI part is all ready made
 
 ## 2.1. Main Chat Window
 The Main interface of the client UI. With Top bar tools to create new chats, edit current chat settings, set llm server ip, and edit messages.
+![Main Chat Window](Img/ChatList.png)
 
 The main area is a window that shows all the interaction between the user and the bot.  The interactions are timestamped with response times recorded while the texts support markdown formats for enhanced readability.  The bottom bar allows multi row text input.  So code pasting is feasible for self sustained vibe coding development.  There are also 2 pop up side bars on the sides for chat selection list and image browser respectively, with edit and delete message functions, the UI functions really similar to modern chatbot applications on the market.
 
 ## 2.2. Chat Creation and Settings
 The user can create new chats or edit existing ones with functions to name the chats, switch the bot LLM, and select bot settings, allowing users to hotswap models and presets for the chat to handle different tasks in various scenarios.
+![Chat Settings](Img/ChatSettings.png)
 
 ## 2.3. Bot Creation and Settings
 The user can drag and drop images to give the bot a bit more personality together with the text description window for more specific and detailed context.  The bot also supports workflow.json for ComfyUI image generation, but that feature is still under development.  This setting is seperated from the chat settings page such that the same bot with the same personality can be use across multiple chats without manually doing all the settings every time.
+![Bot Settings](Img/BottSettings.png)
 
 # 2.4. Save Files
 Since the LLM server is only for processing text only. All of the settings and logs are saved by the client UI, hence more work was done on the UI itself instead of the LLM.  The UI Saves the bot settings separately as previously mentioned.  Meanwhile, each chat was saved as a massive .json file, which includes data such as the save path of the bot settings, visible chat history, invisible chat history, model name, llm temperature, etc.  Everytime the UI loads a chat, the .temp.json updates the order of the chats such that the chat list can reflect the most recently interacted chats for user convenience and organisation.  Meanwhile, the program follows the bot save path set in the chat.json to obtain the bot presets and combines it with the invisible chat history.  The user only sees the visible version of the chat history in the chat window, with all the presets and invisible instructions returned by the bot being hidden in the full version.  The 2 chat logs would then be updated with the latest user message to be sent as a .json to the llm and be reflected onto the chat window.  The program also asks the llm to summarize previous chat logs and compresses the payload chat log to minimise tokens used and optimise the LLM's work load.
+![Bot Settings](Img/ChatJson.png)
 
 # 3. Future Works
 I have packaged the program into a .exe app that can connect to my server machine on the same LAN.  It's now functioning enough that I can ask it to code its own code for me :).

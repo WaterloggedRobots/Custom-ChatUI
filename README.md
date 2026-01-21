@@ -42,7 +42,7 @@ The user can drag and drop images to give the bot a bit more personality togethe
 
 # 2.4. Save Files
 Since the LLM server is only for processing text only. All of the settings and logs are saved by the client UI, hence more work was done on the UI itself instead of the LLM.  The UI Saves the bot settings separately as previously mentioned.  Meanwhile, each chat was saved as a massive .json file, which includes data such as the save path of the bot settings, visible chat history, invisible chat history, model name, llm temperature, etc.  Everytime the UI loads a chat, the .temp.json updates the order of the chats such that the chat list can reflect the most recently interacted chats for user convenience and organisation.  Meanwhile, the program follows the bot save path set in the chat.json to obtain the bot presets and combines it with the invisible chat history.  The user only sees the visible version of the chat history in the chat window, with all the presets and invisible instructions returned by the bot being hidden in the full version.  The 2 chat logs would then be updated with the latest user message to be sent as a .json to the llm and be reflected onto the chat window.  The program also asks the llm to summarize previous chat logs and compresses the payload chat log to minimise tokens used and optimise the LLM's work load.
-![Bot Settings](Img/ChatJson.png)
+
 
 # 3. Future Works
 I have packaged the program into a .exe app that can connect to my server machine on the same LAN.  It's now functioning enough that I can ask it to code its own code for me :).

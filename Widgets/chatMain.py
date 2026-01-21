@@ -70,16 +70,16 @@ class ChatMain(QMainWindow):
         # Connect the toggle button - replace 'pushButton_7' with your actual button name
         self.ui.pushButton.clicked.connect(self.toggle_graphics_view)
         self.ui.pushButton_2.clicked.connect(self.toggle_chat_list)
+        self.ui.pushButton_5.clicked.connect(self.sendMessage)
 
         self.ui.actionNew_Chat.setShortcut("Ctrl+N")
         self.ui.actionLoad_Chat.setShortcut("Ctrl+O")
         self.ui.actionChat_Settings.setShortcut("Ctrl+E")
 
-        self.ui.pushButton_5.clicked.connect(self.sendMessage)
         self.ui.pushButton_6.clicked.connect(self.regenerate_last_response) #regen
 
         self.ui.actionLoad_Chat.triggered.connect(self.selectChat)
-        self.ui.actionEdit_Message.triggered.connect(self.edit_last_user_message)
+
         self.ui.actionDelete_Message.triggered.connect(self.delete_last_user_exchange)
 
         self.input = self.ui.plainTextEdit
@@ -478,32 +478,57 @@ class ChatMain(QMainWindow):
                {html}
            </div>
            """
+    def get_last_user_message(self):
+        # Find last user message
+        for i in range(len(self.chat_markdown) - 1, -1, -1):
+            if self.chat_markdown[i]["role"] == "user":
+                return self.chat_markdown[i]["content"]
+        return None
 
     def edit_last_user_message(self, new_text: str):
-        if not new_text.strip():
+        new_text = new_text.strip()
+        if not new_text:
             return
 
-        # Find last user message
+        # ---- find last user message ----
         for i in range(len(self.chat_markdown) - 1, -1, -1):
             if self.chat_markdown[i]["role"] == "user":
                 user_index = i
                 break
         else:
-            return  # no user message found
+            return  # no user message
 
-        # Remove assistant reply if it exists
-        if user_index + 1 < len(self.chat_markdown) and \
-                self.chat_markdown[user_index + 1]["role"] == "assistant":
+        # ---- remove assistant reply if present ----
+        if (
+                user_index + 1 < len(self.chat_markdown)
+                and self.chat_markdown[user_index + 1]["role"] == "assistant"
+        ):
             self.chat_markdown.pop(user_index + 1)
 
-        # Replace user content
+        # ---- update user message ----
         self.chat_markdown[user_index]["content"] = new_text
+        self.chat_markdown[user_index]["ts"] = self.now_ts()
 
-        # Reset LLM context and rebuild
+        # ---- rebuild LLM + UI ----
         self._rebuild_llm_context()
         self._rebuild_chat_ui()
 
-        # Send new request
+        # ---- UI: show edited user message (already rebuilt) ----
+        ts = self.format_ts(self.chat_markdown[user_index]["ts"])
+
+        self.chat.append(
+            f"<b>{self.botName}:</b>"
+        )
+
+        self.chat.moveCursor(QTextCursor.End)
+
+        # ---- prepare streaming state ----
+        self.response_cursor = self.chat.textCursor()
+        self.response_start_pos = self.response_cursor.position()
+        self.current_response = ""
+        self.response_start_time = time.time()
+
+        # ---- LLM request ----
         self.client.add_user_message(new_text)
         self.client.generate()
 
@@ -627,3 +652,36 @@ class ChatMain(QMainWindow):
     def qs_chat(self, chatName):
         chatPath = Path(self.directoryParent + "//Save//Chat//" + chatName + ".json")
         self.load_chat(str(chatPath))
+
+class EditMessage(QMainWindow):
+
+    def __init__(self, pd, fd):
+        super().__init__()
+        self.directoryParent = pd
+        self.directoryDefault = fd
+        self.load_ui()
+        self.setup_connections()
+
+    def load_ui(self):
+        try:
+            ui_file = QFile(self.directoryDefault+r"\UI\EditMessage.ui")  # Change to your .ui file name
+            if not ui_file.open(QFile.ReadOnly):
+                print(f"Cannot open UI file: {ui_file.errorString()}")
+                return
+
+            loader = QUiLoader()
+            self.ui = loader.load(ui_file)
+            ui_file.close()
+
+            if self.ui:
+                self.setCentralWidget(self.ui)
+                self.setWindowTitle("Edit Message")
+
+
+        except Exception as e:
+            print(f"Error loading UI: {e}")
+
+    def setup_connections(self):
+        """Connect button signals to functions"""
+        #self.ui.pushButton.clicked.connect(self.load_bot_dir)
+        pass

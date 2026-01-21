@@ -82,6 +82,7 @@ class Main:
         mainChat.ui.actionChat_Settings.triggered.connect(self.openChatSettings)
         mainChat.ui.actionNew_Chat.triggered.connect(self.newChatSettings)
         mainChat.ui.listWidget.clicked.connect(self.quick_select_chat)
+        mainChat.ui.actionEdit_Message.triggered.connect(self.openEditMsg)
 
         settingsChat.ui.pushButton_2.clicked.connect(self.newBot)
         settingsChat.ui.pushButton_3.clicked.connect(self.cancelChatSettings)
@@ -90,6 +91,8 @@ class Main:
         settingsBot.ui.pushButton.clicked.connect(self.exitBotSettings)
 
         emptyStart.ui.pushButton.clicked.connect(self.newChatSettings)
+
+        messageEdit.ui.pushButton.clicked.connect(self.exitEditMsg)
 
     def read_json_file(self, file_path):
         """Read a JSON file and return its contents"""
@@ -116,7 +119,7 @@ class Main:
             return None
 
     def get_currentChat(self):
-        logPath = Path(parent_directory) / "Save" / ".temp.json"
+        logPath = Path(data_dir) / "Save" / ".temp.json"
         log = self.read_json_file(logPath)
         return log["LastChat"]
 
@@ -171,6 +174,15 @@ class Main:
         else:
             mainChat.qs_chat(chatName)
 
+    def openEditMsg(self):
+        message = mainChat.get_last_user_message()
+        messageEdit.show()
+        messageEdit.ui.plainTextEdit.clear()
+        messageEdit.ui.plainTextEdit.appendPlainText(message)
+
+    def exitEditMsg(self):
+        mainChat.edit_last_user_message(messageEdit.ui.plainTextEdit.toPlainText().strip())
+        messageEdit.close()
 if __name__ == "__main__":
     QCoreApplication.setOrganizationName("Waterlogged")
     QCoreApplication.setApplicationName("ChatUI")
@@ -203,7 +215,7 @@ if __name__ == "__main__":
     settingsBot = botSettings.BotSettings(str(data_dir),parent_directory)
     warningLeaveEmpty = warningWidget.EmptyLeave(str(data_dir),parent_directory)
     invalidChatSettings = warningWidget.InvalidChatSettings(str(data_dir),parent_directory)
-
+    messageEdit = chatMain.EditMessage(str(data_dir),parent_directory)
     connector = Main()
 
     if find_json_with_format(str(data_dir) + r"\Save\Chat", SETTINGS_KEYS) is not None:

@@ -7,16 +7,13 @@ This project WILL NOT focus on the LLM itself.  I didn't train my own LLM. I don
 
 ## 2.1. Setup
 ### Server
-AMD 9xxxX3D
-
-64GB of Ram
-
-RTX5090
-
-Ubuntu 24.04
+- AMD 9xxxX3D
+- 64GB of Ram
+- RTX5090
+- Ubuntu 24.04
 
 ### Client
-Windows PC
+- Windows PC
 
 ## 2.2. Server
 Despite such beefy of a machine.  I'm still choking on both d and v ram, besides since I wanted to access the chatbot remotely in the future anyways.  I decided to have this machine as a dedicated LLM server that I can just run all the time and other devices can access its services via LAN. 

@@ -1,15 +1,60 @@
 import llmClient
 
-from PySide6.QtWidgets import QMainWindow, QSizePolicy, QFileDialog
+from PySide6.QtWidgets import QMainWindow, QSizePolicy, QFileDialog, QWidget
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, Qt, QObject, QEvent
-from PySide6.QtGui import QTextCursor, QIcon
+from PySide6.QtGui import QTextCursor
 import json
 from pathlib import Path
 import os
 import markdown
 import time
 from datetime import datetime
+
+class CtrlWheelFontFilter(QObject):
+    def __init__(self, widget: QWidget, parent=None):
+        super().__init__(parent)
+        self.widget = widget
+        self.original_vpolicy = widget.verticalScrollBarPolicy()
+        self.original_hpolicy = widget.horizontalScrollBarPolicy()
+        self.current_size = widget.font().pointSizeF()
+        if self.current_size <= 0:
+            self.current_size = widget.font().pointSize()
+
+    def _suppress_scroll(self, suppress: bool):
+        # hide the scrollbars while we repaint
+        policy = Qt.ScrollBarAlwaysOff if suppress else self.original_vpolicy
+        self.widget.setVerticalScrollBarPolicy(policy)
+        # (you can also suppress the horizontal bar if you want)
+
+    def eventFilter(self, obj, event):
+        if obj is not self.widget:
+            return False
+        if event.type() == QEvent.Wheel and event.modifiers() & Qt.ControlModifier:
+            # 1️⃣  suppress the scrollbar
+            self._suppress_scroll(True)
+
+            delta = event.angleDelta().y()
+            step = 1.0
+            if delta < 0:
+                new_size = max(6.0, self.current_size - step)
+            else:
+                new_size = self.current_size + step
+
+            # 2️⃣  apply the new font size *to the whole document*
+            font = self.widget.font()
+            font.setPointSizeF(new_size)
+            self.widget.setFont(font)                       # widget level
+            self.widget.document().setDefaultFont(font)     # document level
+            self.widget.viewport().update()                 # force repaint
+
+            self.current_size = new_size
+
+            # 3️⃣  restore the scrollbar
+            self._suppress_scroll(False)
+
+            return True
+        return False
 
 class ShiftEnterFilter(QObject):
     """
@@ -86,10 +131,19 @@ class ChatMain(QMainWindow):
                 self.chat = self.ui.textBrowser
                 self.input = self.ui.plainTextEdit
                 self.hideChatList()
+
+                self._chat_font_filter = CtrlWheelFontFilter(self.chat, parent=self)
+                self.chat.installEventFilter(self._chat_font_filter)
+
+                self._input_font_filter = CtrlWheelFontFilter(self.input, parent=self)
+                self.input.installEventFilter(self._input_font_filter)
+
                 lastChat = self.get_lastChat()
                 self.load_chat(lastChat)
                 # Connect signals and slots here
                 # Example: self.ui.button.clicked.connect(self.on_button_click)
+
+
 
         except Exception as e:
             print(f"Error loading UI: {e}")
@@ -458,10 +512,10 @@ class ChatMain(QMainWindow):
             extensions=["fenced_code", "tables"]
         )
 
+        #font - size: 14px;
         return f"""
            <div style="
                font-family: Segoe UI, sans-serif;
-               font-size: 14px;
                line-height: 1.5;
            ">
                <style>

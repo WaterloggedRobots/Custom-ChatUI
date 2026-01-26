@@ -84,7 +84,7 @@ class Main:
         mainChat.ui.listWidget.clicked.connect(self.quick_select_chat)
         mainChat.ui.actionEdit_Message.triggered.connect(self.openEditMsg)
         mainChat.ui.actionSet_IP.triggered.connect(self.openIPSettings)
-        mainChat.ui.actionCreate_New_chara.triggered.connect(self.newBot)
+        mainChat.ui.actionCreate_New_Chara.triggered.connect(self.newBot)
         mainChat.ui.actionEdit_Chara.triggered.connect(self.loadBot)
 
         settingsChat.ui.pushButton_2.clicked.connect(self.newBot)
@@ -217,6 +217,7 @@ if __name__ == "__main__":
     if not tempLogFile.exists():
         tempLogFileImport = Path(parent_directory)/ "Save" / ".temp.json"
         tempLog = read_json_file(tempLogFileImport)
+
         with open(tempLogFile, "w", encoding="utf-8") as f:
             json.dump(tempLog, f, indent=4)
 

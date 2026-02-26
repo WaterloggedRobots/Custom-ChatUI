@@ -1,8 +1,11 @@
 import llmClient
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 from PySide6.QtWidgets import QMainWindow, QSizePolicy, QFileDialog
 =======
+=======
+>>>>>>> Stashed changes
 import threading
 from PySide6.QtWidgets import QMainWindow, QSizePolicy, QFileDialog, QWidget
 >>>>>>> Stashed changes
@@ -99,6 +102,11 @@ class ChatMain(QMainWindow):
                 # Connect signals and slots here
                 # Example: self.ui.button.clicked.connect(self.on_button_click)
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
+=======
+                self.input.setFocusPolicy(Qt.StrongFocus)
+                self.input.setFocus()
+>>>>>>> Stashed changes
 =======
                 self.input.setFocusPolicy(Qt.StrongFocus)
                 self.input.setFocus()

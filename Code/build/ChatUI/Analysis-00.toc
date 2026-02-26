@@ -1811,6 +1811,7 @@
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\tls\\qopensslbackend.dll',
    'BINARY'),
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   ('PySide6\\plugins\\tls\\qschannelbackend.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\tls\\qschannelbackend.dll',
    'BINARY'),
@@ -1825,22 +1826,50 @@
    'BINARY'),
   ('PySide6\\plugins\\platforms\\qminimal.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\platforms\\qminimal.dll',
+=======
+  ('PySide6\\plugins\\tls\\qcertonlybackend.dll',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\tls\\qcertonlybackend.dll',
+   'BINARY'),
+  ('PySide6\\plugins\\tls\\qschannelbackend.dll',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\tls\\qschannelbackend.dll',
+   'BINARY'),
+  ('PySide6\\plugins\\platforminputcontexts\\qtvirtualkeyboardplugin.dll',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\platforminputcontexts\\qtvirtualkeyboardplugin.dll',
+   'BINARY'),
+  ('PySide6\\plugins\\imageformats\\qgif.dll',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\imageformats\\qgif.dll',
+>>>>>>> Stashed changes
    'BINARY'),
   ('PySide6\\plugins\\imageformats\\qjpeg.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\imageformats\\qjpeg.dll',
    'BINARY'),
+<<<<<<< Updated upstream
   ('PySide6\\plugins\\imageformats\\qwebp.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\imageformats\\qwebp.dll',
    'BINARY'),
   ('PySide6\\plugins\\imageformats\\qtga.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\imageformats\\qtga.dll',
+=======
+  ('PySide6\\plugins\\iconengines\\qsvgicon.dll',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\iconengines\\qsvgicon.dll',
    'BINARY'),
-  ('PySide6\\plugins\\imageformats\\qgif.dll',
-   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\imageformats\\qgif.dll',
+  ('PySide6\\plugins\\imageformats\\qico.dll',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\imageformats\\qico.dll',
+   'BINARY'),
+  ('PySide6\\plugins\\platforms\\qoffscreen.dll',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\platforms\\qoffscreen.dll',
+   'BINARY'),
+  ('PySide6\\plugins\\imageformats\\qtga.dll',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\imageformats\\qtga.dll',
+   'BINARY'),
+  ('PySide6\\plugins\\imageformats\\qicns.dll',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\imageformats\\qicns.dll',
+>>>>>>> Stashed changes
    'BINARY'),
   ('PySide6\\plugins\\generic\\qtuiotouchplugin.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\generic\\qtuiotouchplugin.dll',
    'BINARY'),
+<<<<<<< Updated upstream
   ('PySide6\\plugins\\imageformats\\qicns.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\imageformats\\qicns.dll',
    'BINARY'),
@@ -1901,6 +1930,8 @@
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\generic\\qtuiotouchplugin.dll',
 >>>>>>> Stashed changes
    'BINARY'),
+=======
+>>>>>>> Stashed changes
   ('PySide6\\plugins\\imageformats\\qsvg.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\plugins\\imageformats\\qsvg.dll',
    'BINARY'),
@@ -2010,8 +2041,13 @@
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\shiboken6\\MSVCP140.dll',
    'BINARY'),
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   ('VCRUNTIME140_1.dll',
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\VCRUNTIME140_1.dll',
+=======
+  ('PySide6\\Qt6Network.dll',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\Qt6Network.dll',
+>>>>>>> Stashed changes
 =======
   ('PySide6\\Qt6Network.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\Qt6Network.dll',
@@ -2030,12 +2066,15 @@
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\Qt6Pdf.dll',
    'BINARY'),
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   ('PySide6\\Qt6Svg.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\Qt6Svg.dll',
    'BINARY'),
   ('PySide6\\Qt6VirtualKeyboard.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\Qt6VirtualKeyboard.dll',
    'BINARY'),
+=======
+>>>>>>> Stashed changes
 =======
 >>>>>>> Stashed changes
   ('PySide6\\Qt6Widgets.dll',
@@ -2053,6 +2092,7 @@
   ('PySide6\\VCRUNTIME140_1.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\VCRUNTIME140_1.dll',
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
    'BINARY'),
   ('PySide6\\MSVCP140.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\MSVCP140.dll',
@@ -2066,10 +2106,18 @@
    'BINARY'),
   ('PySide6\\VCRUNTIME140.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\VCRUNTIME140.dll',
+=======
+>>>>>>> Stashed changes
+   'BINARY'),
+  ('PySide6\\VCRUNTIME140.dll',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\VCRUNTIME140.dll',
    'BINARY'),
   ('PySide6\\pyside6.abi3.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\pyside6.abi3.dll',
 >>>>>>> Stashed changes
+   'BINARY'),
+  ('PySide6\\MSVCP140.dll',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\MSVCP140.dll',
    'BINARY'),
   ('PySide6\\MSVCP140.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\MSVCP140.dll',
@@ -2081,9 +2129,12 @@
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\shiboken6\\shiboken6.abi3.dll',
    'BINARY'),
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   ('PySide6\\pyside6.abi3.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\pyside6.abi3.dll',
 =======
+=======
+>>>>>>> Stashed changes
   ('python3.dll',
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\python3.dll',
 >>>>>>> Stashed changes
@@ -2112,7 +2163,10 @@
   ('PySide6\\Qt6Qml.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\Qt6Qml.dll',
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 =======
+=======
+>>>>>>> Stashed changes
    'BINARY'),
   ('PySide6\\Qt6QmlMeta.dll',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\Qt6QmlMeta.dll',
@@ -2145,23 +2199,32 @@
   ('UI\\config.json', 'E:\\ChatUI\\code\\UI\\config.json', 'DATA'),
   ('UI\\server ip.ui', 'E:\\ChatUI\\code\\UI\\server ip.ui', 'DATA'),
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   ('markdown-3.10.dist-info\\WHEEL',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\markdown-3.10.dist-info\\WHEEL',
 =======
+=======
+>>>>>>> Stashed changes
   ('markdown-3.10.dist-info\\INSTALLER',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\markdown-3.10.dist-info\\INSTALLER',
    'DATA'),
   ('markdown-3.10.dist-info\\entry_points.txt',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\markdown-3.10.dist-info\\entry_points.txt',
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
    'DATA'),
   ('markdown-3.10.dist-info\\RECORD',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\markdown-3.10.dist-info\\RECORD',
    'DATA'),
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   ('markdown-3.10.dist-info\\licenses\\LICENSE.md',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\markdown-3.10.dist-info\\licenses\\LICENSE.md',
 =======
+=======
+>>>>>>> Stashed changes
   ('markdown-3.10.dist-info\\WHEEL',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\markdown-3.10.dist-info\\WHEEL',
 >>>>>>> Stashed changes
@@ -2179,12 +2242,15 @@
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\markdown-3.10.dist-info\\top_level.txt',
    'DATA'),
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   ('markdown-3.10.dist-info\\METADATA',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\markdown-3.10.dist-info\\METADATA',
    'DATA'),
   ('markdown-3.10.dist-info\\entry_points.txt',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\markdown-3.10.dist-info\\entry_points.txt',
 =======
+=======
+>>>>>>> Stashed changes
   ('setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\REQUESTED',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\REQUESTED',
    'DATA'),
@@ -2196,6 +2262,7 @@
    'DATA'),
   ('setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\RECORD',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\RECORD',
+<<<<<<< Updated upstream
 >>>>>>> Stashed changes
    'DATA'),
   ('setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\WHEEL',
@@ -2212,6 +2279,8 @@
    'DATA'),
   ('setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\INSTALLER',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\INSTALLER',
+=======
+>>>>>>> Stashed changes
    'DATA'),
   ('setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\LICENSE',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\LICENSE',
@@ -2220,6 +2289,12 @@
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\METADATA',
    'DATA'),
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
+=======
+  ('setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\WHEEL',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\WHEEL',
+   'DATA'),
+>>>>>>> Stashed changes
 =======
   ('setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\WHEEL',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\setuptools\\_vendor\\importlib_metadata-8.0.0.dist-info\\WHEEL',
@@ -2232,6 +2307,7 @@
   ('certifi\\cacert.pem',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\certifi\\cacert.pem',
    'DATA'),
+<<<<<<< Updated upstream
 <<<<<<< Updated upstream
   ('certifi\\py.typed',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\certifi\\py.typed',
@@ -2497,6 +2573,26 @@
   ('PySide6\\translations\\qtbase_sv.qm',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_sv.qm',
    'DATA'),
+=======
+  ('PySide6\\translations\\qt_help_hu.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_hu.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_zh_CN.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_zh_CN.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_fi.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_fi.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_cs.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_cs.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_da.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_da.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_sv.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_sv.qm',
+   'DATA'),
+>>>>>>> Stashed changes
   ('PySide6\\translations\\qt_help_da.qm',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_da.qm',
    'DATA'),
@@ -2508,6 +2604,8 @@
    'DATA'),
   ('PySide6\\translations\\qt_help_ja.qm',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_ja.qm',
+<<<<<<< Updated upstream
+=======
    'DATA'),
   ('PySide6\\translations\\qt_nn.qm',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_nn.qm',
@@ -2518,6 +2616,55 @@
   ('PySide6\\translations\\qt_help_es.qm',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_es.qm',
    'DATA'),
+  ('PySide6\\translations\\qt_pt_PT.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_pt_PT.qm',
+>>>>>>> Stashed changes
+   'DATA'),
+  ('PySide6\\translations\\qt_nn.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_nn.qm',
+   'DATA'),
+<<<<<<< Updated upstream
+  ('PySide6\\translations\\qt_fi.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_fi.qm',
+=======
+  ('PySide6\\translations\\qtbase_ja.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_ja.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_zh_TW.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_zh_TW.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_it.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_it.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_ko.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_ko.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_fa.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_fa.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_ko.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_ko.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_ja.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_ja.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_gd.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_gd.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_lt.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_lt.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_hr.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_hr.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_bg.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_bg.qm',
+>>>>>>> Stashed changes
+   'DATA'),
+  ('PySide6\\translations\\qt_help_es.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_es.qm',
+   'DATA'),
+<<<<<<< Updated upstream
   ('PySide6\\translations\\qt_pt_PT.qm',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_pt_PT.qm',
 >>>>>>> Stashed changes
@@ -2572,10 +2719,39 @@
    'DATA'),
   ('PySide6\\translations\\qt_fi.qm',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_fi.qm',
+=======
+  ('PySide6\\translations\\qt_help_uk.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_uk.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_de.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_de.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_ru.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_ru.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_lv.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_lv.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_gd.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_gd.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_ru.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_ru.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_it.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_it.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_ar.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_ar.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_hu.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_hu.qm',
+>>>>>>> Stashed changes
    'DATA'),
   ('PySide6\\translations\\qtbase_cs.qm',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_cs.qm',
    'DATA'),
+<<<<<<< Updated upstream
   ('PySide6\\translations\\qt_sv.qm',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_sv.qm',
    'DATA'),
@@ -2590,10 +2766,36 @@
    'DATA'),
   ('PySide6\\translations\\qtbase_lv.qm',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_lv.qm',
+=======
+  ('PySide6\\translations\\qtbase_nl.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_nl.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_cs.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_cs.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_pl.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_pl.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_ka.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_ka.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_fr.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_fr.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_gl.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_gl.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_zh_TW.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_zh_TW.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_ka.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_ka.qm',
+>>>>>>> Stashed changes
    'DATA'),
   ('PySide6\\translations\\qt_de.qm',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_de.qm',
    'DATA'),
+<<<<<<< Updated upstream
   ('PySide6\\translations\\qtbase_lg.qm',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_lg.qm',
    'DATA'),
@@ -2602,10 +2804,162 @@
    'DATA'),
   ('PySide6\\translations\\qt_hr.qm',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_hr.qm',
+=======
+  ('PySide6\\translations\\qtbase_ca.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_ca.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_nn.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_nn.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_bg.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_bg.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_pt_BR.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_pt_BR.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_sl.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_sl.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_lg.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_lg.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_pt_BR.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_pt_BR.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_zh_TW.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_zh_TW.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_ca.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_ca.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_it.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_it.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_ka.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_ka.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_en.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_en.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_nl.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_nl.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_pt_BR.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_pt_BR.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_fa.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_fa.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_es.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_es.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_zh_CN.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_zh_CN.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_tr.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_tr.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_lv.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_lv.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_sv.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_sv.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_lg.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_lg.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_pl.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_pl.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_bg.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_bg.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_es.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_es.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_fr.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_fr.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_zh_CN.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_zh_CN.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_hr.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_hr.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_ca.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_ca.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_tr.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_tr.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_he.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_he.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_he.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_he.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_sv.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_sv.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_gl.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_gl.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_hr.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_hr.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_nn.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_nn.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_pl.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_pl.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_hu.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_hu.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_fr.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_fr.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_de.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_de.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_ko.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_ko.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_uk.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_uk.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_uk.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_uk.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_ar.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_ar.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_help_sk.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_help_sk.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_sk.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_sk.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_en.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_en.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_en.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_en.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_sl.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_sl.qm',
+   'DATA'),
+  ('PySide6\\translations\\qtbase_ru.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qtbase_ru.qm',
+   'DATA'),
+  ('PySide6\\translations\\qt_nl.qm',
+   'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\PySide6\\translations\\qt_nl.qm',
+>>>>>>> Stashed changes
    'DATA'),
   ('setuptools\\_vendor\\wheel-0.45.1.dist-info\\RECORD',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\setuptools\\_vendor\\wheel-0.45.1.dist-info\\RECORD',
    'DATA'),
+<<<<<<< Updated upstream
   ('setuptools\\_vendor\\wheel-0.45.1.dist-info\\LICENSE.txt',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\setuptools\\_vendor\\wheel-0.45.1.dist-info\\LICENSE.txt',
 =======
@@ -2828,6 +3182,8 @@
   ('setuptools\\_vendor\\wheel-0.45.1.dist-info\\METADATA',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\setuptools\\_vendor\\wheel-0.45.1.dist-info\\METADATA',
    'DATA'),
+=======
+>>>>>>> Stashed changes
   ('setuptools\\_vendor\\wheel-0.45.1.dist-info\\INSTALLER',
    'E:\\vllm\\Gen_1\\.venv\\Lib\\site-packages\\setuptools\\_vendor\\wheel-0.45.1.dist-info\\INSTALLER',
    'DATA'),
@@ -2849,6 +3205,7 @@
   ('base_library.zip',
    'E:\\ChatUI\\code\\build\\ChatUI\\base_library.zip',
    'DATA')],
+<<<<<<< Updated upstream
 <<<<<<< Updated upstream
  [('sre_constants',
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\sre_constants.py',
@@ -2934,6 +3291,17 @@
   ('sre_constants',
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\sre_constants.py',
    'PYMODULE'),
+=======
+ [('heapq',
+   'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\heapq.py',
+   'PYMODULE'),
+  ('types',
+   'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\types.py',
+   'PYMODULE'),
+  ('sre_constants',
+   'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\sre_constants.py',
+   'PYMODULE'),
+>>>>>>> Stashed changes
   ('re._parser',
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\re\\_parser.py',
    'PYMODULE'),
@@ -3350,6 +3718,7 @@
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\encodings\\__init__.py',
    'PYMODULE'),
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   ('weakref',
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\weakref.py',
    'PYMODULE'),
@@ -3384,6 +3753,29 @@
   ('traceback',
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\traceback.py',
    'PYMODULE'),
+=======
+  ('locale',
+   'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\locale.py',
+   'PYMODULE'),
+  ('_collections_abc',
+   'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\_collections_abc.py',
+   'PYMODULE'),
+  ('abc',
+   'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\abc.py',
+   'PYMODULE'),
+  ('keyword',
+   'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\keyword.py',
+   'PYMODULE'),
+  ('io',
+   'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\io.py',
+   'PYMODULE'),
+  ('posixpath',
+   'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\posixpath.py',
+   'PYMODULE'),
+  ('traceback',
+   'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\traceback.py',
+   'PYMODULE'),
+>>>>>>> Stashed changes
   ('warnings',
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\warnings.py',
    'PYMODULE'),
@@ -3393,6 +3785,9 @@
   ('ntpath',
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\ntpath.py',
    'PYMODULE'),
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
   ('collections.abc',
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\collections\\abc.py',
@@ -3401,8 +3796,13 @@
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\collections\\__init__.py',
    'PYMODULE'),
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   ('locale',
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\locale.py',
+=======
+  ('codecs',
+   'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\codecs.py',
+>>>>>>> Stashed changes
 =======
   ('codecs',
    'C:\\Users\\seacr\\AppData\\Local\\Programs\\Python\\Python311\\Lib\\codecs.py',

@@ -5,6 +5,9 @@ from PySide6.QtCore import QFile, Qt
 import json
 from pathlib import Path
 
+from Tools.scripts.parse_html5_entities import get_json
+
+
 class ChatSettings(QMainWindow):
     def __init__(self, pd, fd):
         super().__init__()
@@ -39,6 +42,11 @@ class ChatSettings(QMainWindow):
                 self.setWindowTitle("Chat Settings")
 
             self.setup_opacity_controls()
+
+            data=self.read_json_file(str(Path(self.directoryParent) / "Save" / ".models.json"))
+            print(data["ollama"])
+            self.ui.comboBox.addItems(data["ollama"])
+            self.ui.comboBox.setCurrentIndex(0)
 
         except Exception as e:
             print(f"Error loading UI: {e}")
@@ -159,6 +167,9 @@ class ChatSettings(QMainWindow):
             print(f"Error deleting {file_path}: {e}")
             return False
 
+    def load_models(self):
+        pass
+    
     def setup_opacity_controls(self):
         spin = self.ui.doubleSpinBox
         slider = self.ui.horizontalSlider

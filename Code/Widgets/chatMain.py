@@ -1,6 +1,11 @@
 import llmClient
 
+<<<<<<< Updated upstream
 from PySide6.QtWidgets import QMainWindow, QSizePolicy, QFileDialog
+=======
+import threading
+from PySide6.QtWidgets import QMainWindow, QSizePolicy, QFileDialog, QWidget
+>>>>>>> Stashed changes
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, Qt, QObject, QEvent
 from PySide6.QtGui import QTextCursor, QIcon
@@ -61,12 +66,15 @@ class ChatMain(QMainWindow):
         self.client.token.connect(self.on_token)
         self.client.done.connect(self.on_done)
         self.client.error.connect(print)
+        self.client.status_changed.connect(self.on_status_change)
 
         #self.setWindowIcon(QIcon((self.directoryParent + r"\Img\AppIcon.png")))
         self.load_ui()
         self.setup_connections()
+
         # Store the initial stretch for the graphicsView column (e.g., 1)
         self.graphics_view_column_stretch = 1
+        
 
     def load_ui(self):
         """Load the UI file"""
@@ -90,6 +98,11 @@ class ChatMain(QMainWindow):
                 self.load_chat(lastChat)
                 # Connect signals and slots here
                 # Example: self.ui.button.clicked.connect(self.on_button_click)
+<<<<<<< Updated upstream
+=======
+                self.input.setFocusPolicy(Qt.StrongFocus)
+                self.input.setFocus()
+>>>>>>> Stashed changes
 
         except Exception as e:
             print(f"Error loading UI: {e}")
@@ -108,7 +121,7 @@ class ChatMain(QMainWindow):
         self.ui.pushButton_6.clicked.connect(self.regenerate_last_response) #regen
 
         self.ui.actionLoad_Chat.triggered.connect(self.selectChat)
-
+        self.ui.actionDelete_Chat_2.triggered.connect(self.delete_chat)
         self.ui.actionDelete_Message.triggered.connect(self.delete_last_user_exchange)
 
         self.input = self.ui.plainTextEdit
@@ -122,7 +135,7 @@ class ChatMain(QMainWindow):
         self.current_response += text
 
         cursor = self.chat.textCursor()
-        cursor.setPosition(self.chat.document().characterCount() - 1)
+        #cursor.setPosition(self.chat.document().characterCount() - 1)
         self.chat.setTextCursor(cursor)
 
         self.chat.insertPlainText(text)
@@ -137,7 +150,8 @@ class ChatMain(QMainWindow):
 
         # Select EVERYTHING streamed since response start
         cursor.setPosition(self.response_start_pos)
-        cursor.setPosition(doc.characterCount() - 1, QTextCursor.KeepAnchor)
+        #cursor.setPosition(doc.characterCount() - 1, QTextCursor.KeepAnchor)
+        cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
         cursor.removeSelectedText()
 
         # Insert rendered markdown
@@ -169,7 +183,7 @@ class ChatMain(QMainWindow):
         self.current_response = ""
 
         self.save_chat()
-
+    """
     def keyPressEvent(self, event):
         if self.input.hasFocus():
             if event.key() in (Qt.Key_Return, Qt.Key_Enter):
@@ -181,6 +195,7 @@ class ChatMain(QMainWindow):
                     print("sendMessage")
                 return
         super().keyPressEvent(event)
+    """
 
     def toggle_graphics_view(self):
         """Toggle graphics view visibility by adjusting width constraints"""
@@ -284,6 +299,10 @@ class ChatMain(QMainWindow):
         print(f"No .json files found in: {directory}")
         return None
 
+    def on_status_change(self, status):
+        self.ui.label_2.setText(status)
+        return
+
     def get_lastChat(self):
         logPath = Path(self.directoryParent) / "Save" / ".temp.json"
         log = read_json_file(logPath)
@@ -363,10 +382,24 @@ class ChatMain(QMainWindow):
                     )
 
             self.chat.append("")
-            self.client.get_model()
 
         if self.client.model_name != self.client.get_model():
+            if self.client.model_name not in self.client.get_model_list():
+                self.client.set_model("llama3.2:3b")   #Default Llama Model
             self.client.switch_model(self.client.model_name)
+
+    def delete_chat(self):
+        logPath = Path(self.directoryParent) / "Save" / ".temp.json"
+        log = read_json_file(logPath)
+        logNew=log.copy()
+        print("deleting: ",logNew["LastChat"])
+        del_json_file(logNew["LastChat"])
+        logNew["ChatList"].pop()
+        lastChatNew = logNew["ChatList"][-1]
+        logNew["LastChat"] = self.directoryParent + "\\Save\\Chat\\"+ lastChatNew +".json"
+        with open(logPath, "w", encoding="utf-8") as f:
+            json.dump(logNew, f, indent=4)
+        self.load_chat(logNew["LastChat"])
 
     def save_chat(self):
         if not self.chat_path:
@@ -380,12 +413,8 @@ class ChatMain(QMainWindow):
             "Chat": self.chat_markdown,  # ✅ markdown only
             "Payload": self.client.export_payload()
         }
-
-        try:
-            with open(self.chat_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            print(f"Save failed: {e}")
+        with open(self.chat_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
 
     def load_bot(self,path):
         botJsonPath = path + "/Bot Description.json"
@@ -417,6 +446,8 @@ class ChatMain(QMainWindow):
         text = text.replace(r"\n", "\n")
         text = text.replace("\n", "<br/>")
 
+        self.chat.moveCursor(QTextCursor.End)
+
         # UI
         ts = self.format_ts(self.now_ts())
         self.chat.append(
@@ -435,8 +466,6 @@ class ChatMain(QMainWindow):
         # MARK the start of the assistant response
         self.response_cursor = self.chat.textCursor()
         self.response_start_pos = self.response_cursor.position()
-
-        self.current_response = ""
 
         self.current_response = ""
 
@@ -667,6 +696,7 @@ class ChatMain(QMainWindow):
         chatPath = Path(self.directoryParent + "//Save//Chat//" + chatName + ".json")
         self.load_chat(str(chatPath))
 
+
 class EditMessage(QMainWindow):
 
     def __init__(self, pd, fd):
@@ -691,7 +721,6 @@ class EditMessage(QMainWindow):
                 self.setCentralWidget(self.ui)
                 self.setWindowTitle("Edit Message")
 
-
         except Exception as e:
             print(f"Error loading UI: {e}")
 
@@ -699,6 +728,7 @@ class EditMessage(QMainWindow):
         """Connect button signals to functions"""
         #self.ui.pushButton.clicked.connect(self.load_bot_dir)
         pass
+
 
 class ServerIP(QMainWindow):
 
@@ -760,3 +790,15 @@ def read_json_file(file_path):
     except Exception as e:
         print(f"❌ Error reading file: {e}")
         return None
+
+def del_json_file(file_path: str) -> bool:
+    """Simple, safe deletion for your chat app"""
+    try:
+        path = Path(file_path)
+        if path.exists() and path.suffix.lower() == '.json':
+            path.unlink()
+            return True
+        return False
+    except Exception as e:
+        print(f"Error deleting {file_path}: {e}")
+        return False

@@ -5,6 +5,8 @@ import time
 from PySide6.QtCore import Signal, QObject
 from pathlib import Path
 
+from enum import Enum
+
 # ======================
 # CONFIG
 # ======================
@@ -16,26 +18,45 @@ MAX_CONTEXT_MESSAGES = 16
 SUMMARY_TRIGGER_COUNT = 24
 SUMMARY_MODEL_MAX_TOKENS = 512
 
+class LLMArch(str, Enum):
+    VLLM="VLLM"
+    OLLAMA="Ollama"
+    FAIL="not connected"
+
+class LLMStatus(str, Enum):
+    NOT_CONNECTED = "not_connected"
+    FREE = "free"
+    THINKING = "thinking"
+    RESPONDING = "responding"
+    ERROR = "error"
+    SWITCHING_MODEL = "switching_model"
+
 
 class LLMClient(QObject):
     token = Signal(str)
     done = Signal(str)
     error = Signal(str)
+    status_changed=Signal(str)
     model_changed = Signal(str)
+
 
     def __init__(self,fd):
         super().__init__()
         self.model_name = None
         self.temperature = 0.7
+        self.max_tokens = 512
 
         self.directoryDefault = fd
         IP = self.read_json_file(str(self.directoryDefault) + r"\UI\config.json")
         self.ip = IP["ip"]
+        self.llm = self.get_llm()
         self.port = PORT
-        self.VLLM_URL = f"http://{self.ip}:{self.port}/v1/chat/completions"
-        self.MODELS_URL = f"http://{self.ip}:{self.port}/v1/models"
-        self.ADMIN_URL = f"http://{self.ip}:9000/admin/switch_model"
-        
+        self.SERVER_URL = f"http://{self.ip}:{self.port}"
+        #self.VLLM_URL = f"http://{self.ip}:{self.port}/v1/chat/completions"
+        #self.MODELS_URL = f"http://{self.ip}:{self.port}/v1/models"
+        #self.ADMIN_URL = f"http://{self.ip}:9000"
+        #self.ADMIN_URL = f"http://{self.ip}:9000/api"  #vllm api server url
+
         self.preset = ""                 # system role, immutable
         self.messages = []               # visible chat
         self.payload_messages = []       # full payload
@@ -44,6 +65,11 @@ class LLMClient(QObject):
         self.lock = threading.Lock()
 
         self._abort_flag = False
+        self.status = LLMStatus.NOT_CONNECTED
+
+    def _set_status(self, status: LLMStatus):
+        self.status = status
+        self.status_changed.emit(status.value)
 
     def read_json_file(self, file_path):
         """Read a JSON file and return its contents"""
@@ -92,6 +118,7 @@ class LLMClient(QObject):
             self.error.emit("No model selected")
             return
 
+        self._set_status(LLMStatus.THINKING)
         self._abort_flag = False
         self.current_response = ""
         """
@@ -125,7 +152,8 @@ class LLMClient(QObject):
         msgs = list(self.payload_messages)
 
         if len(msgs) > SUMMARY_TRIGGER_COUNT:
-            summary = self._summarize(msgs[:-MAX_CONTEXT_MESSAGES])
+            to_summarize = self._trim_for_summary(msgs[:-MAX_CONTEXT_MESSAGES])
+            summary = self._summarize(to_summarize)
             payload.append({
                 "role": "system",
                 "content": f"Conversation summary:\n{summary}"
@@ -135,6 +163,16 @@ class LLMClient(QObject):
             payload.extend(msgs)
 
         return payload
+
+    def _trim_for_summary(self, messages, max_chars=12000):
+        total = 0
+        trimmed = []
+        for msg in reversed(messages):
+            total += len(msg["content"])
+            if total > max_chars:
+                break
+            trimmed.insert(0, msg)
+        return trimmed
 
     def _summarize(self, messages):
         payload = {
@@ -149,12 +187,13 @@ class LLMClient(QObject):
                 },
                 *messages
             ],
+            "stream": False,
             "temperature": 0.3,
-            "max_tokens": SUMMARY_MODEL_MAX_TOKENS,
-            "stream": False
+            "num_predict": SUMMARY_MODEL_MAX_TOKENS
         }
 
-        r = requests.post(self.VLLM_URL, json=payload, timeout=300)
+        print("Summarizing", len(messages), "messages")
+        r = requests.post(self.SERVER_URL+f"/v1/chat/completions", json=payload, timeout=300)
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
 
@@ -165,36 +204,52 @@ class LLMClient(QObject):
         payload = {
             "model": self.model_name,
             "messages": self._build_payload(),
+            "stream": True,
             "temperature": self.temperature,
-            "stream": True
+            "num_predict": self.max_tokens
         }
 
         try:
             with requests.post(
-                self.VLLM_URL,
+                self.SERVER_URL+f"/v1/chat/completions",
                 json=payload,
                 stream=True,
                 timeout=600
             ) as r:
-                for line in r.iter_lines():
+                for line in r.iter_lines(decode_unicode=True):
                     if self._abort_flag:
                         return
 
-                    if not line or not line.startswith(b"data: "):
+                    if not line:
                         continue
 
-                    data = line[6:]
-                    if data == b"[DONE]":
+                    if line.strip() == "data: [DONE]":
                         break
 
-                    chunk = json.loads(data)
-                    delta = chunk["choices"][0]["delta"]
-                    if "content" in delta:
-                        self.current_response += delta["content"]
-                        self.token.emit(delta["content"])
+                    if not line.startswith("data:"):
+                        continue
+
+                    data = line[len("data:"):].strip()
+
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+
+                    choice = chunk.get("choices", [{}])[0]
+                    delta = choice.get("delta", {})
+
+                    content = delta.get("content")
+                    if content:
+                        if self.status != LLMStatus.RESPONDING:
+                            self._set_status(LLMStatus.RESPONDING)
+                        self.current_response += content
+                        self.token.emit(content)
+
 
         except Exception as e:
             self.error.emit(str(e))
+            self._set_status(LLMStatus.ERROR)
             return
 
         with self.lock:
@@ -203,7 +258,7 @@ class LLMClient(QObject):
             self.payload_messages.append(msg)
 
         self.done.emit(self.current_response)
-
+        self._set_status(LLMStatus.FREE)
     # ----------------------
     # Persistence helpers
     # ----------------------
@@ -237,13 +292,32 @@ class LLMClient(QObject):
     # Switch Models
     # ----------------------
     def request_model_switch(self, model_name: str):
+        payload = {"model": model_name,
+                   "parameters": {
+                       "temperature": self.temperature,
+                       "num_ctx": 16384,
+                       "top_p": 0.95,
+                   },
+                   "system_prompt": "",
+                   "keep_alive": -1
+                   }
+
+        r = requests.post(
+            self.SERVER_URL +f"/v1/models/switch",
+            json=payload,
+            timeout=5
+        )
+        r.raise_for_status()
+    """
+    #vllm api
+        def request_model_switch(self, model_name: str):
         r = requests.post(
             self.ADMIN_URL,
             params={"model": model_name},
             timeout=5
         )
         r.raise_for_status()
-
+    """
     def abort_generation(self):
         self._abort_flag = True
 
@@ -251,15 +325,16 @@ class LLMClient(QObject):
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
-                r = requests.get(self.MODELS_URL, timeout=2)
+                r = requests.get(self.SERVER_URL + f"/v1/models", timeout=2)
                 if r.ok:
                     return True
             except requests.RequestException:
-                pass
+                self._set_status(LLMStatus.NOT_CONNECTED)
             time.sleep(1)
         raise RuntimeError("LLM server did not come back online")
 
     def switch_model(self, model_name: str):
+        self._set_status(LLMStatus.SWITCHING_MODEL)
         self.abort_generation()
         self.request_model_switch(model_name)
         self.wait_for_server_ready()
@@ -267,9 +342,33 @@ class LLMClient(QObject):
         self.model_name = model_name
 
     def get_model(self):
-        r = requests.get(self.MODELS_URL, timeout=2)
+        r = requests.get(self.SERVER_URL+f"/v1/models/active", timeout=2)
         q = r.json()
-        #print(q)
-        model_name = q['data'][0]["id"]
+        print(q)
+        model_name = q['active_model']
         #print(model_name)
         return model_name
+
+    def get_model_list(self):
+        r = requests.get(self.SERVER_URL+f"/v1/models", timeout=2)
+        q = r.json()
+        print(q)
+        model_name_list = []
+        for i in range(len(q['data'])):
+            model_name_list.append(q['data'][i]["id"])
+        #print(model_name_list)
+        return model_name_list
+
+    def get_llm(self):
+        try:
+            r= requests.get(self.SERVER_URL+f"/type", timeout=2)
+            q=r.json()
+        except Exception as e:
+            try:
+                r = requests.get(self.ADMIN_URL + f"/type", timeout=2)
+                q = r.json()
+            except Exception as e:
+                return LLMArch.FAIL
+
+        response = LLMArch.OLLAMA if q['type']=='ollama' else LLMArch.VLLM
+        return response

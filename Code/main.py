@@ -203,7 +203,8 @@ if __name__ == "__main__":
     QCoreApplication.setOrganizationName("Waterlogged")
     QCoreApplication.setApplicationName("ChatUI")
 
-    data_dir = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
+    data_dir=Path(r"\\192.168.0.236\PiShared\LLM\Version 004")
+    #data_dir = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
     data_dir.mkdir(parents=True, exist_ok=True)
     save_dir = Path(data_dir) / "Save"
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -225,10 +226,10 @@ if __name__ == "__main__":
                 "LastChat": "",
                 "ChatList": []
         }
-
+        print("temp file not exist")
         with open(tempLogFile, "w", encoding="utf-8") as f:
             json.dump(tempLog, f, indent=4)
-
+    #print(tempLogFile)
     print(data_dir)
 
     app = QApplication(sys.argv)

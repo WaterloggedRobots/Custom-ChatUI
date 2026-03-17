@@ -4,6 +4,8 @@ from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, Qt
 import json
 from pathlib import Path
+import os
+import shutil
 
 from Tools.scripts.parse_html5_entities import get_json
 
@@ -24,6 +26,7 @@ class ChatSettings(QMainWindow):
         self.setup_connections()
         # Store the initial stretch for the graphicsView column (e.g., 1)
         self.graphics_view_column_stretch = 1
+        self.isNewChat= False
 
     def load_ui(self):
         """Load the UI file"""
@@ -44,16 +47,18 @@ class ChatSettings(QMainWindow):
             self.setup_opacity_controls()
 
             data=self.read_json_file(str(Path(self.directoryParent) / "Save" / ".models.json"))
-            print(data["ollama"])
+            #print(data["ollama"])
             self.ui.comboBox.addItems(data["ollama"])
             self.ui.comboBox.setCurrentIndex(0)
 
+
         except Exception as e:
-            print(f"Error loading UI: {e}")
+            print(f"Error loading UI for chat settings: {e}")
 
     def setup_connections(self):
         """Connect button signals to functions"""
         self.ui.pushButton.clicked.connect(self.load_bot_dir)
+
 
     def load_bot_dir(self):
         folder_path = QFileDialog.getExistingDirectory(
@@ -211,6 +216,7 @@ class ChatSettings(QMainWindow):
         logsPath =Path(self.directoryParent) / "Save" / ".temp.json"
         logs = self.read_json_file(logsPath)
 
+        last_chat_dir = Path(logs["LastChat"])
         """
         if True:
             pass
@@ -224,34 +230,81 @@ class ChatSettings(QMainWindow):
 
         target_base = Path(self.directoryParent) / "Save" / "Chat"
         target_base.mkdir(parents=True, exist_ok=True)
+        chat_dir = target_base / chat_name
+        if self.isNewChat:
 
+            if chat_name in logs["ChatList"]:
+                chat_name = chat_name + " (1)"
+            i=2
+            while True:
+                if chat_name not in logs["ChatList"]:
+                    break
+                else:
+                    chat_name = " ("+str(i)+")"
+                    i+=1
+            print("saving '", chat_name, "' to '", chat_dir, "' as new chat")
+            chat_dir = target_base/ chat_name
+            chat_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            print("saving '", chat_name, "' to '", chat_dir, "' as existing chat")
+            os.rename(last_chat_dir, chat_dir)
+        logs["ChatList"].append(chat_name)
+        logs["LastChat"] = str(chat_dir)
+        with open(logsPath, "w", encoding="utf-8") as f:
+            json.dump(logs, f, indent=4)
+
+        file_upload_dir = Path(str(chat_dir) + '/Input')
+        file_output_dir = Path(str(chat_dir) + '/Output')
+        file_upload_dir.mkdir(parents=True, exist_ok=True)
+        file_output_dir.mkdir(parents=True, exist_ok=True)
+        chat_hist_dir = Path(str(chat_dir) + '/Chat.json')
+
+        print("Saving chat data...")
+        json_data = {
+            "Name": chat_name,
+            "Bot Path": self.botSettingPath,
+            "Temperature": self.ui.doubleSpinBox.value(),
+            "Model": self.ui.comboBox.currentText(),
+            "Chat": self.chatHist,
+            "Payload": self.payload,
+            "Max Tokens": self.ui.spinBox.value()
+        }
+
+        with open(chat_hist_dir, "w", encoding="utf-8") as f:
+            json.dump(json_data, f, indent=4)
+
+        print("Save complete")
+
+        """
         chat_dir = str(target_base) + '/' + chat_name
 
         if self.chatPath == chat_dir:
-            chat_dir = Path(str(self.chatPath)+".json")
+            chat_dir = Path(str(self.chatPath)) #+".json")
 
         else:
             if self.chatPath != "":
-                self.del_json_file(str(self.chatPath))
+                if os.path.exists(self.chatPath):
+                    shutil.rmtree(self.chatPath)
+                #self.del_json_file(str(self.chatPath))
                 self.chatPath = chat_dir
 
             if Path(chat_dir).exists():
-                chatName = Path(chat_dir).stem
+                chatName = Path(chat_dir)
                 i=1
                 while  Path(chat_dir).exists():
-                    chatName_New =chatName + " ("+str(i)+")"
+                    chatName_New = str(chatName) + " ("+str(i)+")"
                     chat_dir = str(target_base) + '/' + chatName_New
                     i+=1
-            chat_dir = Path(chat_dir+".json")
-            chat_dir_str = str(chat_dir.stem)
+            chat_dir = Path(chat_dir)
+            chat_dir_str = str(chat_dir)
 
-        print("Saving: ", chat_dir_str)
-        if chat_dir_str in logs["ChatList"] and logs["ChatList"].index(chat_dir_str) != len(logs["ChatList"])-1:
-            logs["ChatList"].remove(chat_dir_str)
-        if chat_dir_str not in logs["ChatList"]:
+        print("Saving: ", chat_name)
+        if chat_name in logs["ChatList"] and logs["ChatList"].index(chat_name) != len(logs["ChatList"])-1:
+            logs["ChatList"].remove(chat_name)
+        if chat_name not in logs["ChatList"]:
             if self.chatName != "":
                 logs["ChatList"].remove(self.chatName)
-            logs["ChatList"].append(chat_dir_str)
+            logs["ChatList"].append(chat_name)
         logs["LastChat"]=str(chat_dir)
         with open(logsPath, "w", encoding="utf-8") as f:
             json.dump(logs, f, indent=4)
@@ -264,13 +317,23 @@ class ChatSettings(QMainWindow):
             "Temperature": self.ui.doubleSpinBox.value(),
             "Model": self.ui.comboBox.currentText(),
             "Chat": self.chatHist,
-            "Payload":self.payload
+            "Payload":self.payload,
+            "Max Tokens":self.ui.spinBox.value()
         }
 
-        with open(chat_dir, "w", encoding="utf-8") as f:
+        chat_dir.mkdir(parents=True, exist_ok=True)
+        file_upload_dir = Path(str(chat_dir) + '/Input')
+        file_output_dir = Path(str(chat_dir) + '/Output')
+        file_upload_dir.mkdir(parents=True, exist_ok=True)
+        file_output_dir.mkdir(parents=True, exist_ok=True)
+
+        chat_hist_dir = Path(str(chat_dir) + '/Chat.json')
+        with open(chat_hist_dir, "w", encoding="utf-8") as f:
             json.dump(json_data, f, indent=4)
 
         print("save success")
+        """
+
 
     def loadSettings(self, path):
         self.chatPath = path
@@ -280,14 +343,17 @@ class ChatSettings(QMainWindow):
             self.ui.textBrowser_2.setText('')
             self.ui.textBrowser.setText('')
             self.ui.doubleSpinBox.setValue(0.7)
+            self.ui.spinBox.setValue(512)
             self.ui.comboBox.setCurrentIndex(0)
             self.chatHist =[]
             self.payload = []
             self.scene.clear()
+            self.isNewChat = True
         else:
             print("loading chat settings")
             print("path: ", path)
-            settings = self.read_json_file(path)
+            pathjson = Path(str(path)+'/Chat.json')
+            settings = self.read_json_file(pathjson)
             if settings is not None:
                 self.botSettingPath = settings["Bot Path"]
                 self.ui.lineEdit.setText(settings["Name"])
@@ -297,3 +363,4 @@ class ChatSettings(QMainWindow):
                 self.ui.comboBox.setCurrentText(settings["Model"])
                 self.chatHist = settings["Chat"]
                 self.payload = settings["Payload"]
+                self.isNewChat = False

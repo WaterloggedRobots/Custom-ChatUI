@@ -202,6 +202,7 @@ class Main:
 if __name__ == "__main__":
     QCoreApplication.setOrganizationName("Waterlogged")
     QCoreApplication.setApplicationName("ChatUI")
+    VERSION = "0.6.2"
 
     data_dir=Path(r"\\192.168.0.236\PiShared\LLM\Version 004")
     #data_dir = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
@@ -235,7 +236,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon((parent_directory+r"\Img\AppIcon.png")))
     #print((parent_directory+"\Img\AppIcon.ico"))
-    mainChat = chatMain.ChatMain(str(data_dir),parent_directory)
+    mainChat = chatMain.ChatMain(str(data_dir),parent_directory, VERSION)
     emptyStart = warningWidget.EmptyStart(str(data_dir),parent_directory)
     settingsChat = chatSettings.ChatSettings(str(data_dir),parent_directory)
     settingsBot = botSettings.BotSettings(str(data_dir),parent_directory)

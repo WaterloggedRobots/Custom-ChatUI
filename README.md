@@ -51,6 +51,14 @@ Since the LLM server is only for processing text only. All of the settings and l
 
 ![Bot Settings](Img/ChatJson.png)
 
+# 2.5. Reasoning, Files and Web Search (v0.5)
+The client now talks to the Ollama server in `Server/ollama` (see its README). Each reply can:
+- **Think first.** With *Think* ticked, the model's own reasoning streams in grey and then folds into a "💭 Thought for Ns" line you can click to expand. Reasoning is never sent back as context.
+- **Read images and files.** The *File* button attaches images (sent to vision models), PDFs, Word documents and text or code files.
+- **Search the web.** *Web: Auto* lets the model decide when a question needs a search; *Always* and *Off* force it. Answers cite their sources, listed under the reply.
+
+Long chats keep the newest messages word for word and fold older ones into a running summary that is only refreshed every few messages. The server address can include a port (`192.168.0.247:8100`); the default port is 8100.
+
 # 3. Future Works
 I have packaged the program into a .exe app that can connect to my server machine on the same LAN.  It's now functioning enough that I can ask it to code its own code for me :).
 

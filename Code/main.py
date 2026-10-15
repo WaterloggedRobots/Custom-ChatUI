@@ -151,13 +151,18 @@ class Main:
             time.sleep(0.2)
             mainChat.load_chat(self.get_currentChat())
 
+    def refreshModels(self):
+        settingsChat.set_models([m["id"] for m in mainChat.client.list_models()])
+
     def newChatSettings(self):
+        self.refreshModels()
         settingsChat.loadSettings("")
         settingsChat.show()
         if emptyStart.isVisible():
             emptyStart.close()
 
     def openChatSettings(self):
+        self.refreshModels()
         settingsChat.loadSettings(str(self.get_currentChat()))
         settingsChat.show()
 

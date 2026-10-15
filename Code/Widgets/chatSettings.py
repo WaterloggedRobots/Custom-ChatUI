@@ -196,6 +196,22 @@ class ChatSettings(QMainWindow):
         spin.setValue(value / 100.0)
         spin.blockSignals(False)
 
+    def set_models(self, names):
+        """Fill the model list with what the server has, keeping the current choice."""
+        if not names:
+            return
+        combo = self.ui.comboBox
+        current = combo.currentText()
+        combo.clear()
+        combo.addItems(names)
+        self.select_model(current)
+
+    def select_model(self, name):
+        combo = self.ui.comboBox
+        if name and combo.findText(name) < 0:
+            combo.insertItem(0, name)
+        combo.setCurrentText(name)
+
     def save_settings(self):
         logsPath =Path(self.directoryParent) / "Save" / ".temp.json"
         logs = self.read_json_file(logsPath)
@@ -283,6 +299,6 @@ class ChatSettings(QMainWindow):
                 self.chatName = settings["Name"]
                 self.load_bot(self.botSettingPath)
                 self.ui.doubleSpinBox.setValue(settings["Temperature"])
-                self.ui.comboBox.setCurrentText(settings["Model"])
+                self.select_model(settings["Model"])
                 self.chatHist = settings["Chat"]
                 self.payload = settings["Payload"]

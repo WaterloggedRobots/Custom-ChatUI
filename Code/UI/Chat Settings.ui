@@ -223,21 +223,6 @@ border-color:rgb(255, 255, 255)</string>
        <property name="placeholderText">
         <string>LLM Name</string>
        </property>
-       <item>
-        <property name="text">
-         <string>dphn/Dolphin-Mistral-24B-Venice-Edition</string>
-        </property>
-       </item>
-       <item>
-        <property name="text">
-         <string>dphn/dolphin-2.9-llama3-8b</string>
-        </property>
-       </item>
-       <item>
-        <property name="text">
-         <string>openai/gpt-oss-20b</string>
-        </property>
-       </item>
       </widget>
      </item>
      <item>

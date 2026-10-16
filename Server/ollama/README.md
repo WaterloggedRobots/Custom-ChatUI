@@ -35,7 +35,7 @@ python3 -m venv .venv
 ```bash
 ollama pull gemma4:31b                  # or any model you prefer
 .venv/bin/python ollama_server.py       # Ollama must already be running
-# or: ./run.sh   (opens Ollama and the server in two terminals)
+# or: ./run.sh   (starts Ollama only if it is not running, and refuses if port 8100 is taken)
 ```
 
 `run.sh` uses `.venv` when it exists, and falls back to `~/vllm-env` otherwise.

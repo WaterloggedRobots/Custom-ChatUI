@@ -59,6 +59,16 @@ The client now talks to the Ollama server in `Server/ollama` (see its README). E
 
 Long chats keep the newest messages word for word and fold older ones into a running summary that is only refreshed every few messages. The server address can include a port (`192.168.0.247:8100`); the default port is 8100.
 
+## Where things live
+| Name | Where | What |
+|---|---|---|
+| LLM server | `192.168.0.247:8100` (Ubuntu), code in `Server/ollama/` | Ollama wrapper the client talks to. Addresses: `Server/ollama/chat_server/config.py`, overrides in `Server/ollama/.env` |
+| Client git folder | `Code/` (`paths.CLIENT_REPO_DIR`) | app files: UI layouts, images, default addresses in `Code/UI/network.json` |
+| Client data | `%APPDATA%\Waterlogged\ChatUI` (`paths.CLIENT_DATA_DIR`) | chats, bots, and your saved server address (`network.json`) |
+| NAS | `nas` entry in `Code/UI/network.json`, `NAS_IP` on the server | address kept for later; nothing uses it yet |
+
+Every client path and address is defined once, in `Code/paths.py`.
+
 # 3. Future Works
 I have packaged the program into a .exe app that can connect to my server machine on the same LAN.  It's now functioning enough that I can ask it to code its own code for me :).
 

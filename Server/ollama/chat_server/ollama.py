@@ -28,7 +28,7 @@ def _no_think_support(err: "OllamaError") -> bool:
 
 
 class Ollama:
-    def __init__(self, base_url: str = Config.OLLAMA_HOST, transport: Optional[httpx.AsyncBaseTransport] = None):
+    def __init__(self, base_url: str = Config.OLLAMA_URL, transport: Optional[httpx.AsyncBaseTransport] = None):
         # One pooled client for the whole process; streaming replies can take
         # minutes on big models, so there is no read timeout.
         self.http = httpx.AsyncClient(

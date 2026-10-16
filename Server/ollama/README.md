@@ -44,14 +44,17 @@ After a `git pull`, restart the server; re-run the `pip install` line only if
 
 It listens on **port 8100** (8000 belongs to the vLLM script). Settings are
 environment variables, or a `.env` file in this folder when started with
-`run.sh` (`.env` is git-ignored, so keep tokens there):
+`run.sh`. Copy `.env.example` to `.env` to start; `.env` is git-ignored, so
+keep tokens there. All addresses are summarised at the top of
+`chat_server/config.py`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama address |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama address |
 | `DEFAULT_MODEL` | `gemma4:31b` | model used when a request names none |
 | `PLANNER_MODEL` | (chat model) | model for the "search or not" step |
-| `API_HOST` / `API_PORT` | `0.0.0.0` / `8100` | where this server listens |
+| `SERVER_BIND_IP` / `SERVER_PORT` | `0.0.0.0` / `8100` | where this server listens (`API_HOST`/`API_PORT` still work) |
+| `NAS_IP` / `NAS_MOUNT` | (empty) | NAS address, kept for later; nothing uses it yet |
 | `NUM_CTX` | `16384` | context window requested from Ollama |
 | `KEEP_ALIVE` | `30m` | how long Ollama keeps a model loaded |
 | `SEARCH_RESULTS` / `SEARCH_FETCH_PAGES` | `6` / `3` | results kept / pages read |

@@ -1,3 +1,4 @@
+import paths
 from PySide6.QtWidgets import (
     QMainWindow, QGraphicsScene, QGraphicsPixmapItem, QGraphicsView, QFileDialog
 )
@@ -126,15 +127,13 @@ class ImageDropView(QGraphicsView):
         }
 
 class BotSettings(QMainWindow):
-    def __init__(self, pd ,fd):
+    def __init__(self):
         super().__init__()
-        self.directoryParent = pd
-        self.directoryDefault = fd
         self.path =None
         self.load_ui()
 
     def load_ui(self):
-        ui_path = Path(self.directoryDefault) / "UI" / "Bot Settings.ui"
+        ui_path = paths.UI_DIR / "Bot Settings.ui"
         ui_file = QFile(str(ui_path))
         print(ui_path.resolve())
         if not ui_file.open(QFile.ReadOnly):
@@ -150,7 +149,7 @@ class BotSettings(QMainWindow):
 
         self.setCentralWidget(self.ui)
 
-        dummy = Path(self.directoryDefault) / "Img" / "BotDefault.png"
+        dummy = paths.IMG_DIR / "BotDefault.png"
 
         gv = self.ui.graphicsView
         print(type(gv))
@@ -226,7 +225,7 @@ class BotSettings(QMainWindow):
             return
         """
 
-        target_base = Path(self.directoryParent) / "Save" / "Bot"
+        target_base = paths.BOT_DIR
         target_base.mkdir(parents=True, exist_ok=True)
 
         # -----------------------------

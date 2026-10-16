@@ -1,3 +1,4 @@
+import paths
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QGraphicsScene, QGraphicsPixmapItem, QLineEdit
 from PySide6.QtUiTools import QUiLoader
@@ -6,11 +7,9 @@ import json
 from pathlib import Path
 
 class ChatSettings(QMainWindow):
-    def __init__(self, pd, fd):
+    def __init__(self):
         super().__init__()
         self.ui = None
-        self.directoryParent = pd
-        self.directoryDefault = fd
         self.chatPath = ""
         self.chatName =""
         self.botSettingPath = ""
@@ -25,7 +24,7 @@ class ChatSettings(QMainWindow):
     def load_ui(self):
         """Load the UI file"""
         try:
-            ui_file = QFile(self.directoryDefault+r"\UI\Chat Settings.ui")  # Change to your .ui file name
+            ui_file = QFile(paths.ui_file("Chat Settings.ui"))
             if not ui_file.open(QFile.ReadOnly):
                 print(f"Cannot open UI file: {ui_file.errorString()}")
                 return
@@ -51,7 +50,7 @@ class ChatSettings(QMainWindow):
         folder_path = QFileDialog.getExistingDirectory(
             self,
             "Select Folder",  # Dialog title
-            str(Path(self.directoryParent) / "Save" / "Bot"),  # Start directory (empty = current dir)
+            str(paths.BOT_DIR),
             QFileDialog.ShowDirsOnly  # Only show directories
         )
         self.botSettingPath = folder_path
@@ -114,7 +113,7 @@ class ChatSettings(QMainWindow):
             pass
 
     def update_lastChat(self, path):
-        logPath = Path(self.directoryParent) / "Save" / ".temp.json"
+        logPath = paths.CHAT_INDEX_FILE
         log = self.read_json_file(logPath)
         log_new = log.copy()
         log_new["LastChat"] = path
@@ -213,7 +212,7 @@ class ChatSettings(QMainWindow):
         combo.setCurrentText(name)
 
     def save_settings(self):
-        logsPath =Path(self.directoryParent) / "Save" / ".temp.json"
+        logsPath = paths.CHAT_INDEX_FILE
         logs = self.read_json_file(logsPath)
 
         """
@@ -227,7 +226,7 @@ class ChatSettings(QMainWindow):
         if chat_name == "":
             chat_name = "New Chat"
 
-        target_base = Path(self.directoryParent) / "Save" / "Chat"
+        target_base = paths.CHAT_DIR
         target_base.mkdir(parents=True, exist_ok=True)
 
         chat_dir = str(target_base) + '/' + chat_name

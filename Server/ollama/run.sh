@@ -1,7 +1,7 @@
 #!/bin/bash
 # Starts Ollama and the ChatUI server in two terminals.
 # The server needs chat_server/ next to ollama_server.py. Settings can go in
-# a .env file in this folder (it is git-ignored), e.g. DEFAULT_MODEL=gemma4:31b.
+# a .env file in this folder (copy .env.example; .env is git-ignored).
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 gnome-terminal -- bash -c "ollama serve; exec bash"

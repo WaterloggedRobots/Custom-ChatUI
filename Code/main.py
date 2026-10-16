@@ -1,14 +1,14 @@
 import sys
-import os
 import json
 import time
 from pathlib import Path
 
 from typing import Set, Optional
 
-from PySide6.QtCore import QStandardPaths, QCoreApplication
+from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
+import paths
 from Widgets import chatMain, chatSettings, botSettings, warningWidget
 
 SETTINGS_KEYS = {"Name", "Bot Path", "Temperature", "Model", "Chat"}
@@ -124,8 +124,7 @@ class Main:
             return None
 
     def get_currentChat(self):
-        logPath = Path(data_dir) / "Save" / ".temp.json"
-        log = self.read_json_file(logPath)
+        log = self.read_json_file(paths.CHAT_INDEX_FILE)
         return log["LastChat"]
 
     def get_currentBot(self):
@@ -195,67 +194,40 @@ class Main:
         messageEdit.close()
 
     def openIPSettings(self):
-        ip = mainChat.client.ip
         settingsIP.show()
-        settingsIP.ui.lineEdit.setText(ip)
+        settingsIP.ui.lineEdit.setText(mainChat.client.server_address)
 
     def exitIPSettings(self):
-        mainChat.client.ip = settingsIP.ui.lineEdit.text()
-        print("IP Set To: ", mainChat.client.ip)
+        mainChat.client.set_server_address(settingsIP.ui.lineEdit.text())
+        print("LLM server set to:", mainChat.client.server_address)
         settingsIP.close()
 
 if __name__ == "__main__":
     QCoreApplication.setOrganizationName("Waterlogged")
     QCoreApplication.setApplicationName("ChatUI")
 
-    data_dir = Path(QStandardPaths.writableLocation(QStandardPaths.AppDataLocation))
-    data_dir.mkdir(parents=True, exist_ok=True)
-    save_dir = Path(data_dir) / "Save"
-    save_dir.mkdir(parents=True, exist_ok=True)
-    saveChat_dir = Path(data_dir) / "Save" / "Chat"
-    saveChat_dir.mkdir(parents=True, exist_ok=True)
-    saveBot = Path(data_dir) / "Save" / "Bot"
-    saveBot.mkdir(parents=True, exist_ok=True)
-    current_script_path = os.path.abspath(__file__)
-    parent_directory = os.path.dirname(current_script_path)
-    tempLogFile = save_dir / ".temp.json"
-    if not tempLogFile.exists():
-        """
-    
-        tempLogFileImport = Path(parent_directory)/ "Save" / ".temp.json"
-        tempLog = read_json_file(tempLogFileImport)
-        """
-        tempLog={
-                "LastOpened": "",
-                "LastChat": "",
-                "ChatList": []
-        }
-
-        with open(tempLogFile, "w", encoding="utf-8") as f:
-            json.dump(tempLog, f, indent=4)
-
-    print(data_dir)
+    paths.ensure_data_dirs()
+    print("Client app files:", paths.CLIENT_REPO_DIR)
+    print("Client data:     ", paths.CLIENT_DATA_DIR)
 
     app = QApplication(sys.argv)
-    app.setWindowIcon(QIcon((parent_directory+r"\Img\AppIcon.png")))
-    #print((parent_directory+"\Img\AppIcon.ico"))
-    mainChat = chatMain.ChatMain(str(data_dir),parent_directory)
-    emptyStart = warningWidget.EmptyStart(str(data_dir),parent_directory)
-    settingsChat = chatSettings.ChatSettings(str(data_dir),parent_directory)
-    settingsBot = botSettings.BotSettings(str(data_dir),parent_directory)
-    warningLeaveEmpty = warningWidget.EmptyLeave(str(data_dir),parent_directory)
-    invalidChatSettings = warningWidget.InvalidChatSettings(str(data_dir),parent_directory)
-    messageEdit = chatMain.EditMessage(str(data_dir),parent_directory)
-    settingsIP = chatMain.ServerIP(str(data_dir),parent_directory)
+    app.setWindowIcon(QIcon(str(paths.IMG_DIR / "AppIcon.png")))
+    mainChat = chatMain.ChatMain()
+    emptyStart = warningWidget.EmptyStart()
+    settingsChat = chatSettings.ChatSettings()
+    settingsBot = botSettings.BotSettings()
+    warningLeaveEmpty = warningWidget.EmptyLeave()
+    invalidChatSettings = warningWidget.InvalidChatSettings()
+    messageEdit = chatMain.EditMessage()
+    settingsIP = chatMain.ServerIP()
 
     connector = Main()
 
-    if find_json_with_format(str(data_dir) + r"\Save\Chat", SETTINGS_KEYS) is not None:
+    if find_json_with_format(str(paths.CHAT_DIR), SETTINGS_KEYS) is not None:
         noChats = False
         mainChat.show()
 
     else:
-        print(parent_directory + r"\Save\Chat")
         noChats = True
         emptyStart.show()
 

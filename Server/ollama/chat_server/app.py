@@ -34,9 +34,9 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
                                            limits=httpx.Limits(max_connections=20))
         try:
             names = [m["name"] for m in await app.state.ollama.tags()]
-            log.info("Ollama at %s has: %s", Config.OLLAMA_HOST, ", ".join(names) or "(no models)")
+            log.info("Ollama at %s has: %s", Config.OLLAMA_URL, ", ".join(names) or "(no models)")
         except Exception as e:
-            log.warning("Ollama not reachable at %s yet: %s", Config.OLLAMA_HOST, e)
+            log.warning("Ollama not reachable at %s yet: %s", Config.OLLAMA_URL, e)
         yield
         await app.state.ollama.close()
         await app.state.http.aclose()
@@ -52,7 +52,7 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
     @app.exception_handler(httpx.TransportError)
     async def _unreachable(_, e: httpx.TransportError):
         return JSONResponse(status_code=503, content={"error": {
-            "message": f"Ollama not reachable at {Config.OLLAMA_HOST}: {e or type(e).__name__}", "type": "ollama_unreachable"}})
+            "message": f"Ollama not reachable at {Config.OLLAMA_URL}: {e or type(e).__name__}", "type": "ollama_unreachable"}})
 
     @app.exception_handler(HTTPException)
     async def _http_error(_, e: HTTPException):
@@ -98,7 +98,7 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
             ok = True
         except Exception:
             ok = False
-        return {"status": "healthy" if ok else "degraded", "ollama": ok, "ollama_host": Config.OLLAMA_HOST,
+        return {"status": "healthy" if ok else "degraded", "ollama": ok, "ollama_url": Config.OLLAMA_URL,
                 "default_model": Config.DEFAULT_MODEL, "features": extras_available}
 
     # ---------------------------------------------------------------- models

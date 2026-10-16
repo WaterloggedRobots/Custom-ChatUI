@@ -22,6 +22,8 @@ from pathlib import Path
 import requests
 from PySide6.QtCore import QObject, Signal
 
+import paths
+
 DEFAULT_PORT = 8100
 
 MAX_CONTEXT_MESSAGES = 20     # newest messages sent verbatim
@@ -51,7 +53,7 @@ class LLMClient(QObject):
     done = Signal(dict)        # {"content", "thinking", "sources", "usage", "timings", "aborted"}
     error = Signal(str)
 
-    def __init__(self, fd):
+    def __init__(self):
         super().__init__()
         self.model_name = None
         self.temperature = 0.7
@@ -60,9 +62,10 @@ class LLMClient(QObject):
         self.web_mode = "auto"
         self.summary = None            # {"upto": n, "text": "..."} covering history[:n]
 
-        cfg = self.read_json_file(Path(fd) / "UI" / "config.json") or {}
-        self.ip = str(cfg.get("ip", "127.0.0.1"))
-        self.port = int(cfg.get("port", DEFAULT_PORT))
+        # LLM server address: Code/UI/network.json, or your saved copy (see paths.py)
+        server = paths.load_network().get("llm_server", {})
+        self.server_ip = str(server.get("ip") or "127.0.0.1")
+        self.server_port = int(server.get("port") or DEFAULT_PORT)
 
         self._worker = None
         self._abort = threading.Event()
@@ -70,22 +73,19 @@ class LLMClient(QObject):
 
     # ------------------------------------------------------------- settings
 
-    @staticmethod
-    def read_json_file(file_path):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
-            print(f"❌ Could not read {file_path}: {e}")
-            return None
+    @property
+    def server_address(self) -> str:
+        return f"{self.server_ip}:{self.server_port}"
+
+    def set_server_address(self, text: str, save: bool = True):
+        """Accepts '192.168.0.247' or '192.168.0.247:8100'."""
+        self.server_ip, self.server_port = paths.split_address(text, self.server_port)
+        if save:
+            paths.save_server_address(self.server_ip, self.server_port)
 
     @property
     def base_url(self) -> str:
-        # The IP field may also carry a port, e.g. 192.168.0.247:8100.
-        host = self.ip.strip().removeprefix("http://").rstrip("/")
-        if ":" not in host:
-            host = f"{host}:{self.port}"
-        return f"http://{host}"
+        return f"http://{self.server_address}"
 
     def set_model(self, model: str):
         self.model_name = model

@@ -1,4 +1,5 @@
 import llmClient
+import paths
 
 from PySide6.QtWidgets import QMainWindow, QSizePolicy, QFileDialog, QComboBox, QCheckBox, QLabel, QMenu
 from PySide6.QtUiTools import QUiLoader
@@ -58,7 +59,7 @@ class ChatMain(QMainWindow):
                  thinking, thinking_time, sources [{n, title, url}], usage
     """
 
-    def __init__(self, pd, fd):
+    def __init__(self):
         super().__init__()
         self.isShowImgWindow = True
         self.isShowImgWindowLock = False
@@ -68,8 +69,6 @@ class ChatMain(QMainWindow):
         self.botName = ""
         self.chat_markdown = []
         self.chat_path = None  # active chat file path
-        self.directoryParent = pd
-        self.directoryDefault = fd
         self.pending_attachments = []
         self.expanded_thinking = set()   # indices of assistant messages showing their reasoning
 
@@ -80,7 +79,7 @@ class ChatMain(QMainWindow):
         self.thinking_time = None
         self.stream_phase = None          # None | "thinking" | "answer"
 
-        self.client = llmClient.LLMClient(fd)
+        self.client = llmClient.LLMClient()
         self.client.token.connect(self.on_token)
         self.client.thinking.connect(self.on_thinking)
         self.client.status.connect(self.on_status)
@@ -95,7 +94,7 @@ class ChatMain(QMainWindow):
     def load_ui(self):
         """Load the UI file"""
         try:
-            ui_file = QFile(str(Path(self.directoryDefault) / "UI" / "Chat Window.ui"))
+            ui_file = QFile(paths.ui_file("Chat Window.ui"))
             if not ui_file.open(QFile.ReadOnly):
                 print(f"Cannot open UI file: {ui_file.errorString()}")
                 return
@@ -496,12 +495,11 @@ class ChatMain(QMainWindow):
         return None
 
     def get_lastChat(self):
-        logPath = Path(self.directoryParent) / "Save" / ".temp.json"
-        log = read_json_file(logPath)
+        log = read_json_file(paths.CHAT_INDEX_FILE)
         return log["LastChat"]
 
     def update_lastChat(self, path):
-        logPath = Path(self.directoryParent) / "Save" / ".temp.json"
+        logPath = paths.CHAT_INDEX_FILE
         log = read_json_file(logPath)
         log_new = log.copy()
         log_new["LastChat"] = path
@@ -515,8 +513,7 @@ class ChatMain(QMainWindow):
             self._end_response()
 
         if path == "":
-            savePath = Path(self.directoryParent) / "Save" / "Chat"
-            path = self.get_first_json_file_os(str(savePath))
+            path = self.get_first_json_file_os(str(paths.CHAT_DIR))
             if path is None:
                 return
 
@@ -534,7 +531,7 @@ class ChatMain(QMainWindow):
             if msg.get("role") == "user":
                 msg["content"] = msg.get("content", "").replace("<br/>", "\n")
 
-        logsPath = Path(self.directoryParent) / "Save" / ".temp.json"
+        logsPath = paths.CHAT_INDEX_FILE
         logs = read_json_file(logsPath)
         chat_path_str = Path(self.chat_path).stem
 
@@ -728,7 +725,7 @@ class ChatMain(QMainWindow):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select chat JSON",
-            str(Path(self.directoryParent) / "Save" / "Chat"),
+            str(paths.CHAT_DIR),
             "JSON Files (*.json)"
         )
 
@@ -736,21 +733,19 @@ class ChatMain(QMainWindow):
             self.load_chat(file_path)
 
     def qs_chat(self, chatName):
-        chatPath = Path(self.directoryParent) / "Save" / "Chat" / (chatName + ".json")
+        chatPath = paths.CHAT_DIR / (chatName + ".json")
         self.load_chat(str(chatPath))
 
 class EditMessage(QMainWindow):
 
-    def __init__(self, pd, fd):
+    def __init__(self):
         super().__init__()
-        self.directoryParent = pd
-        self.directoryDefault = fd
         self.load_ui()
         self.setup_connections()
 
     def load_ui(self):
         try:
-            ui_file = QFile(str(Path(self.directoryDefault) / "UI" / "EditMessage.ui"))  # Change to your .ui file name
+            ui_file = QFile(paths.ui_file("EditMessage.ui"))
             if not ui_file.open(QFile.ReadOnly):
                 print(f"Cannot open UI file: {ui_file.errorString()}")
                 return
@@ -774,16 +769,14 @@ class EditMessage(QMainWindow):
 
 class ServerIP(QMainWindow):
 
-    def __init__(self, pd, fd):
+    def __init__(self):
         super().__init__()
-        self.directoryParent = pd
-        self.directoryDefault = fd
         self.load_ui()
         self.setup_connections()
 
     def load_ui(self):
         try:
-            ui_file = QFile(str(Path(self.directoryDefault) / "UI" / "server ip.ui"))  # Change to your .ui file name
+            ui_file = QFile(paths.ui_file("server ip.ui"))
             if not ui_file.open(QFile.ReadOnly):
                 print(f"Cannot open UI file: {ui_file.errorString()}")
                 return
@@ -805,9 +798,9 @@ class ServerIP(QMainWindow):
         self.ui.pushButton_2.clicked.connect(self.reset_ip)
 
     def reset_ip(self):
-        ipDefaultPath = self.directoryDefault + r"\UI\config.json"
-        ipDefault = read_json_file(ipDefaultPath)
-        self.ui.lineEdit.setText(ipDefault["ipReset"])
+        """Put back the default LLM server address from Code/UI/network.json."""
+        server = paths.default_network().get("llm_server", {})
+        self.ui.lineEdit.setText(f"{server.get('ip', '')}:{server.get('port', llmClient.DEFAULT_PORT)}")
 
 def read_json_file(file_path):
     """Read a JSON file and return its contents"""

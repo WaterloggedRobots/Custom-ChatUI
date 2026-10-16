@@ -22,6 +22,6 @@ logging.basicConfig(level=Config.LOG_LEVEL, format="%(asctime)s %(levelname)s %(
 app = create_app()
 
 if __name__ == "__main__":
-    print(f"ChatUI server on http://{Config.HOST}:{Config.PORT}  (Ollama: {Config.OLLAMA_HOST}, "
+    print(f"ChatUI server on http://{Config.SERVER_BIND_IP}:{Config.SERVER_PORT}  (Ollama: {Config.OLLAMA_URL}, "
           f"default model: {Config.DEFAULT_MODEL})")
-    uvicorn.run(app, host=Config.HOST, port=Config.PORT, log_level=Config.LOG_LEVEL.lower())
+    uvicorn.run(app, host=Config.SERVER_BIND_IP, port=Config.SERVER_PORT, log_level=Config.LOG_LEVEL.lower())

@@ -1,0 +1,13 @@
+{
+    "_about": "Default network addresses. Server > Set IP saves your own copy in the client data folder (see Code/paths.py).",
+    "llm_server": {
+        "_about": "Ubuntu machine running Server/ollama/ollama_server.py",
+        "ip": "192.168.0.247",
+        "port": 8100
+    },
+    "nas": {
+        "_about": "NAS on the LAN. Not used by the client yet.",
+        "ip": "",
+        "share": ""
+    }
+}

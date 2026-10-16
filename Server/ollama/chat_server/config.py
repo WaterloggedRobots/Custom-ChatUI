@@ -1,6 +1,15 @@
-"""Settings, read once from the environment (or a .env file next to run.sh)."""
+"""Settings, read once from the environment (or a .env file next to run.sh;
+copy .env.example to .env to change them).
+
+Addresses at a glance:
+  LLM server (this program)  listens on SERVER_BIND_IP:SERVER_PORT; clients use
+                             the machine's LAN IP, e.g. 192.168.0.247:8100
+  Ollama                     OLLAMA_URL, normally on this same machine
+  NAS                        NAS_IP / NAS_MOUNT, recorded here; nothing uses them yet
+"""
 
 import os
+from pathlib import Path
 
 
 def _int(name: str, default: int) -> int:
@@ -10,17 +19,40 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _env(name: str, default: str, *old_names: str) -> str:
+    """Read a setting; older variable names are still honoured."""
+    for n in (name, *old_names):
+        if os.getenv(n):
+            return os.environ[n]
+    return default
+
+
 class Config:
-    OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+    # ---- Paths on the server -------------------------------------------
+    SERVER_DIR = Path(__file__).resolve().parent.parent      # Server/ollama in the git clone
+    ENV_FILE = SERVER_DIR / ".env"                           # loaded by run.sh
+
+    # ---- Network ---------------------------------------------------------
+    # This server. 0.0.0.0 = reachable from the LAN; 127.0.0.1 = this machine only.
+    # 8000 is taken by the vLLM start script, so this server defaults to 8100.
+    SERVER_BIND_IP = _env("SERVER_BIND_IP", "0.0.0.0", "API_HOST")
+    SERVER_PORT = int(_env("SERVER_PORT", "8100", "API_PORT"))
+    # Ollama, which runs the models.
+    # (OLLAMA_HOST is only borrowed when it is a full URL: Ollama itself also
+    # reads OLLAMA_HOST, often as a bare bind address like 0.0.0.0.)
+    OLLAMA_URL = _env("OLLAMA_URL", os.getenv("OLLAMA_HOST", "") if os.getenv("OLLAMA_HOST", "").startswith("http")
+                      else "http://localhost:11434").rstrip("/")
+    # NAS on the LAN (reserved for later; not used yet).
+    NAS_IP = os.getenv("NAS_IP", "")
+    NAS_MOUNT = os.getenv("NAS_MOUNT", "")
+
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+    # ---- Models ------------------------------------------------------------
     DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gemma4:31b")
     # Model used for the small "does this need a web search?" step. Empty means
     # use the chat model itself, which avoids loading a second model.
     PLANNER_MODEL = os.getenv("PLANNER_MODEL", "")
-
-    HOST = os.getenv("API_HOST", "0.0.0.0")
-    # 8000 is taken by the vLLM start script, so this server defaults to 8100.
-    PORT = _int("API_PORT", 8100)
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
     # Context window asked of Ollama. Its own default (4096 on many builds) is
     # too small once search results or a document are added.

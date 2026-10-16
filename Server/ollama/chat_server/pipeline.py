@@ -17,6 +17,7 @@ One request goes through at most three steps:
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
@@ -210,6 +211,7 @@ async def plan_search(ollama: Ollama, model: str, messages: List[Dict[str, Any]]
         return []
     history = _plan_context(messages)
     prompt = (f"Conversation so far:\n{history}\n\n" if history else "") + f"Latest message:\n{question[:2000]}"
+    started = time.monotonic()
     try:
         reply = await ollama.chat({
             "model": Config.PLANNER_MODEL or model,
@@ -226,6 +228,8 @@ async def plan_search(ollama: Ollama, model: str, messages: List[Dict[str, Any]]
         plan = json.loads(reply.get("message", {}).get("content") or "{}")
         queries = [str(q).strip() for q in plan.get("queries", []) if str(q).strip()][:3]
         wants = bool(plan.get("search"))
+        log.info("timing: search planner %.1fs (prompt %s tokens), search=%s", time.monotonic() - started,
+                 reply.get("prompt_eval_count", "?"), wants)
     except Exception as e:
         log.warning("search planner failed: %s", e)
         queries, wants = [], False
@@ -320,6 +324,18 @@ def _think_value(model: str, think: Optional[Union[bool, str]]) -> Optional[Unio
     return think
 
 
+def log_timing(final: Dict[str, Any]) -> None:
+    """One line per answer showing where the time went (Ollama reports nanoseconds)."""
+    def secs(key):
+        return final.get(key, 0) / 1e9
+    p_n, p_s = final.get("prompt_eval_count", 0), secs("prompt_eval_duration")
+    e_n, e_s = final.get("eval_count", 0), secs("eval_duration")
+    log.info("timing: total %.1fs | model load %.1fs | read prompt %d tokens in %.1fs (%.0f tok/s) | "
+             "wrote %d tokens (thinking + answer) in %.1fs (%.1f tok/s)",
+             secs("total_duration"), secs("load_duration"), p_n, p_s, p_n / p_s if p_s else 0,
+             e_n, e_s, e_n / e_s if e_s else 0)
+
+
 def prepare(job: ChatJob) -> ChatJob:
     """Unpack attachments and validate, so bad input fails before a stream starts."""
     if job.prepared is None:
@@ -380,6 +396,7 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient) -> Asy
     for kind, text in splitter.flush():
         yield Event(kind, text)
 
+    log_timing(final)
     prompt_tokens = final.get("prompt_eval_count", 0)
     completion_tokens = final.get("eval_count", 0)
     yield Event("done", {

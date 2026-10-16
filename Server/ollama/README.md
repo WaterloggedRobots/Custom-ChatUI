@@ -9,9 +9,11 @@ OpenAI-style client, such as Futu-Network later) one chat endpoint that adds:
   without it automatically, and inline `<think>…</think>` output is split out too.
 - **Images and files.** Images go to vision models natively. PDF, Word and
   text/code files are converted to text and added to the message.
-- **Web search.** `web_search: "auto"` makes one small structured-output call
-  to decide whether the question needs the web and which queries to run;
-  `"on"` always searches; `"off"` (the default for API callers) never does.
+- **Web search.** With `web_search: "auto"` the model decides itself: a fixed
+  system note lets it reply with only `<search>query | query</search>`, and the
+  server then stops that reply, runs the searches and asks again with the
+  results. Questions that don't need the web cost no extra call. `"on"` always
+  searches; `"off"` (the default for API callers) never does.
   Queries run in parallel on DuckDuckGo (Wikipedia as fallback), the top pages
   are read in parallel, and the model cites them as `[1]`, `[2]`.
 
@@ -27,7 +29,7 @@ sudo apt install python3-venv          # once
 cd ~/Custom-ChatUI/Server/ollama        # wherever you cloned it
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest -q tests     # optional: 14 tests, no Ollama needed
+.venv/bin/python -m pytest -q tests     # optional: 16 tests, no Ollama needed
 ```
 
 ## Run
@@ -111,6 +113,10 @@ parsing, HTML extraction and the DuckDuckGo client. The speed-ups that matter
 are done here instead: one pooled connection to Ollama, parallel searches and
 page reads, models kept loaded (`KEEP_ALIVE`), a larger context window so
 Ollama doesn't silently cut the system prompt, and no per-request token counting.
+Old messages are dropped in blocks (here and in the client) rather than one per
+turn, so the start of the prompt stays the same and Ollama reuses its prompt
+cache instead of re-reading the whole chat on every message. Each answer logs a
+`timing:` line showing model load, prompt reading and generation.
 
 ## Tests
 

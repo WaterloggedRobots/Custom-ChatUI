@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from chat_server import search as web  # noqa: E402
 from chat_server.app import create_app  # noqa: E402
-from chat_server.pipeline import ThinkSplitter, fit_context  # noqa: E402
+from chat_server.pipeline import SearchSniffer, ThinkSplitter, fit_context  # noqa: E402
 
 PNG_1PX = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
@@ -29,6 +29,7 @@ class FakeOllama:
         self.shows = []
         self.plan = {"search": False, "queries": []}
         self.inline_think = False
+        self.search_tag = None        # what the model replies when it wants to search (auto mode)
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -54,7 +55,13 @@ class FakeOllama:
             if body.get("think"):
                 lines += [{"message": {"role": "assistant", "content": "", "thinking": "Let me think. "}, "done": False},
                           {"message": {"role": "assistant", "content": "", "thinking": "Done."}, "done": False}]
-            if self.inline_think:
+            wants_search = (self.search_tag and any("<search>" in m.get("content", "") for m in body["messages"]
+                                                    if m["role"] == "system")
+                            and "<web_results" not in body["messages"][-1]["content"])
+            if wants_search:
+                lines += [{"message": {"content": c}, "done": False} for c in self.search_tag]
+                lines += [{"message": {"content": " more text the server must not wait for"}, "done": False}]
+            elif self.inline_think:
                 lines += [{"message": {"content": "<thi"}, "done": False},
                           {"message": {"content": "nk>hidden</th"}, "done": False},
                           {"message": {"content": "ink>\nVisible"}, "done": False}]
@@ -162,9 +169,9 @@ def test_inline_think_tags_are_split_out(env):
     assert msg["reasoning_content"] == "hidden"
 
 
-def test_auto_search_runs_planner_and_cites_sources(env):
+def test_auto_search_lets_the_model_ask_and_cites_sources(env):
     client, fake, searched = env
-    fake.plan = {"search": True, "queries": ["hsi close today", "hang seng index"]}
+    fake.search_tag = ["<sea", "rch>hsi close today | hang", " seng index</search>"]
     with client.stream("POST", "/v1/chat/completions", json={
         "model": "gemma4:31b", "stream": True, "web_search": "auto",
         "messages": [{"role": "user", "content": "Where did the Hang Seng close today?"}]}) as r:
@@ -174,9 +181,12 @@ def test_auto_search_runs_planner_and_cites_sources(env):
     sources = next(e["sources"] for e in events if isinstance(e, dict) and "sources" in e)
     assert [s["n"] for s in sources] == [1, 2, 3, 4, 5]
     assert sorted(searched) == ["hang seng index", "hsi close today"]
-    planner, answer = fake.requests[-2], fake.requests[-1]
-    assert planner["think"] is False and planner["format"]["required"] == ["search", "queries"]
-    assert planner["options"]["num_ctx"] == answer["options"]["num_ctx"]
+    content = "".join(e["choices"][0]["delta"].get("content", "") for e in events
+                      if isinstance(e, dict) and e.get("choices"))
+    assert content == "Hello world [1]"               # the search tag never reaches the user
+    first, answer = fake.requests[-2], fake.requests[-1]
+    assert not any("format" in r for r in fake.requests), "auto mode needs no separate planner call"
+    assert first["messages"][:-1] == answer["messages"][:-1]   # same prefix: cache reused
     user = answer["messages"][-1]["content"]
     assert "<web_results" in user and user.rstrip().endswith("Where did the Hang Seng close today?")
     assert "Fact from site0.example." in user          # page text was read
@@ -184,13 +194,22 @@ def test_auto_search_runs_planner_and_cites_sources(env):
     assert "snippet broken" in user                    # a failed page keeps its snippet
 
 
-def test_auto_search_skips_when_planner_says_no(env):
+def test_auto_search_is_one_call_when_the_model_answers(env):
     client, fake, searched = env
-    fake.plan = {"search": False, "queries": []}
-    client.post("/v1/chat/completions", json={"model": "gemma4:31b", "web_search": "auto",
-                                               "messages": [{"role": "user", "content": "Write a haiku"}]})
-    assert searched == []
+    before = len(fake.requests)
+    body = client.post("/v1/chat/completions", json={"model": "gemma4:31b", "web_search": "auto",
+                                                      "messages": [{"role": "user", "content": "Write a haiku"}]}).json()
+    assert searched == [] and len(fake.requests) == before + 1
+    assert body["choices"][0]["message"]["content"] == "Hello world [1]"
     assert "<web_results" not in fake.requests[-1]["messages"][-1]["content"]
+
+
+def test_search_tag_in_a_code_fence_is_understood():
+    sn = SearchSniffer()
+    assert sn.feed("```\n<search>a | b</sea") == "" and sn.feed("rch>\n```") == ""
+    assert sn.mode == "search" and sn.queries == ["a", "b"]
+    sn = SearchSniffer()
+    assert sn.feed("```python\nprint(1)") == "```python\nprint(1)" and sn.mode == "answer"
 
 
 def test_search_on_falls_back_to_the_question(env):
@@ -284,3 +303,11 @@ def test_fit_context_keeps_system_and_newest():
     assert kept[1]["role"] == "user"
     assert kept[-1] is msgs[-1]
     assert len(kept) < len(msgs)
+
+
+def test_fit_context_drops_in_blocks_so_the_start_stays_put():
+    def chat(n):
+        return [{"role": "system", "content": "S"}] + [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": f"{i}" + "x" * 3000} for i in range(n)]
+    firsts = {fit_context(chat(n), num_ctx=8192, reserve=1024)[1]["content"][:3] for n in range(12, 17)}
+    assert len(firsts) <= 2          # five turns, at most one change of starting message

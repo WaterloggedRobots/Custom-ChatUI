@@ -4,11 +4,14 @@ One request goes through at most three steps:
 
 1. Attachments in the newest messages are unpacked: images go to the model
    natively (Ollama's `images`), documents become text blocks.
-2. Optional web search. In "auto" mode one short structured-output call asks
-   the model whether the question needs the web and which queries to run;
-   "on" always searches; "off" never does. Queries run in parallel, the top
-   pages are read in parallel, and the results are given to the model as
-   numbered sources it can cite.
+2. Optional web search. In "auto" mode the model decides itself: a fixed
+   system note lets it reply with only `<search>query | query</search>`, in
+   which case the answer is stopped, the searches run and the model is asked
+   again with the results. No extra model call is spent on questions that
+   don't need the web, and Ollama's prompt cache stays valid between turns.
+   "on" always searches (one short call picks the queries); "off" never does.
+   Queries run in parallel, the top pages are read in parallel, and the
+   results are given to the model as numbered sources it can cite.
 3. The answer is streamed. Reasoning comes from the model's native thinking
    channel (`think`), kept separate from the answer, instead of a prompted
    chain of thought mixed into the reply.
@@ -150,27 +153,34 @@ def estimate_tokens(msg: Dict[str, Any]) -> int:
     return len(msg.get("content", "")) // 3 + 8 + IMAGE_TOKENS * len(msg.get("images", []))
 
 
+DROP_STEP = 8   # old messages are dropped in blocks, so the prompt's start (and Ollama's cache) stays put
+
+
 def fit_context(messages: List[Dict[str, Any]], num_ctx: int, reserve: int) -> List[Dict[str, Any]]:
     """Drop the oldest non-system turns until the prompt fits, so Ollama never
-    silently cuts the system prompt off the front."""
+    silently cuts the system prompt off the front.
+
+    Messages go in blocks of DROP_STEP counted from the start of the list, not
+    one per turn: while a chat grows, the first kept message stays the same for
+    several turns, so Ollama can reuse its cached prompt instead of re-reading
+    the whole history on every message."""
     budget = max(num_ctx - reserve, 1024)
     system = [m for m in messages if m["role"] == "system"]
     rest = [m for m in messages if m["role"] != "system"]
     used = sum(estimate_tokens(m) for m in system)
-    kept: List[Dict[str, Any]] = []
-    for m in reversed(rest):
-        cost = estimate_tokens(m)
-        if kept and used + cost > budget:
-            break
-        kept.append(m)
-        used += cost
-    kept.reverse()
+    costs = [estimate_tokens(m) for m in rest]
+    drop, total = 0, used + sum(costs)
+    while drop < len(rest) - 1 and total > budget:
+        total -= costs[drop]
+        drop += 1
+    if drop:
+        drop = min(-(-drop // DROP_STEP) * DROP_STEP, len(rest) - 1)
     # Never start the conversation with an orphaned assistant turn.
-    while len(kept) > 1 and kept[0]["role"] != "user":
-        kept.pop(0)
-    if len(kept) < len(rest):
-        log.info("context: dropped %d old messages to fit num_ctx=%d", len(rest) - len(kept), num_ctx)
-    return system + kept
+    while drop < len(rest) - 1 and rest[drop]["role"] != "user":
+        drop += 1
+    if drop:
+        log.info("context: dropped %d old messages to fit num_ctx=%d", drop, num_ctx)
+    return system + rest[drop:]
 
 
 # --------------------------------------------------------------------------
@@ -248,7 +258,8 @@ def sources_block(hits: List[web.Hit]) -> str:
         + "\n\n".join(parts)
         + "\n</web_results>\n"
         "Use the web results above where they help, and cite them inline like [1] or [2]. "
-        "If they don't cover the question, say so and answer from what you know."
+        "If they don't cover the question, say so and answer from what you know. "
+        "Answer now; don't search again."
     )
 
 
@@ -257,6 +268,62 @@ def attach_to_last_user(messages: List[Dict[str, Any]], block: str) -> None:
         if m["role"] == "user":
             m["content"] = f"{block}\n\n{m.get('content', '')}"
             return
+
+
+SEARCH_HINT = """You can search the web. If a good answer needs current or changing facts (news, prices,
+releases, schedules, weather, versions), niche facts you are unsure of, or the user asks you to look
+something up, reply with only this and nothing else:
+<search>short query 1 | short query 2</search>
+(1 to 3 specific queries of 3 to 8 words.) You will then get the results and answer. Otherwise,
+answer directly. Don't search for greetings, opinions, creative writing, maths, coding help, or
+questions about attached files or earlier messages."""
+
+
+def add_search_hint(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Put the fixed search note after the system messages. It is the same text on
+    every turn, so it doesn't disturb Ollama's prompt cache."""
+    n = 0
+    while n < len(messages) and messages[n]["role"] == "system":
+        n += 1
+    return messages[:n] + [{"role": "system", "content": SEARCH_HINT}] + messages[n:]
+
+
+_SEARCH_RE = re.compile(r"^\s*(?:`{1,3}\w*\s*)?<search>(.*?)</search>", re.S)
+
+
+class SearchSniffer:
+    """Holds back the start of the answer until it is clear whether the model
+    asked for a search (`<search>…</search>`) or is answering."""
+
+    def __init__(self):
+        self.buf = ""
+        self.mode = "start"     # start | search | answer
+        self.queries: List[str] = []
+
+    def feed(self, text: str) -> str:
+        """Returns answer text that can be shown now."""
+        if self.mode == "answer":
+            return text
+        self.buf += text
+        m = _SEARCH_RE.match(self.buf)
+        if m:
+            self.mode = "search"
+            self.queries = [q.strip(" \"'") for q in re.split(r"[|\n]", m.group(1)) if q.strip(" \"'")][:3]
+            return ""
+        probe = re.sub(r"^`{1,3}\w*\s*", "", self.buf.lstrip())   # the tag may come inside a code fence
+        if probe and not ("<search>".startswith(probe) or probe.startswith("<search>")):
+            self.mode = "answer"
+            text, self.buf = self.buf, ""
+            return text
+        if len(self.buf) > 600:            # an unclosed tag: give up and show it
+            self.mode = "answer"
+            text, self.buf = self.buf, ""
+            return text
+        return ""
+
+    def flush(self) -> str:
+        text, self.buf = ("" if self.mode == "search" else self.buf), ""
+        return text
 
 
 # --------------------------------------------------------------------------
@@ -345,30 +412,38 @@ def prepare(job: ChatJob) -> ChatJob:
     return job
 
 
+async def _search_and_attach(http: httpx.AsyncClient, messages: List[Dict[str, Any]],
+                             queries: List[str]) -> AsyncIterator[Event]:
+    yield Event("status", "Searching: " + " · ".join(queries))
+    hits = await web.search_many(http, queries)
+    if hits:
+        n = min(len(hits), Config.SEARCH_FETCH_PAGES)
+        yield Event("status", f"Reading {n} page{'s' if n != 1 else ''}…")
+        await web.fetch_pages(http, hits)
+        attach_to_last_user(messages, sources_block(hits))
+        yield Event("sources", [{"n": i, "title": h.title, "url": h.link} for i, h in enumerate(hits, 1)])
+    else:
+        yield Event("status", "The search returned nothing; answering without it.")
+
+
 async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient) -> AsyncIterator[Event]:
     messages = prepare(job).prepared
 
     options = dict(job.options)
     options.setdefault("num_ctx", Config.NUM_CTX)
 
-    if job.web_search in ("auto", "on"):
-        yield Event("status", "Checking whether a web search would help…" if job.web_search == "auto" else "Planning the search…")
-        queries = await plan_search(ollama, job.model, messages, job.web_search, options["num_ctx"])
-        if queries:
-            yield Event("status", "Searching: " + " · ".join(queries))
-            hits = await web.search_many(http, queries)
-            if hits:
-                n = min(len(hits), Config.SEARCH_FETCH_PAGES)
-                yield Event("status", f"Reading {n} page{'s' if n != 1 else ''}…")
-                await web.fetch_pages(http, hits)
-                attach_to_last_user(messages, sources_block(hits))
-                yield Event("sources", [{"n": i, "title": h.title, "url": h.link} for i, h in enumerate(hits, 1)])
-            else:
-                yield Event("status", "The search returned nothing; answering without it.")
+    if job.web_search == "on":
+        yield Event("status", "Planning the search…")
+        queries = await plan_search(ollama, job.model, messages, "on", options["num_ctx"])
+        async for ev in _search_and_attach(http, messages, queries):
+            yield ev
         yield Event("status", "")
 
     reserve = options.get("num_predict") if (options.get("num_predict") or 0) > 0 else 4096
     messages = fit_context(messages, options["num_ctx"], reserve)
+    model_decides = job.web_search == "auto" and job.format is None
+    if model_decides:
+        messages = add_search_hint(messages)
 
     payload: Dict[str, Any] = {
         "model": job.model,
@@ -382,23 +457,56 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient) -> Asy
     if job.format is not None:
         payload["format"] = job.format
 
-    splitter = ThinkSplitter()
+    used = {"prompt": 0, "completion": 0}
     final: Dict[str, Any] = {}
-    async for chunk in ollama.stream_chat(payload):
-        msg = chunk.get("message") or {}
-        if msg.get("thinking"):
-            yield Event("thinking", msg["thinking"])
-        if msg.get("content"):
-            for kind, text in splitter.feed(msg["content"]):
+    thought = False
+    for attempt in (1, 2):
+        splitter = ThinkSplitter()
+        sniffer = SearchSniffer() if model_decides and attempt == 1 else None
+        stream = ollama.stream_chat(payload)
+        try:
+            async for chunk in stream:
+                msg = chunk.get("message") or {}
+                if msg.get("thinking"):
+                    if attempt == 2 and thought is True:
+                        thought = "separated"
+                        yield Event("thinking", "\n\n— after searching the web —\n\n")
+                    thought = thought or True
+                    yield Event("thinking", msg["thinking"])
+                if msg.get("content"):
+                    for kind, text in splitter.feed(msg["content"]):
+                        if kind == "content" and sniffer:
+                            text = sniffer.feed(text)
+                        if text:
+                            yield Event(kind, text)
+                    if sniffer and sniffer.mode == "search":
+                        break                      # stop the answer; closing the stream stops Ollama
+                if chunk.get("done"):
+                    final = chunk
+        finally:
+            await stream.aclose()
+        for kind, text in splitter.flush():
+            if kind == "content" and sniffer:
+                text = sniffer.feed(text) + sniffer.flush()
+            if text:
                 yield Event(kind, text)
-        if chunk.get("done"):
-            final = chunk
-    for kind, text in splitter.flush():
-        yield Event(kind, text)
+        if final:
+            log_timing(final)
+            used["prompt"] += final.get("prompt_eval_count", 0)
+            used["completion"] += final.get("eval_count", 0)
 
-    log_timing(final)
-    prompt_tokens = final.get("prompt_eval_count", 0)
-    completion_tokens = final.get("eval_count", 0)
+        if not (sniffer and sniffer.mode == "search" and sniffer.queries):
+            break
+        # The model asked for a search: run it and ask again with the results.
+        log.info("model asked to search: %s", " | ".join(sniffer.queries))
+        messages = [dict(m) for m in messages]
+        async for ev in _search_and_attach(http, messages, sniffer.queries):
+            yield ev
+        yield Event("status", "")
+        payload["messages"] = messages
+        final = {}
+
+    prompt_tokens, completion_tokens = used["prompt"], used["completion"]
     yield Event("done", {
         "finish_reason": "length" if final.get("done_reason") == "length" else "stop",
         "usage": {
@@ -409,7 +517,7 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient) -> Asy
         "timings": {
             "total_s": round(final.get("total_duration", 0) / 1e9, 2),
             "load_s": round(final.get("load_duration", 0) / 1e9, 2),
-            "tokens_per_s": round(completion_tokens / (final["eval_duration"] / 1e9), 1)
+            "tokens_per_s": round(final.get("eval_count", 0) / (final["eval_duration"] / 1e9), 1)
             if final.get("eval_duration") else None,
         },
     })

@@ -26,7 +26,7 @@ import paths
 
 DEFAULT_PORT = 8100
 
-MAX_CONTEXT_MESSAGES = 20     # newest messages sent verbatim
+MAX_CONTEXT_MESSAGES = 20     # at least this many newest messages are sent verbatim
 SUMMARY_REFRESH_STEP = 10     # re-summarise after this many more messages fall out of the window
 SUMMARY_MAX_TOKENS = 600
 ATTACHMENT_TURNS = 2          # user turns whose attachments are re-sent in full
@@ -132,8 +132,15 @@ class LLMClient(QObject):
         return parts
 
     def _split_history(self, history):
-        """(older, recent): recent is the verbatim window and starts with a user turn."""
+        """(older, recent): recent is the verbatim window and starts with a user turn.
+
+        The window moves in steps of SUMMARY_REFRESH_STEP rather than one message per
+        turn (it holds MAX_CONTEXT_MESSAGES to MAX_CONTEXT_MESSAGES + step - 1 messages).
+        Between steps the start of the prompt doesn't change, so Ollama reuses its
+        cached prompt and only reads the new messages; the summary refreshes at the
+        same steps."""
         cut = max(0, len(history) - MAX_CONTEXT_MESSAGES)
+        cut -= cut % SUMMARY_REFRESH_STEP
         while cut < len(history) - 1 and history[cut]["role"] != "user":
             cut += 1
         return history[:cut], history[cut:]

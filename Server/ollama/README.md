@@ -65,7 +65,7 @@ keep tokens there. All addresses are summarised at the top of
 | Method | Path | |
 |---|---|---|
 | POST | `/v1/chat/completions` | OpenAI-style chat, streaming or not |
-| GET | `/v1/models?detailed=true` | Ollama models, with capabilities (vision, thinking, tools) |
+| GET | `/v1/models?detailed=true` | the models Ollama has right now, with capabilities (vision, thinking, tools), size and whether each is loaded |
 | POST | `/web_search`, `/v1/web/search` | `{"query", "num_results", "read_pages"}` |
 | POST | `/v1/web/browse` | `{"url"}` → page title and text |
 | POST | `/v1/files/extract` | multipart upload → the text the model would see |

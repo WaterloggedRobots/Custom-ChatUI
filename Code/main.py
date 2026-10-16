@@ -151,7 +151,7 @@ class Main:
             mainChat.load_chat(self.get_currentChat())
 
     def refreshModels(self):
-        settingsChat.set_models([m["id"] for m in mainChat.client.list_models()])
+        settingsChat.set_models(mainChat.refresh_models())
 
     def newChatSettings(self):
         self.refreshModels()

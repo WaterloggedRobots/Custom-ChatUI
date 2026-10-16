@@ -26,14 +26,20 @@ PNG_1PX = base64.b64decode(
 class FakeOllama:
     def __init__(self):
         self.requests = []
+        self.shows = []
         self.plan = {"search": False, "queries": []}
         self.inline_think = False
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path == "/api/tags":
-            return httpx.Response(200, json={"models": [{"name": "gemma4:31b", "size": 1}, {"name": "plain:7b", "size": 2}]})
+            return httpx.Response(200, json={"models": [
+                {"name": "gemma4:31b", "size": 1, "digest": "d1", "details": {"parameter_size": "31B"}},
+                {"name": "plain:7b", "size": 2, "digest": "d2"}]})
+        if path == "/api/ps":
+            return httpx.Response(200, json={"models": [{"name": "gemma4:31b"}]})
         if path == "/api/show":
+            self.shows.append(1)
             name = json.loads(request.content)["model"]
             caps = ["completion", "vision", "thinking"] if name.startswith("gemma") else ["completion"]
             return httpx.Response(200, json={"capabilities": caps, "model_info": {"gemma3.context_length": 131072}})
@@ -99,12 +105,17 @@ def sse(resp):
 
 
 def test_models_and_health(env):
-    client, _, _ = env
+    client, fake, _ = env
     r = client.get("/v1/models", params={"detailed": True}).json()
     ids = {m["id"]: m for m in r["data"]}
     assert set(ids) == {"gemma4:31b", "plain:7b"}
     assert "vision" in ids["gemma4:31b"]["capabilities"]
     assert ids["gemma4:31b"]["context_length"] == 131072
+    assert ids["gemma4:31b"]["loaded"] and not ids["plain:7b"]["loaded"]
+    assert ids["gemma4:31b"]["parameter_size"] == "31B"
+    shows = len(fake.shows)
+    client.get("/v1/models", params={"detailed": True})
+    assert len(fake.shows) == shows          # /api/show answers are cached per model digest
     assert client.get("/health").json()["ollama"] is True
 
 

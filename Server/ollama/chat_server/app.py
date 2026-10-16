@@ -103,22 +103,43 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
 
     # ---------------------------------------------------------------- models
 
+    show_cache: Dict[str, Dict[str, Any]] = {}   # digest -> {capabilities, context_length}
+
     @app.get("/v1/models")
     async def list_models(detailed: bool = False):
+        """The models Ollama has right now (no saved list). With detailed=true each entry also
+        has capabilities (completion, vision, thinking, tools, embedding), context_length,
+        size details and whether it is loaded in memory."""
         models = await app.state.ollama.tags()
-        data = [{"id": m["name"], "object": "model", "owned_by": "ollama",
-                 "created": int(time.time()), "size": m.get("size")} for m in models]
+        data = []
+        for m in models:
+            details = m.get("details") or {}
+            data.append({"id": m["name"], "object": "model", "owned_by": "ollama", "created": int(time.time()),
+                         "size": m.get("size"), "parameter_size": details.get("parameter_size"),
+                         "quantization": details.get("quantization_level"), "family": details.get("family")})
         if detailed:
-            async def caps(entry):
+            async def caps(entry, digest):
+                cached = show_cache.get(digest) if digest else None
+                if cached is None:
+                    try:
+                        info = await app.state.ollama.show(entry["id"])
+                        cached = {"capabilities": info.get("capabilities", []), "context_length": next(
+                            (v for k, v in info.get("model_info", {}).items() if k.endswith(".context_length")), None)}
+                        if digest:
+                            show_cache[digest] = cached
+                    except Exception as e:
+                        log.info("could not inspect %s: %s", entry["id"], e)
+                        cached = {"capabilities": [], "context_length": None}
+                entry.update(cached)
+
+            async def loaded():
                 try:
-                    info = await app.state.ollama.show(entry["id"])
-                    entry["capabilities"] = info.get("capabilities", [])
-                    entry["context_length"] = next(
-                        (v for k, v in info.get("model_info", {}).items() if k.endswith(".context_length")), None)
-                except Exception as e:
-                    entry["capabilities"] = []
-                    log.info("could not inspect %s: %s", entry["id"], e)
-            await asyncio.gather(*(caps(d) for d in data))
+                    return {m.get("name") or m.get("model") for m in await app.state.ollama.ps()}
+                except Exception:
+                    return set()
+            *_, running = await asyncio.gather(*(caps(d, m.get("digest")) for d, m in zip(data, models)), loaded())
+            for d in data:
+                d["loaded"] = d["id"] in running
         return {"object": "list", "data": data, "default": Config.DEFAULT_MODEL}
 
     @app.post("/v1/models/load")

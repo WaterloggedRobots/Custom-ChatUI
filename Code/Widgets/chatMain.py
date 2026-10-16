@@ -3,7 +3,7 @@ import paths
 
 from PySide6.QtWidgets import QMainWindow, QSizePolicy, QFileDialog, QComboBox, QCheckBox, QLabel, QMenu
 from PySide6.QtUiTools import QUiLoader
-from PySide6.QtCore import QFile, Qt, QObject, QEvent, QUrl
+from PySide6.QtCore import QFile, Qt, QObject, QEvent, QUrl, QTimer
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QDesktopServices
 import html
 import json
@@ -14,7 +14,20 @@ import time
 from datetime import datetime
 
 MUTED = "#8a8a8a"
+CAP_ICONS = (("vision", "👁"), ("thinking", "💭"), ("tools", "🔧"))
 WEB_LABELS = {"auto": "Web: Auto", "on": "Web: Always", "off": "Web: Off"}
+
+
+class LiveComboBox(QComboBox):
+    """A combo box that refreshes its items each time it is opened."""
+
+    def __init__(self, refresh, parent=None):
+        super().__init__(parent)
+        self._refresh = refresh
+
+    def showPopup(self):
+        self._refresh()
+        super().showPopup()
 
 
 class ShiftEnterFilter(QObject):
@@ -114,6 +127,7 @@ class ChatMain(QMainWindow):
                 self.hideChatList()
                 lastChat = self.get_lastChat()
                 self.load_chat(lastChat)
+                QTimer.singleShot(0, self.refresh_models)
 
         except Exception as e:
             print(f"Error loading UI: {e}")
@@ -124,6 +138,16 @@ class ChatMain(QMainWindow):
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(f"color:{MUTED}")
         bar.insertWidget(0, self.status_label, 1)
+
+        # Models come straight from Ollama through the server, refreshed whenever the list is opened.
+        self.models = {}
+        self.model_combo = LiveComboBox(self.refresh_models)
+        self.model_combo.setToolTip("Models on the server's Ollama. ● = loaded in memory, 👁 vision, "
+                                    "💭 thinking, 🔧 tools")
+        self.model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.model_combo.setStyleSheet("background:rgb(57,57,57);color:white")
+        self.model_combo.activated.connect(self.on_model_chosen)
+        bar.insertWidget(bar.count() - 1, self.model_combo)
 
         self.web_combo = QComboBox()
         for mode in llmClient.WEB_MODES:
@@ -166,6 +190,54 @@ class ChatMain(QMainWindow):
     # ------------------------------------------------------------------
     # Options and attachments
     # ------------------------------------------------------------------
+
+    def refresh_models(self):
+        """Ask the server which models Ollama has and fill the model list. Returns their names."""
+        found = [m for m in self.client.list_models()
+                 if "completion" in m.get("capabilities", ["completion"]) or not m.get("capabilities")]
+        if found or not self.models:
+            self.models = {m["id"]: m for m in found}
+        if not found:
+            self.status_label.setText(f"Can't get the model list from {self.client.base_url}")
+        self._fill_model_combo()
+        return list(self.models)
+
+    def _model_label(self, m):
+        icons = "".join(icon for cap, icon in CAP_ICONS if cap in m.get("capabilities", []))
+        size = m.get("parameter_size") or ""
+        return f"{'●' if m.get('loaded') else '○'} {m['id']}  {size} {icons}".rstrip()
+
+    def _fill_model_combo(self):
+        combo, current = self.model_combo, self.client.model_name
+        combo.blockSignals(True)
+        combo.clear()
+        for mid, m in self.models.items():
+            combo.addItem(self._model_label(m), mid)
+            ctx = m.get("context_length")
+            combo.setItemData(combo.count() - 1, ", ".join(
+                x for x in (m.get("parameter_size"), m.get("quantization"),
+                            f"context {ctx:,}" if ctx else None,
+                            "loaded" if m.get("loaded") else "not loaded") if x), Qt.ToolTipRole)
+        if current and current not in self.models:
+            combo.addItem(f"   {current} (not on the server)", current)
+        combo.setCurrentIndex(max(0, combo.findData(current)))
+        combo.blockSignals(False)
+        self._update_think_check()
+
+    def on_model_chosen(self, index):
+        model = self.model_combo.itemData(index)
+        if model and model != self.client.model_name:
+            self.client.set_model(model)
+            self.client.summary = None      # the old summary was written by another model; harmless to redo
+            self.save_chat()
+        self._update_think_check()
+
+    def _update_think_check(self):
+        caps = self.models.get(self.client.model_name, {}).get("capabilities")
+        can_think = not caps or "thinking" in caps
+        self.think_check.setEnabled(can_think)
+        self.think_check.setToolTip("Let the model reason before answering" if can_think
+                                    else f"{self.client.model_name} can't think; this setting is ignored")
 
     def on_options_changed(self, *_):
         self.client.web_mode = self.web_combo.currentData() or "auto"
@@ -545,6 +617,7 @@ class ChatMain(QMainWindow):
 
         self.load_bot(chatHist["Bot Path"])
         self.client.set_model(chatHist["Model"])
+        self._fill_model_combo()
         self.client.temperature = chatHist["Temperature"]
         self.client.summary = chatHist.get("Summary")
 

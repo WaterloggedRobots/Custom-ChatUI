@@ -102,7 +102,7 @@ class LLMClient(QObject):
     def list_models(self):
         """Models on the server, with capabilities when it reports them."""
         try:
-            r = requests.get(f"{self.base_url}/v1/models", params={"detailed": "true"}, timeout=5)
+            r = requests.get(f"{self.base_url}/v1/models", params={"detailed": "true"}, timeout=4)
             r.raise_for_status()
             return r.json().get("data", [])
         except requests.RequestException as e:

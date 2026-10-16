@@ -105,6 +105,12 @@ class Ollama:
         await self._raise_for(resp)
         return resp.json().get("models", [])
 
+    async def ps(self) -> List[Dict[str, Any]]:
+        """Models currently loaded in memory."""
+        resp = await self.http.get("/api/ps", timeout=10)
+        await self._raise_for(resp)
+        return resp.json().get("models", [])
+
     async def show(self, model: str) -> Dict[str, Any]:
         resp = await self.http.post("/api/show", json={"model": model}, timeout=30)
         await self._raise_for(resp)

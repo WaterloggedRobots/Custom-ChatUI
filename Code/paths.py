@@ -94,7 +94,7 @@ def save_server_address(ip: str, port: int):
 
 
 def split_address(text: str, default_port: int):
-    """'192.168.0.247:8100' or '192.168.0.247' -> (ip, port)."""
+    """'192.168.0.192:8100' or '192.168.0.192' -> (ip, port)."""
     text = text.strip().removeprefix("http://").rstrip("/")
     host, _, port = text.partition(":")
     return host, int(port) if port.isdigit() else default_port

@@ -57,15 +57,16 @@ The client now talks to the Ollama server in `Server/ollama` (see its README). E
 - **Read images and files.** The *File* button attaches images (sent to vision models), PDFs, Word documents and text or code files.
 - **Search the web.** *Web: Auto* lets the model decide when a question needs a search; *Always* and *Off* force it. Answers cite their sources, listed under the reply.
 
-Long chats keep the newest messages word for word and fold older ones into a running summary that is only refreshed every few messages. The server address can include a port (`192.168.0.247:8100`); the default port is 8100.
+Long chats keep the newest messages word for word and fold older ones into a running summary that is only refreshed every few messages. The server address can include a port (`192.168.0.192:8100`); the default port is 8100.
 
 ## Where things live
 | Name | Where | What |
 |---|---|---|
-| LLM server | `192.168.0.247:8100` (Ubuntu), code in `Server/ollama/` | Ollama wrapper the client talks to. Addresses: `Server/ollama/chat_server/config.py`, overrides in `Server/ollama/.env` |
+| LLM server | `192.168.0.192:8100` (Ubuntu), code in `Server/ollama/` | Ollama wrapper the client talks to. Addresses: `Server/ollama/chat_server/config.py`, overrides in `Server/ollama/.env` |
 | Client git folder | `Code/` (`paths.CLIENT_REPO_DIR`) | app files: UI layouts, images, default addresses in `Code/UI/network.json` |
 | Client data | `%APPDATA%\Waterlogged\ChatUI` (`paths.CLIENT_DATA_DIR`) | chats, bots, and your saved server address (`network.json`) |
-| NAS | `nas` entry in `Code/UI/network.json`, `NAS_IP` on the server | address kept for later; nothing uses it yet |
+| Client PC | `192.168.0.184` (Windows) | runs `Code/`; listed in `network.json` for reference |
+| NAS | `192.168.0.163` (Samba): `nas` in `Code/UI/network.json`, `NAS_IP` on the server | chat and bot saves move here next; nothing uses it yet |
 
 Every client path and address is defined once, in `Code/paths.py`.
 

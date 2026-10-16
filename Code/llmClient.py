@@ -78,7 +78,7 @@ class LLMClient(QObject):
         return f"{self.server_ip}:{self.server_port}"
 
     def set_server_address(self, text: str, save: bool = True):
-        """Accepts '192.168.0.247' or '192.168.0.247:8100'."""
+        """Accepts '192.168.0.192' or '192.168.0.192:8100'."""
         self.server_ip, self.server_port = paths.split_address(text, self.server_port)
         if save:
             paths.save_server_address(self.server_ip, self.server_port)

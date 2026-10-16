@@ -3,7 +3,7 @@ copy .env.example to .env to change them).
 
 Addresses at a glance:
   LLM server (this program)  listens on SERVER_BIND_IP:SERVER_PORT; clients use
-                             the machine's LAN IP, e.g. 192.168.0.247:8100
+                             the machine's LAN IP, e.g. 192.168.0.192:8100
   Ollama                     OLLAMA_URL, normally on this same machine
   NAS                        NAS_IP / NAS_MOUNT, recorded here; nothing uses them yet
 """

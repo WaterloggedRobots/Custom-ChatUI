@@ -15,13 +15,32 @@ OpenAI-style client, such as Futu-Network later) one chat endpoint that adds:
   Queries run in parallel on DuckDuckGo (Wikipedia as fallback), the top pages
   are read in parallel, and the model cites them as `[1]`, `[2]`.
 
+## Setup (Ubuntu 24.04)
+
+Run it straight from the git clone; no Docker is needed. The only
+prerequisites are Python 3.10+ and Ollama with at least one model pulled.
+Ubuntu 24.04 blocks `pip install` into the system Python, so use a virtual
+environment inside the clone (`.venv/` is git-ignored):
+
+```bash
+sudo apt install python3-venv          # once
+cd ~/Custom-ChatUI/Server/ollama        # wherever you cloned it
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m pytest -q tests     # optional: 14 tests, no Ollama needed
+```
+
 ## Run
 
 ```bash
-cd Server/ollama
-pip install -r requirements.txt
-DEFAULT_MODEL=gemma4:31b python ollama_server.py      # or ./run.sh
+ollama pull gemma4:31b                  # or any model you prefer
+.venv/bin/python ollama_server.py       # Ollama must already be running
+# or: ./run.sh   (opens Ollama and the server in two terminals)
 ```
+
+`run.sh` uses `.venv` when it exists, and falls back to `~/vllm-env` otherwise.
+After a `git pull`, restart the server; re-run the `pip install` line only if
+`requirements.txt` changed.
 
 It listens on **port 8100** (8000 belongs to the vLLM script). Settings are
 environment variables, or a `.env` file in this folder when started with

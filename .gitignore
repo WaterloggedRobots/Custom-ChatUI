@@ -2,6 +2,7 @@
 .env
 
 # Python / IDE artifacts
+.venv/
 __pycache__/
 *.pyc
 .idea/

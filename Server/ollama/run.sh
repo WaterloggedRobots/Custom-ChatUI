@@ -6,6 +6,8 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 gnome-terminal -- bash -c "ollama serve; exec bash"
 
-gnome-terminal -- bash -c "source ~/vllm-env/bin/activate; cd '$DIR'; set -a; [ -f .env ] && . ./.env; set +a; python ollama_server.py; exec bash"
+if [ -f "$DIR/.venv/bin/activate" ]; then VENV="$DIR/.venv"; else VENV="$HOME/vllm-env"; fi
+
+gnome-terminal -- bash -c "source '$VENV/bin/activate'; cd '$DIR'; set -a; [ -f .env ] && . ./.env; set +a; python ollama_server.py; exec bash"
 
 #gnome-terminal -- bash -c "source ~/functiongemma/functiongemma-env/bin/activate; python ~/functiongemma/functiongemma_server.py; exec bash"

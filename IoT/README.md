@@ -43,6 +43,14 @@ ignored. For 10 s after boot it prints `[PAIR] MAC: ...` every half second: copy
 `MERCURY_MAC`. After pairing, put the antenna's MAC in `ALLOWED_SENDER` so other ESP-NOW
 senders can't press the button.
 
+**The antenna doesn't need reflashing.** The Pi bridge and the relay work with the
+antenna sketch that is already on the XIAO: the serial format is the same. The version in
+`esp_antenna_bridge/` is optional. It fixes a read past the end of received data (the
+relay now sends a closing NUL, so the old sketch is safe), stops the harmless "Failed to add
+peer" log on every send after the first, and tags each reply with the request id of the
+last command sent to that device instead of the last command overall, which only matters
+once several devices are in use.
+
 Arduino IDE boards: "Generic ESP8266 Module" (esp8266 core 3.x) for the relay, "XIAO_ESP32C3"
 (esp32 core 3.3.x) for the antenna. Library: ArduinoJson (6 or 7).
 

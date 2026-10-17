@@ -71,7 +71,8 @@ void reply(uint8_t *to, JsonDocument &doc) {
   char out[250];
   size_t n = serializeJson(doc, out, sizeof(out));
   if (!esp_now_is_peer_exist(to)) esp_now_add_peer(to, ESP_NOW_ROLE_COMBO, CHANNEL, NULL, 0);
-  esp_now_send(to, (uint8_t *)out, n);
+  // Send the closing NUL too: the original antenna sketch reads the reply as a C string.
+  esp_now_send(to, (uint8_t *)out, n + 1);
   Serial.print("[REPLY] ");
   Serial.println(out);
 }

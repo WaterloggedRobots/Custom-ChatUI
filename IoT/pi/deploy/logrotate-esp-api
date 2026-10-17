@@ -1,0 +1,17 @@
+# /etc/logrotate.d/esp-api
+# Only Gunicorn's logs: esp-api.log is already rotated by the app itself (10 MB x 5).
+/var/log/esp-api/gunicorn-*.log {
+    su waterlogged waterlogged
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    create 644 waterlogged waterlogged
+    sharedscripts
+    postrotate
+        # USR1 makes Gunicorn reopen its log files without restarting the worker
+        systemctl kill -s USR1 --kill-whom=main esp-api.service > /dev/null 2>&1 || true
+    endscript
+}

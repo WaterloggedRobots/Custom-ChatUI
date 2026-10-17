@@ -1,0 +1,46 @@
+# /etc/nginx/sites-available/esp-api
+# Port 80 on the LAN -> Gunicorn on 127.0.0.1:8000.
+upstream esp_api_backend {
+    server 127.0.0.1:8000 fail_timeout=0;
+    keepalive 16;
+}
+
+server {
+    listen 80 default_server;
+    server_name _;
+
+    access_log /var/log/nginx/esp-api-access.log;
+    error_log /var/log/nginx/esp-api-error.log;
+
+    # Commands are tiny JSON bodies (ESP-NOW carries at most 250 bytes)
+    client_max_body_size 16k;
+
+    location /api/ {
+        proxy_pass http://esp_api_backend;
+        proxy_http_version 1.1;
+        # Empty Connection header keeps the upstream keepalive working (no WebSockets here)
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 30s;
+        # Above the API's longest ?wait (15 s)
+        proxy_read_timeout 30s;
+    }
+
+    # Short health URL, not logged
+    location = /health {
+        proxy_pass http://esp_api_backend/api/health;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        access_log off;
+    }
+
+    location / {
+        default_type text/plain;
+        return 200 "ESP API server is running\n";
+    }
+}

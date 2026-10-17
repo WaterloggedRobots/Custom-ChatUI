@@ -1,0 +1,24 @@
+# /etc/systemd/system/espnow-bridge.service
+# MQTT <-> USB serial bridge to the XIAO ESP32-C3 antenna. Change "waterlogged" if your user differs.
+[Unit]
+Description=ESP-NOW serial bridge (MQTT <-> antenna)
+After=mosquitto.service
+Wants=mosquitto.service
+
+[Service]
+Type=simple
+User=waterlogged
+Group=waterlogged
+SupplementaryGroups=dialout
+WorkingDirectory=/home/waterlogged/Custom-ChatUI/IoT/pi
+Environment=MQTT_BROKER=localhost
+Environment=MQTT_PORT=1883
+Environment=ESPNOW_SERIAL=/dev/ttyACM0
+Environment=ESPNOW_BAUD=115200
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/waterlogged/esp-gateway-env/bin/python espnow_serial_bridge.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

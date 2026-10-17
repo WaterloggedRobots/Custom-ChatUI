@@ -1,0 +1,29 @@
+# /etc/systemd/system/esp-api.service
+# HTTP API -> MQTT (esp_api_server.py under Gunicorn). Change "waterlogged" if your user differs.
+[Unit]
+Description=ESP API server (Gunicorn)
+After=network-online.target mosquitto.service
+Wants=network-online.target mosquitto.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=waterlogged
+Group=waterlogged
+WorkingDirectory=/home/waterlogged/Custom-ChatUI/IoT/pi
+Environment=PATH=/home/waterlogged/esp-gateway-env/bin:/usr/bin:/bin
+Environment=MQTT_BROKER=localhost
+Environment=MQTT_PORT=1883
+Environment=ESP_API_LOG_DIR=/var/log/esp-api
+# ESP_API_TOKEN goes here, readable only by root (the leading "-" makes the file optional)
+EnvironmentFile=-/etc/esp-api.env
+ExecStart=/home/waterlogged/esp-gateway-env/bin/gunicorn --config gunicorn_config.py esp_api_server:app
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=15
+PrivateTmp=true
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+{
+    "_about": "Default network addresses (LAN as of 2026-10-16, after the router reset). Server > Set IP saves your own copy in the client data folder (see Code/paths.py).",
+    "llm_server": {
+        "_about": "Ubuntu machine running Server/ollama/ollama_server.py",
+        "ip": "192.168.0.192",
+        "port": 8100
+    },
+    "client": {
+        "_about": "This Windows PC. For reference only; the client never needs its own IP.",
+        "ip": "192.168.0.184"
+    },
+    "nas": {
+        "_about": "Samba NAS. Chat and bot saves move here in the next step; not used yet.",
+        "ip": "192.168.0.163",
+        "share": ""
+    }
+}

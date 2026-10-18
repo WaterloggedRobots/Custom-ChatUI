@@ -15,12 +15,18 @@ One request goes through at most three steps:
 3. The answer is streamed. Reasoning comes from the model's native thinking
    channel (`think`), kept separate from the answer, instead of a prompted
    chain of thought mixed into the reply.
+
+Tools (OpenAI `tools`) are passed through to Ollama. The server does not run
+them: when the model calls one, the calls are streamed back and the client
+runs them (they act on the client's PC) and sends the results in the next
+request as `role: tool` messages.
 """
 
 import json
 import logging
 import re
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
@@ -56,6 +62,7 @@ class ChatJob:
     options: Dict[str, Any] = field(default_factory=dict)
     format: Optional[Union[str, Dict[str, Any]]] = None
     keep_alive: Optional[Union[int, str]] = None
+    tools: Optional[List[Dict[str, Any]]] = None
     prepared: Optional[List[Dict[str, Any]]] = None   # Ollama-shape messages, see prepare()
 
 
@@ -121,9 +128,38 @@ def to_ollama_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if role == "assistant":
             # Earlier turns' reasoning is not sent back; the answer is enough.
             msg["content"] = strip_think_tags(msg["content"])
+            if m.get("tool_calls"):
+                msg["tool_calls"] = [_ollama_tool_call(c) for c in m["tool_calls"]]
+        if role == "tool":
+            name = m.get("name") or m.get("tool_name")
+            if name:
+                msg["tool_name"] = name
         if m.get("images") and role == "user":   # Ollama-style images pass straight through
             msg.setdefault("images", []).extend(m["images"])
         out.append(msg)
+    return out
+
+
+def _ollama_tool_call(call: Dict[str, Any]) -> Dict[str, Any]:
+    """OpenAI tool call (arguments as a JSON string) -> Ollama (arguments as an object)."""
+    fn = call.get("function") or {}
+    args = fn.get("arguments") or {}
+    if isinstance(args, str):
+        try:
+            args = json.loads(args) if args.strip() else {}
+        except ValueError:
+            args = {}
+    return {"function": {"name": fn.get("name", ""), "arguments": args}}
+
+
+def openai_tool_calls(calls: List[Dict[str, Any]], start: int = 0) -> List[Dict[str, Any]]:
+    """Ollama tool calls -> OpenAI shape, with ids so the client can match the results."""
+    out = []
+    for i, c in enumerate(calls, start):
+        fn = c.get("function") or {}
+        out.append({"index": i, "id": c.get("id") or f"call_{uuid.uuid4().hex[:12]}", "type": "function",
+                    "function": {"name": fn.get("name", ""),
+                                 "arguments": json.dumps(fn.get("arguments") or {}, ensure_ascii=False)}})
     return out
 
 
@@ -456,10 +492,13 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient) -> Asy
         payload["think"] = think
     if job.format is not None:
         payload["format"] = job.format
+    if job.tools:
+        payload["tools"] = job.tools
 
     used = {"prompt": 0, "completion": 0}
     final: Dict[str, Any] = {}
     thought = False
+    tool_calls: List[Dict[str, Any]] = []
     for attempt in (1, 2):
         splitter = ThinkSplitter()
         sniffer = SearchSniffer() if model_decides and attempt == 1 else None
@@ -481,6 +520,10 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient) -> Asy
                             yield Event(kind, text)
                     if sniffer and sniffer.mode == "search":
                         break                      # stop the answer; closing the stream stops Ollama
+                if msg.get("tool_calls"):
+                    calls = openai_tool_calls(msg["tool_calls"], len(tool_calls))
+                    tool_calls += calls
+                    yield Event("tool_calls", calls)
                 if chunk.get("done"):
                     final = chunk
         finally:
@@ -508,7 +551,7 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient) -> Asy
 
     prompt_tokens, completion_tokens = used["prompt"], used["completion"]
     yield Event("done", {
-        "finish_reason": "length" if final.get("done_reason") == "length" else "stop",
+        "finish_reason": "tool_calls" if tool_calls else "length" if final.get("done_reason") == "length" else "stop",
         "usage": {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,

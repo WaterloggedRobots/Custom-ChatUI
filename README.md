@@ -59,6 +59,14 @@ The client now talks to the Ollama server in `Server/ollama` (see its README). E
 
 Long chats keep the newest messages word for word and fold older ones into a running summary that is only refreshed every few messages. The server address can include a port (`192.168.0.192:8100`); the default port is 8100.
 
+## 2.6. Tools on your PC: files, git and terminal
+With *Tools* ticked (models marked 🔧 in the model list), the model can work on the Windows PC the client runs on, not only on files you attach:
+- **Files and folders:** list folders, find files by name, search inside files, read text files (PDF and Word through the server), create, edit, copy, move and delete (to the Recycle Bin).
+- **Git:** status, diff, log, show and branches; add, commit, switch, pull, push and clone; any other git command.
+- **Terminal:** runs PowerShell (or cmd) commands and reads their output.
+
+Reading never asks. Every change and every command opens an *Allow / Always allow / Deny* box first, showing exactly what will run ("Show Details" has the full arguments); *Always allow* lasts until the app is closed. The 📁 button sets the working folder that relative paths, git and commands start from; each chat remembers its own. The tools run in the client (`Code/local_tools/`), so the server never touches your files. Git must be installed (Git for Windows). Tests: `cd Code` then `python -m pytest -q tests`.
+
 ## Where things live
 | Name | Where | What |
 |---|---|---|

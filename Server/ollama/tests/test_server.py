@@ -55,6 +55,16 @@ class FakeOllama:
             if body.get("think"):
                 lines += [{"message": {"role": "assistant", "content": "", "thinking": "Let me think. "}, "done": False},
                           {"message": {"role": "assistant", "content": "", "thinking": "Done."}, "done": False}]
+            if body.get("tools") and body["model"].startswith("plain"):
+                return httpx.Response(400, json={"error": f"{body['model']} does not support tools"})
+            if body.get("tools") and body["messages"][-1]["role"] != "tool":
+                call = {"function": {"name": "list_directory", "arguments": {"path": "C:/Users"}}}
+                lines += [{"message": {"role": "assistant", "content": "", "tool_calls": [call]}, "done": False},
+                          {"message": {"role": "assistant", "content": ""}, "done": True, "done_reason": "stop",
+                           "prompt_eval_count": 5, "eval_count": 3}]
+                if not body.get("stream", True):
+                    return httpx.Response(200, json={**lines[-1], "message": lines[0]["message"]})
+                return httpx.Response(200, content="\n".join(json.dumps(ln) for ln in lines).encode())
             wants_search = (self.search_tag and any("<search>" in m.get("content", "") for m in body["messages"]
                                                     if m["role"] == "system")
                             and "<web_results" not in body["messages"][-1]["content"])
@@ -311,3 +321,65 @@ def test_fit_context_drops_in_blocks_so_the_start_stays_put():
             {"role": "user" if i % 2 == 0 else "assistant", "content": f"{i}" + "x" * 3000} for i in range(n)]
     firsts = {fit_context(chat(n), num_ctx=8192, reserve=1024)[1]["content"][:3] for n in range(12, 17)}
     assert len(firsts) <= 2          # five turns, at most one change of starting message
+
+
+TOOLS = [{"type": "function", "function": {"name": "list_directory", "description": "List a folder",
+                                           "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}}]
+
+
+def test_tool_calls_stream_back_to_the_client(env):
+    client, fake, _ = env
+    with client.stream("POST", "/v1/chat/completions", json={
+            "model": "gemma4:31b", "stream": True, "think": False, "tools": TOOLS,
+            "messages": [{"role": "user", "content": "what's in C:/Users?"}]}) as r:
+        events = sse(r)
+    assert fake.requests[-1]["tools"] == TOOLS
+    calls = [c for e in events if isinstance(e, dict) for ch in e.get("choices", [])
+             for c in ch["delta"].get("tool_calls", [])]
+    assert len(calls) == 1 and calls[0]["function"]["name"] == "list_directory"
+    assert json.loads(calls[0]["function"]["arguments"]) == {"path": "C:/Users"}
+    assert calls[0]["id"].startswith("call_")
+    finish = [ch["finish_reason"] for e in events if isinstance(e, dict) for ch in e.get("choices", [])
+              if ch.get("finish_reason")]
+    assert finish == ["tool_calls"]
+
+
+def test_tool_results_go_back_to_ollama_in_its_shape(env):
+    client, fake, _ = env
+    r = client.post("/v1/chat/completions", json={
+        "model": "gemma4:31b", "think": False, "tools": TOOLS, "messages": [
+            {"role": "user", "content": "what's in C:/Users?"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "call_1", "type": "function",
+                 "function": {"name": "list_directory", "arguments": "{\"path\": \"C:/Users\"}"}}]},
+            {"role": "tool", "tool_call_id": "call_1", "name": "list_directory", "content": "Public/\nwaterlogged/"}]})
+    assert r.status_code == 200
+    sent = fake.requests[-1]["messages"]
+    assert sent[1]["tool_calls"] == [{"function": {"name": "list_directory", "arguments": {"path": "C:/Users"}}}]
+    assert sent[1]["content"] == ""
+    assert sent[2] == {"role": "tool", "content": "Public/\nwaterlogged/", "tool_name": "list_directory"}
+    body = r.json()
+    assert body["choices"][0]["message"]["content"] == "Hello world [1]"
+    assert "tool_calls" not in body["choices"][0]["message"]
+
+
+def test_non_streamed_tool_call(env):
+    client, _, _ = env
+    r = client.post("/v1/chat/completions", json={
+        "model": "gemma4:31b", "think": False, "tools": TOOLS,
+        "messages": [{"role": "user", "content": "list C:/Users"}]}).json()
+    choice = r["choices"][0]
+    assert choice["finish_reason"] == "tool_calls"
+    assert choice["message"]["tool_calls"][0]["function"]["name"] == "list_directory"
+    assert "index" not in choice["message"]["tool_calls"][0]
+
+
+def test_model_without_tools_is_retried_without_them(env):
+    client, fake, _ = env
+    with client.stream("POST", "/v1/chat/completions", json={
+            "model": "plain:7b", "stream": True, "tools": TOOLS,
+            "messages": [{"role": "user", "content": "hi"}]}) as r:
+        events = sse(r)
+    text = "".join(ch["delta"].get("content", "") for e in events if isinstance(e, dict) for ch in e.get("choices", []))
+    assert text == "Hello world [1]"
+    assert "tools" not in fake.requests[-1]

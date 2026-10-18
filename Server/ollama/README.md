@@ -104,6 +104,15 @@ Standard fields (`model`, `messages`, `stream`, `temperature`, `top_p`,
 (`[{"n", "title", "url"}]`). The last chunk has `usage` with Ollama's real
 token counts.
 
+`tools` (OpenAI function tools) are passed to Ollama, but the server never runs
+them. When the model calls one, the stream carries `delta.tool_calls` (OpenAI
+shape, arguments as a JSON string, with an `id`) and ends with
+`finish_reason: "tool_calls"`. The caller runs the tools and sends the results
+in its next request as `{"role": "tool", "tool_call_id", "name", "content"}`
+after the assistant message that holds the `tool_calls`. The ChatUI client uses
+this for its file, git and terminal tools, which act on the Windows PC. A model
+that can't call tools is retried without them.
+
 ## Why Python and not C++
 
 The time per request is spent in model inference on the GPU and in waiting on

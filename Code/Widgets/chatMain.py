@@ -1,7 +1,8 @@
 import llmClient
 import paths
 
-from PySide6.QtWidgets import QMainWindow, QSizePolicy, QFileDialog, QComboBox, QCheckBox, QLabel, QMenu
+from PySide6.QtWidgets import (QMainWindow, QSizePolicy, QFileDialog, QComboBox, QCheckBox, QLabel, QMenu,
+                               QMessageBox, QPushButton)
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, Qt, QObject, QEvent, QUrl, QTimer
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QDesktopServices
@@ -16,6 +17,7 @@ from datetime import datetime
 MUTED = "#8a8a8a"
 CAP_ICONS = (("vision", "👁"), ("thinking", "💭"), ("tools", "🔧"))
 WEB_LABELS = {"auto": "Web: Auto", "on": "Web: Always", "off": "Web: Off"}
+TOOL_STATE_ICONS = {"ok": "✓", "error": "⚠", "declined": "✗ declined"}
 
 
 class LiveComboBox(QComboBox):
@@ -69,7 +71,8 @@ class ChatMain(QMainWindow):
     payload behind. Each message is a dict:
       user:      role, content (plain text), ts, attachments [{name, path, kind}]
       assistant: role, content (markdown), ts, response_time,
-                 thinking, thinking_time, sources [{n, title, url}], usage
+                 thinking, thinking_time, sources [{n, title, url}], usage,
+                 tools [{name, summary, kind, state, output}]
     """
 
     def __init__(self):
@@ -84,6 +87,7 @@ class ChatMain(QMainWindow):
         self.chat_path = None  # active chat file path
         self.pending_attachments = []
         self.expanded_thinking = set()   # indices of assistant messages showing their reasoning
+        self.expanded_tools = set()      # indices of assistant messages showing their tool output
 
         # Streaming state
         self.response_start_pos = None
@@ -98,6 +102,8 @@ class ChatMain(QMainWindow):
         self.client.status.connect(self.on_status)
         self.client.done.connect(self.on_done)
         self.client.error.connect(self.on_error)
+        self.client.tool_event.connect(self.on_tool_event)
+        self.client.approval_needed.connect(self.on_approval_needed)
 
         self.load_ui()
         self.setup_connections()
@@ -159,6 +165,19 @@ class ChatMain(QMainWindow):
         self.think_check.setToolTip("Let the model reason before answering (thinking models only)")
         bar.insertWidget(bar.count() - 1, self.web_combo)
         bar.insertWidget(bar.count() - 1, self.think_check)
+
+        # Tools on this PC: files, git and terminal (local_tools/). Changes and commands ask first.
+        self.tools_check = QCheckBox("Tools")
+        self.tools_check.setChecked(True)
+        self.tools_check.setToolTip("Let the model browse and edit files, use git and run commands on this PC. "
+                                    "It asks you before any change or command.")
+        self.folder_button = QPushButton("📁")
+        self.folder_button.setStyleSheet("background:rgb(57,57,57);color:white")
+        self.folder_button.clicked.connect(self.choose_tools_folder)
+        bar.insertWidget(bar.count() - 1, self.tools_check)
+        bar.insertWidget(bar.count() - 1, self.folder_button)
+        self.tools_check.toggled.connect(self.on_options_changed)
+        self._show_tools_folder()
         self.ui.label.setText("0.5.0")
 
         self.web_combo.currentIndexChanged.connect(self.on_options_changed)
@@ -238,10 +257,60 @@ class ChatMain(QMainWindow):
         self.think_check.setEnabled(can_think)
         self.think_check.setToolTip("Let the model reason before answering" if can_think
                                     else f"{self.client.model_name} can't think; this setting is ignored")
+        can_call = not caps or "tools" in caps
+        self.tools_check.setEnabled(can_call)
+        if not can_call:
+            self.tools_check.setToolTip(f"{self.client.model_name} can't call tools; pick a model marked 🔧")
+        self.on_options_changed()
 
     def on_options_changed(self, *_):
         self.client.web_mode = self.web_combo.currentData() or "auto"
         self.client.think = self.think_check.isChecked()
+        self.client.tools_enabled = self.tools_check.isChecked() and self.tools_check.isEnabled()
+
+    def choose_tools_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Working folder for tools", str(self.client.toolbox.working_dir))
+        if folder:
+            self.client.toolbox.working_dir = Path(folder)
+            self._show_tools_folder()
+            self.save_chat()
+
+    def _show_tools_folder(self):
+        self.folder_button.setToolTip(f"Working folder for tools: {self.client.toolbox.working_dir}\n"
+                                      "Relative paths, git and commands start here. Click to change.")
+
+    def on_tool_event(self, ev):
+        if ev["state"] == "running":
+            self.status_label.setText("🔧 " + ev["summary"].splitlines()[0])
+            return
+        if self.response_start_pos is None:
+            return
+        if self.stream_phase == "thinking":
+            if self.thinking_time is None:
+                self.thinking_time = round(time.time() - self.thinking_started_at, 1)
+            self._insert_stream("\n\n")
+        self.stream_phase = "tools"
+        self._insert_stream(f"🔧 {ev['summary'].splitlines()[0]}  {TOOL_STATE_ICONS.get(ev['state'], '')}\n", muted=True)
+        self._show_tools_folder()
+
+    def on_approval_needed(self, req):
+        """A change or command wants to run; the worker thread waits for the answer."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning if req["kind"] == "run" else QMessageBox.Question)
+        box.setWindowTitle("Allow this command?" if req["kind"] == "run" else "Allow this change?")
+        box.setText(f"{html.escape(self.botName)} wants to:<br/><br/><b>"
+                    + html.escape(req["summary"]).replace("\n", "<br/>") + "</b>")
+        box.setTextFormat(Qt.RichText)
+        box.setDetailedText(req.get("details", ""))
+        allow = box.addButton("Allow", QMessageBox.AcceptRole)
+        always = box.addButton(f"Always allow {req['name']}", QMessageBox.AcceptRole)
+        deny = box.addButton("Deny", QMessageBox.RejectRole)
+        box.setDefaultButton(deny)
+        box.setEscapeButton(deny)
+        self.status_label.setText("Waiting for your OK…")
+        box.exec()
+        clicked = box.clickedButton()
+        self.client.answer_approval("allow" if clicked is allow else "always" if clicked is always else "deny")
 
     def on_file_button(self):
         if not self.pending_attachments:
@@ -309,6 +378,19 @@ class ChatMain(QMainWindow):
                              f"<div style='color:{MUTED};font-size:12px;margin-left:12px'><i>{body}</i></div>")
             else:
                 parts.append(f"<a href='think:{index}' style='color:{MUTED};text-decoration:none'>💭 {label} ▸</a>")
+        tools = msg.get("tools") or []
+        if tools:
+            open_ = index in self.expanded_tools
+            lines = []
+            for t in tools:
+                line = f"🔧 {html.escape(t['summary'].splitlines()[0])}  {TOOL_STATE_ICONS.get(t['state'], '')}"
+                if open_ and t.get("output"):
+                    out = html.escape(t["output"]).replace("\n", "<br/>")
+                    line += f"<div style='font-family:Consolas,monospace;font-size:11px;margin-left:16px'>{out}</div>"
+                lines.append(line)
+            parts.append(f"<a href='tools:{index}' style='color:{MUTED};text-decoration:none'>"
+                         f"Used {len(tools)} tool{'s' if len(tools) != 1 else ''} {'▾' if open_ else '▸'}</a>"
+                         f"<div style='color:{MUTED};font-size:12px;margin-left:12px'>{'<br/>'.join(lines)}</div>")
         parts.append(self.render_markdown(msg.get("content", "")))
         sources = msg.get("sources") or []
         if sources:
@@ -360,6 +442,11 @@ class ChatMain(QMainWindow):
             idx = int(target.split(":", 1)[1])
             self.expanded_thinking ^= {idx}
             self._rebuild_chat_ui(keep_scroll=True)
+        elif target.startswith("tools:"):
+            if self.client.busy:
+                return
+            self.expanded_tools ^= {int(target.split(":", 1)[1])}
+            self._rebuild_chat_ui(keep_scroll=True)
         elif url.scheme() in ("http", "https"):
             QDesktopServices.openUrl(url)
 
@@ -395,6 +482,9 @@ class ChatMain(QMainWindow):
             self.thinking_started_at = time.time()
             self._insert_stream("💭 Thinking…\n", muted=True)
             self.stream_phase = "thinking"
+        elif self.stream_phase != "thinking":       # thinking again after tool results
+            self._insert_stream("\n" if self.stream_phase == "answer" else "", muted=True)
+            self.stream_phase = "thinking"
         self._insert_stream(text, muted=True)
 
     def on_token(self, text):
@@ -402,7 +492,8 @@ class ChatMain(QMainWindow):
             return
         if self.stream_phase != "answer":
             if self.stream_phase == "thinking":
-                self.thinking_time = round(time.time() - self.thinking_started_at, 1)
+                if self.thinking_time is None:
+                    self.thinking_time = round(time.time() - self.thinking_started_at, 1)
                 self._insert_stream("\n\n")
             self.stream_phase = "answer"
         self._insert_stream(text)
@@ -442,6 +533,8 @@ class ChatMain(QMainWindow):
             msg["thinking_time"] = self.thinking_time or round(end_time - (self.thinking_started_at or end_time), 1)
         if result.get("sources"):
             msg["sources"] = result["sources"]
+        if result.get("tools"):
+            msg["tools"] = result["tools"]
         if result.get("usage"):
             msg["usage"] = result["usage"]
         if result.get("aborted"):
@@ -628,6 +721,13 @@ class ChatMain(QMainWindow):
         self.think_check.blockSignals(True)
         self.think_check.setChecked(chatHist.get("Think", True))
         self.think_check.blockSignals(False)
+        self.tools_check.blockSignals(True)
+        self.tools_check.setChecked(chatHist.get("Tools", True))
+        self.tools_check.blockSignals(False)
+        folder = chatHist.get("Tools Folder")
+        if folder and Path(folder).is_dir():
+            self.client.toolbox.working_dir = Path(folder)
+        self._show_tools_folder()
         self.on_options_changed()
 
         self.ui.listWidget.clear()
@@ -636,6 +736,7 @@ class ChatMain(QMainWindow):
             self.ui.listWidget.addItem(chatFile)
 
         self.expanded_thinking = set()
+        self.expanded_tools = set()
         self.clear_attachments()
         self._rebuild_chat_ui()
 
@@ -650,6 +751,8 @@ class ChatMain(QMainWindow):
             "Model": self.client.model_name,
             "Web Search": self.client.web_mode,
             "Think": self.client.think,
+            "Tools": self.tools_check.isChecked(),
+            "Tools Folder": str(self.client.toolbox.working_dir),
             "Chat": self.chat_markdown,
             "Summary": self.client.summary,
             "Payload": self.client.export_payload(self.chat_markdown),
@@ -785,6 +888,7 @@ class ChatMain(QMainWindow):
             return
         del self.chat_markdown[i + 1:]
         self.expanded_thinking = {x for x in self.expanded_thinking if x <= i}
+        self.expanded_tools = {x for x in self.expanded_tools if x <= i}
         self._rebuild_chat_ui()
         self._start_response()
 

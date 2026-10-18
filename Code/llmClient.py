@@ -10,7 +10,12 @@ builds its message list from it here:
 - images and files attached to recent user messages are sent inline
   (OpenAI content parts); older ones are replaced by a short note;
 - the model's reasoning is requested with `think` and streamed separately,
-  and is never sent back as context.
+  and is never sent back as context;
+- with tools on, the model can use this PC's files, git and terminal
+  (local_tools/). The server streams the model's tool calls back; they run
+  here (changes and commands only after you allow them in the GUI), and the
+  results go back to the model in the next request, for up to
+  MAX_TOOL_ROUNDS rounds per answer.
 """
 
 import base64
@@ -23,6 +28,7 @@ import requests
 from PySide6.QtCore import QObject, Signal
 
 import paths
+from local_tools import ToolBox
 
 DEFAULT_PORT = 8100
 
@@ -34,6 +40,8 @@ MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 WEB_MODES = ("auto", "on", "off")
+MAX_TOOL_ROUNDS = 12          # tool calls the model may make in a row before it must answer
+TOOL_LOG_CHARS = 3000         # how much of each tool result is kept in the saved chat
 
 
 def attachment_kind(path) -> str:
@@ -50,8 +58,11 @@ class LLMClient(QObject):
     thinking = Signal(str)     # reasoning text, as it streams
     status = Signal(str)       # "Searching: …" and similar; "" clears it
     sources = Signal(list)     # [{"n", "title", "url"}]
-    done = Signal(dict)        # {"content", "thinking", "sources", "usage", "timings", "aborted"}
+    done = Signal(dict)        # {"content", "thinking", "sources", "tools", "usage", "timings", "aborted"}
     error = Signal(str)
+    tool_event = Signal(dict)  # {"name", "summary", "kind", "state": running|ok|error|declined, "output"}
+    # A change or command wants to run: {"name", "summary", "kind", "details"}. Answer with answer_approval().
+    approval_needed = Signal(dict)
 
     def __init__(self):
         super().__init__()
@@ -70,6 +81,11 @@ class LLMClient(QObject):
         self._worker = None
         self._abort = threading.Event()
         self._response = None
+
+        self.tools_enabled = True
+        self.toolbox = ToolBox(extract_text=self._extract_text)
+        self._approval = threading.Event()
+        self._approval_answer = "deny"
 
     # ------------------------------------------------------------- settings
 
@@ -108,6 +124,14 @@ class LLMClient(QObject):
         except requests.RequestException as e:
             print(f"❌ Could not list models: {e}")
             return []
+
+    def _extract_text(self, path: Path) -> str:
+        """PDF/Word text for read_file, from the server's extractor."""
+        with open(path, "rb") as f:
+            r = requests.post(f"{self.base_url}/v1/files/extract", files={"file": (path.name, f)}, timeout=120)
+        if r.status_code != 200:
+            raise RuntimeError(f"the server could not read {path.name}: {r.text[:300]}")
+        return r.json().get("text", "")
 
     # ------------------------------------------------------------ messages
 
@@ -154,10 +178,17 @@ class LLMClient(QObject):
             messages.append({"role": "system", "content": f"Summary of the earlier conversation:\n{summary_text}"})
         user_idx = [i for i, m in enumerate(recent) if m["role"] == "user"]
         full = set(user_idx[-ATTACHMENT_TURNS:])
+        if self.tools_enabled:
+            messages.append({"role": "system", "content": self.toolbox.system_note()})
         for i, m in enumerate(recent):
             if m["role"] not in ("user", "assistant"):
                 continue
-            messages.append({"role": m["role"], "content": self._content(m, i in full)})
+            content = self._content(m, i in full)
+            if m.get("tools"):
+                # Earlier tool use, in one line each, so follow-up questions have the context.
+                used = "\n".join(f"- {t['summary'].splitlines()[0]} ({t['state']})" for t in m["tools"])
+                content = f"[Tools used for this answer:\n{used}]\n\n{content}"
+            messages.append({"role": m["role"], "content": content})
         return messages
 
     def export_payload(self, history):
@@ -212,6 +243,7 @@ class LLMClient(QObject):
 
     def abort_generation(self):
         self._abort.set()
+        self._approval.set()
         r = self._response
         if r is not None:
             try:
@@ -219,56 +251,143 @@ class LLMClient(QObject):
             except Exception:
                 pass
 
+    def answer_approval(self, answer: str):
+        """From the GUI: "allow", "always" (this tool, until the app closes) or "deny"."""
+        self._approval_answer = answer
+        self._approval.set()
+
+    def _ask_approval(self, name, summary, kind, args) -> bool:
+        if not self.toolbox.needs_approval(name):
+            return True
+        self._approval.clear()
+        self._approval_answer = "deny"
+        details = json.dumps(args, indent=2, ensure_ascii=False)
+        self.approval_needed.emit({"name": name, "summary": summary, "kind": kind,
+                                   "details": details[:8000] + ("\n…" if len(details) > 8000 else "")})
+        self._approval.wait()
+        if self._abort.is_set():
+            return False
+        if self._approval_answer == "always":
+            self.toolbox.always_allow.add(name)
+        return self._approval_answer in ("allow", "always")
+
+    def _run_tools(self, calls, result):
+        """Run the model's tool calls in order; returns the role=tool messages."""
+        replies = []
+        for call in calls:
+            fn = call.get("function") or {}
+            name = fn.get("name", "")
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+                if not isinstance(args, dict):
+                    raise ValueError("arguments must be an object")
+            except ValueError as e:
+                args, output, state = {}, f"Error: arguments were not valid JSON ({e})", "error"
+            else:
+                state = None
+            summary = self.toolbox.describe(name, args)
+            kind = self.toolbox.kind(name)
+            if state is None:
+                if self._abort.is_set():
+                    break
+                if self._ask_approval(name, summary, kind, args):
+                    self.tool_event.emit({"name": name, "summary": summary, "kind": kind, "state": "running"})
+                    output = self.toolbox.run(name, args)
+                    state = "error" if output.startswith("Error:") else "ok"
+                elif self._abort.is_set():
+                    break
+                else:
+                    output, state = "The user declined this action. Don't try it again; ask them or carry on without it.", "declined"
+            entry = {"name": name, "summary": summary, "kind": kind, "state": state,
+                     "output": output[:TOOL_LOG_CHARS] + ("…" if len(output) > TOOL_LOG_CHARS else "")}
+            result["tools"].append(entry)
+            self.tool_event.emit(entry)
+            replies.append({"role": "tool", "tool_call_id": call.get("id", ""), "name": name, "content": output})
+        return replies
+
+    def _stream(self, payload, result):
+        """One streamed request. Adds text to `result`; returns (this round's text, tool calls)."""
+        text, calls = "", {}
+        with requests.post(f"{self.base_url}/v1/chat/completions", json=payload, stream=True,
+                           timeout=(10, 600)) as r:
+            self._response = r
+            if r.status_code != 200:
+                try:
+                    msg = r.json()["error"]["message"]
+                except Exception:
+                    msg = r.text
+                raise RuntimeError(f"Server error {r.status_code}: {msg}")
+            for line in r.iter_lines(decode_unicode=True):
+                if self._abort.is_set():
+                    result["aborted"] = True
+                    break
+                if not line or not line.startswith("data: "):
+                    continue
+                data = line[6:]
+                if data == "[DONE]":
+                    break
+                chunk = json.loads(data)
+                if "error" in chunk:
+                    raise RuntimeError(chunk["error"].get("message", str(chunk["error"])))
+                if "status" in chunk:
+                    self.status.emit(chunk["status"])
+                if "sources" in chunk:
+                    result["sources"] = chunk["sources"]
+                    self.sources.emit(chunk["sources"])
+                if chunk.get("usage"):
+                    for k, v in chunk["usage"].items():
+                        result["usage"][k] = result["usage"].get(k, 0) + v
+                    result["timings"] = chunk.get("timings", {})
+                for choice in chunk.get("choices") or []:
+                    delta = choice.get("delta") or {}
+                    if delta.get("reasoning_content"):
+                        result["thinking"] += delta["reasoning_content"]
+                        self.thinking.emit(delta["reasoning_content"])
+                    if delta.get("content"):
+                        text += delta["content"]
+                        result["content"] += delta["content"]
+                        self.token.emit(delta["content"])
+                    for tc in delta.get("tool_calls") or []:
+                        # OpenAI streams may split one call over several chunks, keyed by index.
+                        slot = calls.setdefault(tc.get("index", len(calls)),
+                                                {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                        slot["id"] = tc.get("id") or slot["id"]
+                        fn = tc.get("function") or {}
+                        slot["function"]["name"] += fn.get("name") or ""
+                        slot["function"]["arguments"] += fn.get("arguments") or ""
+        return text, [calls[k] for k in sorted(calls)]
+
     def _run(self, history):
-        result = {"content": "", "thinking": "", "sources": [], "usage": {}, "timings": {}, "aborted": False}
+        result = {"content": "", "thinking": "", "sources": [], "tools": [], "usage": {}, "timings": {},
+                  "aborted": False}
         try:
             older, _ = self._split_history(history)
             summary = self._summary_for(older)
-            payload = {
-                "model": self.model_name,
-                "messages": self.build_messages(history, summary),
-                "temperature": self.temperature,
-                "think": self.think,
-                "web_search": self.web_mode,
-                "stream": True,
-            }
-            with requests.post(f"{self.base_url}/v1/chat/completions", json=payload, stream=True,
-                               timeout=(10, 600)) as r:
-                self._response = r
-                if r.status_code != 200:
-                    try:
-                        msg = r.json()["error"]["message"]
-                    except Exception:
-                        msg = r.text
-                    raise RuntimeError(f"Server error {r.status_code}: {msg}")
-                for line in r.iter_lines(decode_unicode=True):
-                    if self._abort.is_set():
-                        result["aborted"] = True
-                        break
-                    if not line or not line.startswith("data: "):
-                        continue
-                    data = line[6:]
-                    if data == "[DONE]":
-                        break
-                    chunk = json.loads(data)
-                    if "error" in chunk:
-                        raise RuntimeError(chunk["error"].get("message", str(chunk["error"])))
-                    if "status" in chunk:
-                        self.status.emit(chunk["status"])
-                    if "sources" in chunk:
-                        result["sources"] = chunk["sources"]
-                        self.sources.emit(chunk["sources"])
-                    if chunk.get("usage"):
-                        result["usage"] = chunk["usage"]
-                        result["timings"] = chunk.get("timings", {})
-                    for choice in chunk.get("choices") or []:
-                        delta = choice.get("delta") or {}
-                        if delta.get("reasoning_content"):
-                            result["thinking"] += delta["reasoning_content"]
-                            self.thinking.emit(delta["reasoning_content"])
-                        if delta.get("content"):
-                            result["content"] += delta["content"]
-                            self.token.emit(delta["content"])
+            messages = self.build_messages(history, summary)
+            for round_no in range(MAX_TOOL_ROUNDS + 1):
+                payload = {
+                    "model": self.model_name,
+                    "messages": messages,
+                    "temperature": self.temperature,
+                    "think": self.think,
+                    # "Always" searches once per question, not again after every tool result.
+                    "web_search": "off" if round_no and self.web_mode == "on" else self.web_mode,
+                    "stream": True,
+                }
+                if self.tools_enabled and round_no < MAX_TOOL_ROUNDS:
+                    payload["tools"] = self.toolbox.schemas()
+                text, calls = self._stream(payload, result)
+                if not calls or result["aborted"]:
+                    break
+                if text and not text.endswith("\n"):
+                    result["content"] += "\n\n"
+                    self.token.emit("\n\n")
+                messages = messages + [{"role": "assistant", "content": text, "tool_calls": calls}]
+                messages += self._run_tools(calls, result)
+                if self._abort.is_set():
+                    result["aborted"] = True
+                    break
+                self.status.emit("Reading the results…")
         except Exception as e:
             if self._abort.is_set():
                 result["aborted"] = True

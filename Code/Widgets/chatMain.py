@@ -2,13 +2,13 @@ import llmClient
 import paths
 
 from PySide6.QtWidgets import (QMainWindow, QSizePolicy, QFileDialog, QComboBox, QCheckBox, QLabel, QMenu,
-                               QMessageBox, QPushButton)
+                               QMessageBox, QPushButton, QToolButton, QWidget, QHBoxLayout, QWidgetAction)
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, Qt, QObject, QEvent, QUrl, QTimer
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QDesktopServices
 import html
 import json
-from pathlib import Path
+from pathlib import Path, PurePath
 import os
 import markdown
 import time
@@ -18,6 +18,19 @@ MUTED = "#8a8a8a"
 CAP_ICONS = (("vision", "👁"), ("thinking", "💭"), ("tools", "🔧"))
 WEB_LABELS = {"auto": "Web: Auto", "on": "Web: Always", "off": "Web: Off"}
 TOOL_STATE_ICONS = {"ok": "✓", "error": "⚠", "declined": "✗ declined"}
+APP_VERSION = "0.8.0_Folders"
+
+
+def short_path(path) -> str:
+    """C:\\Users\\me\\Projects\\ChatUI -> C:/.../Projects/ChatUI (drive, parent, folder)."""
+    p = path if isinstance(path, PurePath) else Path(path)
+    drive = (p.drive or "").replace("\\", "/").rstrip("/")
+    names = list(p.parts[1:])
+    if not names:
+        return f"{drive}/"
+    if len(names) <= 2:
+        return "/".join([drive, *names])
+    return "/".join([drive, "...", names[-2], names[-1]])
 
 
 class LiveComboBox(QComboBox):
@@ -161,6 +174,7 @@ class ChatMain(QMainWindow):
         self.web_combo.setToolTip("Auto: the model decides when a question needs a web search")
         self.web_combo.setStyleSheet("background:rgb(57,57,57);color:white")
         self.think_check = QCheckBox("Think")
+        self.think_check.setLayoutDirection(Qt.RightToLeft)      # box to the right of the label
         self.think_check.setChecked(True)
         self.think_check.setToolTip("Let the model reason before answering (thinking models only)")
         bar.insertWidget(bar.count() - 1, self.web_combo)
@@ -168,17 +182,27 @@ class ChatMain(QMainWindow):
 
         # Tools on this PC: files, git and terminal (local_tools/). Changes and commands ask first.
         self.tools_check = QCheckBox("Tools")
+        self.tools_check.setLayoutDirection(Qt.RightToLeft)
         self.tools_check.setChecked(True)
         self.tools_check.setToolTip("Let the model browse and edit files, use git and run commands on this PC. "
                                     "It asks you before any change or command.")
+        # 📁 links another folder; ▾ drops down the linked folders, each with an x to remove it.
         self.folder_button = QPushButton("📁")
         self.folder_button.setStyleSheet("background:rgb(57,57,57);color:white")
-        self.folder_button.clicked.connect(self.choose_tools_folder)
+        self.folder_button.clicked.connect(self.add_tools_folder)
+        self.folder_list_button = QToolButton()
+        self.folder_list_button.setText("▾")
+        self.folder_list_button.setStyleSheet("background:rgb(57,57,57);color:white")
+        self.folder_list_button.setToolTip("Linked folders")
+        self.folder_menu = QMenu(self)
+        self.folder_menu.setStyleSheet("QMenu{background:rgb(45,45,45);color:white}")
+        self.folder_list_button.clicked.connect(self.show_folder_menu)
         bar.insertWidget(bar.count() - 1, self.tools_check)
         bar.insertWidget(bar.count() - 1, self.folder_button)
+        bar.insertWidget(bar.count() - 1, self.folder_list_button)
         self.tools_check.toggled.connect(self.on_options_changed)
         self._show_tools_folder()
-        self.ui.label.setText("0.5.0")
+        self.ui.label.setText(APP_VERSION)
 
         self.web_combo.currentIndexChanged.connect(self.on_options_changed)
         self.think_check.toggled.connect(self.on_options_changed)
@@ -268,16 +292,60 @@ class ChatMain(QMainWindow):
         self.client.think = self.think_check.isChecked()
         self.client.tools_enabled = self.tools_check.isChecked() and self.tools_check.isEnabled()
 
-    def choose_tools_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Working folder for tools", str(self.client.toolbox.working_dir))
+    def add_tools_folder(self):
+        box = self.client.toolbox
+        start = box.folders[-1].parent if box.folders else box.working_dir
+        folder = QFileDialog.getExistingDirectory(self, "Link a folder for the tools", str(start))
         if folder:
-            self.client.toolbox.working_dir = Path(folder)
+            box.add_folder(folder)
             self._show_tools_folder()
             self.save_chat()
 
+    def remove_tools_folder(self, folder):
+        self.client.toolbox.remove_folder(folder)
+        self._show_tools_folder()
+        self.save_chat()
+        self._fill_folder_menu()
+        self.folder_menu.adjustSize()
+
+    def show_folder_menu(self):
+        self._fill_folder_menu()
+        btn = self.folder_list_button
+        self.folder_menu.popup(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _fill_folder_menu(self):
+        menu = self.folder_menu
+        menu.clear()
+        folders = self.client.toolbox.folders
+        if not folders:
+            menu.addAction("No folders").setEnabled(False)
+            return
+        for folder in folders:
+            row = QWidget()
+            lay = QHBoxLayout(row)
+            lay.setContentsMargins(8, 2, 4, 2)
+            label = QLabel(short_path(folder))
+            label.setToolTip(str(folder))
+            label.setStyleSheet("color:white")
+            remove = QToolButton()
+            remove.setText("x")
+            remove.setToolTip(f"Unlink {folder}")
+            remove.setAutoRaise(True)
+            remove.setStyleSheet("color:#ff8a8a")
+            # Deferred: refilling the menu deletes this button, which must not happen inside its own click.
+            remove.clicked.connect(lambda _=False, f=folder: QTimer.singleShot(0, lambda: self.remove_tools_folder(f)))
+            lay.addWidget(label, 1)
+            lay.addWidget(remove)
+            action = QWidgetAction(menu)
+            action.setDefaultWidget(row)
+            menu.addAction(action)
+
     def _show_tools_folder(self):
-        self.folder_button.setToolTip(f"Working folder for tools: {self.client.toolbox.working_dir}\n"
-                                      "Relative paths, git and commands start here. Click to change.")
+        box = self.client.toolbox
+        n = len(box.folders)
+        self.folder_list_button.setText(f"▾ {n}" if n else "▾")
+        self.folder_button.setToolTip(f"Link a folder for the tools ({n} linked)\n"
+                                      f"Working folder now: {box.working_dir}")
 
     def on_tool_event(self, ev):
         if ev["state"] == "running":
@@ -724,9 +792,11 @@ class ChatMain(QMainWindow):
         self.tools_check.blockSignals(True)
         self.tools_check.setChecked(chatHist.get("Tools", True))
         self.tools_check.blockSignals(False)
-        folder = chatHist.get("Tools Folder")
-        if folder and Path(folder).is_dir():
-            self.client.toolbox.working_dir = Path(folder)
+        folders = chatHist.get("Tools Folders")
+        if folders is None:          # 0.5 saved one working folder, which defaulted to home
+            old = chatHist.get("Tools Folder")
+            folders = [old] if old and Path(old) != Path.home() else []
+        self.client.toolbox.set_folders(folders)
         self._show_tools_folder()
         self.on_options_changed()
 
@@ -752,7 +822,7 @@ class ChatMain(QMainWindow):
             "Web Search": self.client.web_mode,
             "Think": self.client.think,
             "Tools": self.tools_check.isChecked(),
-            "Tools Folder": str(self.client.toolbox.working_dir),
+            "Tools Folders": [str(f) for f in self.client.toolbox.folders],
             "Chat": self.chat_markdown,
             "Summary": self.client.summary,
             "Payload": self.client.export_payload(self.chat_markdown),

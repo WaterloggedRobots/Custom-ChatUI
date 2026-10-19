@@ -10,8 +10,10 @@ Each tool has a kind:
   write  changes files, folders or a repository. Asks you first.
   run    runs a program or shell command. Asks you first.
 
-ToolBox holds the state one chat needs: the working folder that relative
-paths start from, and the tools you chose to "always allow" for this session.
+ToolBox holds the state one chat needs: the folders you linked to the chat
+(the model is told about them; the first is where it starts), the working
+folder that relative paths start from, and the tools you chose to "always
+allow" for this session.
 """
 
 import json
@@ -56,6 +58,7 @@ class ToolBox:
     def __init__(self, working_dir: Optional[str] = None,
                  extract_text: Optional[Callable[[Path], str]] = None):
         self.working_dir = Path(working_dir).expanduser() if working_dir else Path.home()
+        self.folders: List[Path] = []     # linked in the GUI
         self.always_allow: set = set()
         # Turns a PDF or Word file into text (llmClient uses the server's /v1/files/extract).
         self.extract_text = extract_text
@@ -71,6 +74,27 @@ class ToolBox:
         if not p.is_absolute():
             p = self.working_dir / p
         return Path(os.path.normpath(p))
+
+    def set_folders(self, folders) -> None:
+        """Link these folders; the working folder moves to the first one."""
+        self.folders = []
+        for f in folders:
+            p = Path(os.path.normpath(Path(f).expanduser()))
+            if p.is_dir() and p not in self.folders:
+                self.folders.append(p)
+        self.working_dir = self.folders[0] if self.folders else Path.home()
+
+    def add_folder(self, folder) -> None:
+        self._relink([*self.folders, folder])
+
+    def remove_folder(self, folder) -> None:
+        self._relink([f for f in self.folders if f != Path(folder)])
+
+    def _relink(self, folders) -> None:
+        current = self.working_dir
+        self.set_folders(folders)
+        if any(current == f or f in current.parents for f in self.folders):
+            self.working_dir = current       # still inside a linked folder: stay there
 
     def set_working_dir(self, path: str) -> Path:
         p = self.resolve(path)
@@ -122,6 +146,8 @@ class ToolBox:
         return (
             "You can use tools on the user's own PC (Windows): browse and read folders and files, "
             "edit files, use git, and run terminal commands (PowerShell by default). "
+            + (f"The user linked these folders for you to work in: {'; '.join(str(f) for f in self.folders)}. "
+               if self.folders else "") +
             f"The working folder is {self.working_dir}; relative paths start there and "
             "change_directory moves it. Look before you change anything: list or read first, and use "
             "edit_file for small changes instead of rewriting whole files. The user is asked to approve "

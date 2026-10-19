@@ -12,6 +12,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -86,6 +87,33 @@ def test_change_directory_moves_relative_paths(box, tmp_path):
     assert "Working folder is now" in box.run("change_directory", {"path": "notes"})
     assert box.working_dir == tmp_path / "notes"
     assert "alpha" in box.run("read_file", {"path": "a.txt"})
+
+
+def test_linked_folders(box, tmp_path):
+    (tmp_path / "other").mkdir()
+    box.set_folders([tmp_path / "notes", tmp_path / "other", tmp_path / "missing", tmp_path / "notes"])
+    assert box.folders == [tmp_path / "notes", tmp_path / "other"]       # missing and duplicate dropped
+    assert box.working_dir == tmp_path / "notes"
+    assert str(tmp_path / "other") in box.system_note()
+    box.run("change_directory", {"path": str(tmp_path / "other")})
+    box.remove_folder(tmp_path / "notes")
+    assert box.working_dir == tmp_path / "other"                         # still inside a linked folder
+    box.add_folder(tmp_path / "notes")
+    assert box.folders == [tmp_path / "other", tmp_path / "notes"] and box.working_dir == tmp_path / "other"
+    box.remove_folder(tmp_path / "other")
+    assert box.working_dir == tmp_path / "notes"
+    box.remove_folder(tmp_path / "notes")
+    assert box.folders == [] and box.working_dir == Path.home() and "linked" not in box.system_note()
+
+
+def test_short_folder_names():
+    from pathlib import PureWindowsPath as W
+    from Widgets.chatMain import short_path
+    assert short_path(W(r"C:\Users\me\Documents\Projects\ChatUI")) == "C:/.../Projects/ChatUI"
+    assert short_path(W(r"D:\Work\Repo")) == "D:/Work/Repo"
+    assert short_path(W(r"D:\Work")) == "D:/Work"
+    assert short_path(W("E:\\")) == "E:/"
+    assert short_path(W(r"\\nas\share\chats\2026\oct")) == "//nas/share/.../2026/oct"
 
 
 def test_terminal(box):

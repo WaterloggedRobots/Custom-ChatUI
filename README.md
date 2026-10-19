@@ -65,7 +65,7 @@ With *Tools* ticked (models marked 🔧 in the model list), the model can work o
 - **Git:** status, diff, log, show and branches; add, commit, switch, pull, push and clone; any other git command.
 - **Terminal:** runs PowerShell (or cmd) commands and reads their output.
 
-Reading never asks. Every change and every command opens an *Allow / Always allow / Deny* box first, showing exactly what will run ("Show Details" has the full arguments); *Always allow* lasts until the app is closed. The 📁 button sets the working folder that relative paths, git and commands start from; each chat remembers its own. The tools run in the client (`Code/local_tools/`), so the server never touches your files. Git must be installed (Git for Windows). Tests: `cd Code` then `python -m pytest -q tests`.
+Reading never asks. Every change and every command opens an *Allow / Always allow / Deny* box first, showing exactly what will run ("Show Details" has the full arguments); *Always allow* lasts until the app is closed. The 📁 button links a folder for the model to work in, and you can link several. The ▾ next to it drops down the linked folders, shortened to drive, parent and folder (`C:/.../Projects/ChatUI`), each with an **x** to unlink it. The model is told which folders are linked and starts in the first one. Each chat remembers its own folders. The tools run in the client (`Code/local_tools/`), so the server never touches your files. Git must be installed (Git for Windows). Tests: `cd Code` then `python -m pytest -q tests`.
 
 ## Where things live
 | Name | Where | What |

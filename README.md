@@ -39,7 +39,7 @@ The main area is a window that shows all the interaction between the user and th
 ## 2.2. Chat Settings (v0.9)
 Every chat has its own settings, saved inside the chat file: the chat title, the **character** (a name and the pretext sent first as the system message), the **model** and temperature, **web search**, **Think** and **Tools**. Open them from *Character > Settings…* or *Chat > Chat Settings* (Ctrl+E); *Chat > New Chat* opens them for a new chat. The model picker above the message box (left, next to the 📁 folder buttons) is a quick shortcut to the same setting: changing it there changes it in the settings too.
 
-*Export…* in the settings window saves a chat's settings to a small `.json` you can share; *Import…* loads one into the window to check before you press *Save*. Anything missing or invalid in an imported file takes its default, so partial files and the old `Bot Description.json` files import too. The defaults and checks live in `Code/chat_settings.py`.
+*Export…* in the settings window saves a chat's settings to a small `.json` you can share. It opens a save dialog (File Explorer on Windows) with the file named after the chat, `{chat name}.json`; rename it or pick another folder there, and the next export or import opens in that folder; *Import…* loads one into the window to check before you press *Save*. Anything missing or invalid in an imported file takes its default, so partial files and the old `Bot Description.json` files import too. The defaults and checks live in `Code/chat_settings.py`.
 
 Chats from before 0.9 kept their character in a separate bot folder (`Save/Bot/<name>/Bot Description.json`) and a duplicate "Payload" copy of the conversation. Opening such a chat copies its character into the chat file and drops both; the old `Save/Bot` folders are no longer read and can be deleted.
 
@@ -65,6 +65,13 @@ With *Tools* on in the chat's settings (models marked 🔧 in the model list), t
 - **Terminal:** runs PowerShell (or cmd) commands and reads their output.
 
 Reading never asks. Every change and every command opens an *Allow / Always allow / Deny* box first, showing exactly what will run ("Show Details" has the full arguments); *Always allow* lasts until the app is closed. The 📁 button links a folder for the model to work in, and you can link several. The ▾ next to it drops down the linked folders, shortened to drive, parent and folder (`C:/.../Projects/ChatUI`), each with an **x** to unlink it. The model is told which folders are linked and starts in the first one. Each chat remembers its own folders. The tools run in the client (`Code/local_tools/`), so the server never touches your files. Git must be installed (Git for Windows). Tests: `cd Code` then `python -m pytest -q tests`.
+
+## 2.7. Voice input (v0.10)
+The 🎤 button between the message box and *Send* lets you speak instead of typing. Click it (or press Ctrl+M) and talk; the button turns red and counts the time, and the status line shows the microphone level. Click it again (or Ctrl+M) to stop, or press Esc to throw the recording away. The clip goes to the server, where Whisper writes it down, and the text lands in the message box at the cursor so you can fix it before sending. Right-click the button for:
+- **Send automatically after speaking**, which sends the text straight away;
+- **Language**: detect automatically (the default), English, Chinese, Cantonese or Japanese.
+
+The client records with Qt Multimedia, which comes with PySide6, so there is nothing extra to install on Windows. Windows must allow desktop apps to use the microphone (*Settings > Privacy & security > Microphone*). The server needs `faster-whisper` (in its `requirements.txt`); the first clip after the server starts takes longer while it loads the model, and the very first one also downloads it. See *Speech to text* in `Server/ollama/README.md`.
 
 ## Where things live
 | Name | Where | What |

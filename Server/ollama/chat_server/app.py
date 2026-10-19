@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import search as web
+from . import speech
 from .config import Config
 from .documents import AttachmentError, load_attachment
 from .ollama import Ollama, OllamaError
@@ -37,6 +38,9 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
             log.info("Ollama at %s has: %s", Config.OLLAMA_URL, ", ".join(names) or "(no models)")
         except Exception as e:
             log.warning("Ollama not reachable at %s yet: %s", Config.OLLAMA_URL, e)
+        log.info("Speech to text: %s", speech.ENGINE or "off")
+        if Config.STT_PRELOAD:
+            asyncio.get_running_loop().run_in_executor(None, speech.preload)
         yield
         await app.state.ollama.close()
         await app.state.http.aclose()
@@ -62,12 +66,14 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
     async def _attachment_error(_, e: AttachmentError):
         return JSONResponse(status_code=400, content={"error": {"message": str(e), "type": "attachment_error"}})
 
+    app.include_router(speech.router)
     if Config.ENABLE_EXTRAS:
         from . import extras
         app.include_router(extras.router)
-        extras_available = extras.AVAILABLE
+        extras_available = dict(extras.AVAILABLE)
     else:
         extras_available = {}
+    extras_available["stt"] = speech.ENGINE is not None
 
     # ------------------------------------------------------------------ info
 
@@ -82,6 +88,7 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
                 "web_search": "POST /web_search",
                 "browse": "POST /v1/web/browse",
                 "extract": "POST /v1/files/extract",
+                "speech_to_text": "POST /v1/audio/transcriptions (multipart: file, language); GET /v1/audio/stt",
                 "health": "GET /health",
             },
         }

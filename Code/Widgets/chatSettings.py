@@ -7,11 +7,11 @@ model list is the same one the main window's quick model picker shows.
 
 import chat_settings
 import paths
-from Widgets.chatMain import LiveComboBox, WEB_LABELS
+from Widgets.chatMain import LiveComboBox, WEB_LABELS, safe_file_name
 
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QComboBox, QMessageBox
 from PySide6.QtUiTools import QUiLoader
-from PySide6.QtCore import QFile
+from PySide6.QtCore import QFile, QSettings
 from pathlib import Path
 
 
@@ -156,11 +156,23 @@ class ChatSettings(QMainWindow):
                 self.show_settings(settings)
 
     def export_settings(self):
-        export_to_file(self, self.settings())
+        export_to_file(self, self.settings(), self.title())
+
+
+def _last_folder() -> Path:
+    """Where the last import or export went, so the next dialog opens there."""
+    folder = Path(str(QSettings().value("settings/lastFolder", "") or Path.home()))
+    return folder if folder.is_dir() else Path.home()
+
+
+def _remember_folder(path):
+    QSettings().setValue("settings/lastFolder", str(Path(path).parent))
 
 
 def ask_import_path(parent) -> str:
-    path, _ = QFileDialog.getOpenFileName(parent, "Import chat settings", str(Path.home()), "JSON Files (*.json)")
+    path, _ = QFileDialog.getOpenFileName(parent, "Import chat settings", str(_last_folder()), "JSON Files (*.json)")
+    if path:
+        _remember_folder(path)
     return path
 
 
@@ -173,13 +185,20 @@ def read_import(parent, path):
         return None
 
 
-def export_to_file(parent, settings: dict):
-    name = "".join(c for c in settings["Character"] if c not in '<>:"/\\|?*').strip() or "Chat"
-    path, _ = QFileDialog.getSaveFileName(parent, "Export chat settings",
-                                          str(Path.home() / f"{name} settings.json"), "JSON Files (*.json)")
+def export_to_file(parent, settings: dict, chat_name: str):
+    """Save `settings` as {chat name}.json. The file dialog (Explorer on Windows)
+    lets you rename the file and pick the folder; the next export opens in the
+    folder you picked."""
+    default = _last_folder() / f"{safe_file_name(chat_name)}.json"
+    path, _ = QFileDialog.getSaveFileName(parent, "Export chat settings", str(default), "JSON Files (*.json)")
     if not path:
         return
+    if Path(path).suffix.lower() != ".json":
+        path += ".json"
     try:
         chat_settings.export_file(settings, path)
     except OSError as e:
         QMessageBox.warning(parent, "Can't export settings", str(e))
+        return
+    _remember_folder(path)
+    QMessageBox.information(parent, "Settings exported", f"Saved to {path}")

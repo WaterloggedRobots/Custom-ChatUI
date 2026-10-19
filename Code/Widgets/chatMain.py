@@ -1,12 +1,13 @@
 import chat_settings
 import llmClient
 import paths
+import voice
 
 from PySide6.QtWidgets import (QMainWindow, QSizePolicy, QFileDialog, QComboBox, QLabel, QMenu,
                                QMessageBox, QPushButton, QToolButton, QWidget, QHBoxLayout, QWidgetAction)
 from PySide6.QtUiTools import QUiLoader
-from PySide6.QtCore import QFile, Qt, QObject, QEvent, QUrl, QTimer, Signal
-from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QDesktopServices
+from PySide6.QtCore import QFile, Qt, QObject, QEvent, QUrl, QTimer, Signal, QSettings
+from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QDesktopServices, QKeySequence, QShortcut
 import html
 import json
 from pathlib import Path, PurePath
@@ -19,7 +20,12 @@ MUTED = "#8a8a8a"
 CAP_ICONS = (("vision", "👁"), ("thinking", "💭"), ("tools", "🔧"))
 WEB_LABELS = {"auto": "Web: Auto", "on": "Web: Always", "off": "Web: Off"}
 TOOL_STATE_ICONS = {"ok": "✓", "error": "⚠", "declined": "✗ declined"}
-APP_VERSION = "0.9.0_Settings"
+APP_VERSION = "0.10.0_Voice"
+# Mic button languages: label, code sent to the server ("" = Whisper detects it)
+VOICE_LANGUAGES = (("Detect automatically", ""), ("English", "en"), ("中文 Chinese", "zh"),
+                   ("粵語 Cantonese", "yue"), ("日本語 Japanese", "ja"))
+MIC_STYLE = "border-color:rgb(255,255,255);background:rgb(57,57,57);color:white"
+MIC_RECORDING_STYLE = "border-color:rgb(255,255,255);background:rgb(170,40,40);color:white"
 
 
 def short_path(path) -> str:
@@ -129,6 +135,15 @@ class ChatMain(QMainWindow):
         self.client.tool_event.connect(self.on_tool_event)
         self.client.approval_needed.connect(self.on_approval_needed)
 
+        # Voice input (voice.py): the mic button records, the server's Whisper writes it down
+        self.recorder = voice.Recorder(self)
+        self.recorder.level.connect(self.on_voice_level)
+        self.recorder.finished.connect(self.on_voice_recorded)
+        self.recorder.failed.connect(self.on_voice_failed)
+        self.transcriber = voice.Transcriber(lambda: self.client.base_url, self)
+        self.transcriber.done.connect(self.on_voice_text)
+        self.transcriber.failed.connect(self.on_voice_failed)
+
         self.load_ui()
         self.setup_connections()
         # Store the initial stretch for the graphicsView column (e.g., 1)
@@ -204,6 +219,19 @@ class ChatMain(QMainWindow):
         bar.insertWidget(1, self.folder_button)
         bar.insertWidget(2, self.folder_list_button)
         self._show_tools_folder()
+
+        # Mic button between the input and Send. Click to talk, click again to stop;
+        # right-click for the language and auto-send.
+        self.mic_button = QPushButton("🎤")
+        self.mic_button.setMinimumHeight(40)
+        self.mic_button.setFixedWidth(52)
+        self.mic_button.setStyleSheet(MIC_STYLE)
+        self.mic_button.setToolTip("Speak instead of typing (Ctrl+M). Click again to stop, Esc to cancel.\n"
+                                   "Right-click for the language and auto-send.")
+        self.mic_button.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.mic_button.customContextMenuRequested.connect(self.show_voice_menu)
+        row = self.ui.horizontalLayout
+        row.insertWidget(row.indexOf(self.ui.pushButton_5), self.mic_button)
         self.ui.label.setText(APP_VERSION)
 
     def setup_connections(self):
@@ -212,6 +240,10 @@ class ChatMain(QMainWindow):
         self.ui.pushButton_2.clicked.connect(self.toggle_chat_list)
         self.ui.pushButton_5.clicked.connect(self.sendMessage)
         self.ui.pushButton_3.clicked.connect(self.on_file_button)
+        self.mic_button.clicked.connect(self.toggle_voice)
+        QShortcut(QKeySequence("Ctrl+M"), self, self.toggle_voice)
+        self._voice_cancel = QShortcut(QKeySequence(Qt.Key_Escape), self, self.cancel_voice)
+        self._voice_cancel.setEnabled(False)
 
         self.ui.actionNew_Chat.setShortcut("Ctrl+N")
         self.ui.actionLoad_Chat.setShortcut("Ctrl+O")
@@ -417,6 +449,98 @@ class ChatMain(QMainWindow):
         n = len(self.pending_attachments)
         self.ui.pushButton_3.setText(f"File ({n})" if n else "File")
         self.status_label.setText("📎 " + ", ".join(a["name"] for a in self.pending_attachments) if n else "")
+
+    # ------------------------------------------------------------------
+    # Voice input
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _voice_setting(key, default):
+        value = QSettings().value(f"voice/{key}", default)
+        if isinstance(default, bool) and not isinstance(value, bool):
+            return str(value).lower() in ("true", "1")
+        return value
+
+    def show_voice_menu(self, pos):
+        menu = QMenu(self)
+        auto = menu.addAction("Send automatically after speaking")
+        auto.setCheckable(True)
+        auto.setChecked(self._voice_setting("autoSend", False))
+        auto.toggled.connect(lambda on: QSettings().setValue("voice/autoSend", on))
+        langs = menu.addMenu("Language")
+        current = self._voice_setting("language", "")
+        for label, code in VOICE_LANGUAGES:
+            act = langs.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(code == current)
+            act.triggered.connect(lambda _=False, c=code: QSettings().setValue("voice/language", c))
+        menu.exec(self.mic_button.mapToGlobal(pos))
+
+    def toggle_voice(self):
+        if self.transcriber.busy:
+            return
+        if self.recorder.recording:
+            self.recorder.stop()
+            return
+        self.recorder.start()
+        if self.recorder.recording:
+            self.mic_button.setText("■ 0:00")
+            self.mic_button.setStyleSheet(MIC_RECORDING_STYLE)
+            self._voice_cancel.setEnabled(True)
+            self.status_label.setText("🎤 Listening… click ■ or press Ctrl+M to stop, Esc to cancel")
+
+    def cancel_voice(self):
+        if self.recorder.recording:
+            self.recorder.cancel()
+            self._voice_idle()
+            self.on_status("")
+
+    def on_voice_level(self, level):
+        secs = int(self.recorder.seconds())
+        self.mic_button.setText(f"■ {secs // 60}:{secs % 60:02d}")
+        bars = round(min(1.0, level * 1.5) * 8)
+        self.status_label.setText("🎤 Listening " + "▮" * bars + "▯" * (8 - bars)
+                                  + "  click ■ or press Ctrl+M to stop, Esc to cancel")
+
+    def on_voice_recorded(self, wav):
+        self._voice_cancel.setEnabled(False)
+        if self.recorder.seconds() < 0.3:
+            self._voice_idle()
+            self.on_status("")
+            return
+        self.mic_button.setText("…")
+        self.mic_button.setStyleSheet(MIC_STYLE)
+        self.mic_button.setEnabled(False)
+        self.status_label.setText("🎤 Writing down what you said…")
+        self.transcriber.transcribe(wav, self._voice_setting("language", ""))
+
+    def on_voice_text(self, text):
+        self._voice_idle()
+        if not text:
+            self.status_label.setText("🎤 Didn't catch anything; try again a little closer to the mic")
+            return
+        self.on_status("")
+        current = self.input.toPlainText()
+        cursor = self.input.textCursor()
+        before = current[:cursor.position()]
+        if before and not before[-1].isspace():
+            text = " " + text
+        cursor.insertText(text)
+        self.input.setTextCursor(cursor)
+        self.input.setFocus()
+        if self._voice_setting("autoSend", False) and not self.client.busy:
+            self.sendMessage()
+
+    def on_voice_failed(self, err):
+        print(f"Voice: {err}")
+        self._voice_idle()
+        self.status_label.setText("🎤 " + err)
+
+    def _voice_idle(self):
+        self._voice_cancel.setEnabled(False)
+        self.mic_button.setEnabled(True)
+        self.mic_button.setText("🎤")
+        self.mic_button.setStyleSheet(MIC_STYLE)
 
     def on_status(self, text):
         if text:

@@ -75,5 +75,14 @@ class Config:
     MAX_ATTACHMENT_BYTES = _int("MAX_ATTACHMENT_BYTES", 25 * 1024 * 1024)
     FILE_TEXT_CHARS = _int("FILE_TEXT_CHARS", 40000)
 
-    # Optional extras (TTS/STT and the experimental tool-calling endpoints)
+    # Speech to text for the GUI's mic button (speech.py)
+    STT_ENGINE = os.getenv("STT_ENGINE", "auto")            # auto | whisper | google | off
+    STT_MODEL = os.getenv("STT_MODEL", "")                  # "" = large-v3-turbo on a GPU, small on the CPU
+    STT_DEVICE = os.getenv("STT_DEVICE", "auto")            # auto (GPU, else CPU) | cuda | cpu
+    STT_COMPUTE_TYPE = os.getenv("STT_COMPUTE_TYPE", "")    # "" = float16 on a GPU, int8 on the CPU
+    STT_MODEL_DIR = os.getenv("STT_MODEL_DIR", "")          # "" = the Hugging Face cache (~/.cache/huggingface)
+    STT_PRELOAD = os.getenv("STT_PRELOAD", "0") not in ("0", "false", "no")
+    STT_MAX_BYTES = _int("STT_MAX_BYTES", 50 * 1024 * 1024)
+
+    # Optional extras (TTS and the experimental tool-calling endpoints)
     ENABLE_EXTRAS = os.getenv("ENABLE_EXTRAS", "1") not in ("0", "false", "no")

@@ -13,9 +13,13 @@ pypdf>=4.0
 python-docx>=1.1
 Pillow>=10.0              # converts webp/gif/bmp images for the model
 
+# Speech to text for the GUI's mic button (speech.py)
+faster-whisper>=1.1       # local Whisper; pulls in numpy, ctranslate2 and av
+numpy>=1.26
+
 # Optional extras (each switches itself off if missing)
 edge-tts>=6.1             # /tts
-SpeechRecognition>=3.10   # /stt
+SpeechRecognition>=3.10   # STT_ENGINE=google fallback (needs internet)
 ollama>=0.4               # gemma_four.py tool-calling test endpoints
 
 # Tests

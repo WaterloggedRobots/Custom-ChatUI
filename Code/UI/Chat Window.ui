@@ -418,8 +418,10 @@ color:rgb(255, 255, 255)</string>
     <property name="title">
      <string>Character</string>
     </property>
-    <addaction name="actionCreate_New_Chara"/>
-    <addaction name="actionEdit_Chara"/>
+    <addaction name="actionCharacter_Settings"/>
+    <addaction name="separator"/>
+    <addaction name="actionImport_Settings"/>
+    <addaction name="actionExport_Settings"/>
    </widget>
    <widget class="QMenu" name="menuServer">
     <property name="title">
@@ -478,14 +480,28 @@ color:rgb(255, 255, 255)</string>
     <string>Chat Settings</string>
    </property>
   </action>
-  <action name="actionCreate_New_Chara">
+  <action name="actionCharacter_Settings">
    <property name="text">
-    <string>Create New</string>
+    <string>Settings…</string>
+   </property>
+   <property name="toolTip">
+    <string>This chat's character, model, web search, Think and Tools</string>
    </property>
   </action>
-  <action name="actionEdit_Chara">
+  <action name="actionImport_Settings">
    <property name="text">
-    <string>Edit Chara</string>
+    <string>Import Settings…</string>
+   </property>
+   <property name="toolTip">
+    <string>Load settings exported from another chat into this one</string>
+   </property>
+  </action>
+  <action name="actionExport_Settings">
+   <property name="text">
+    <string>Export Settings…</string>
+   </property>
+   <property name="toolTip">
+    <string>Save this chat's settings to a .json to reuse or share</string>
    </property>
   </action>
   <action name="actionSet_IP">

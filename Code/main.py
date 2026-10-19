@@ -1,6 +1,5 @@
 import sys
 import json
-import time
 from pathlib import Path
 
 from typing import Set, Optional
@@ -9,9 +8,10 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 import paths
-from Widgets import chatMain, chatSettings, botSettings, warningWidget
+import chat_settings
+from Widgets import chatMain, chatSettings, warningWidget
 
-SETTINGS_KEYS = {"Name", "Bot Path", "Temperature", "Model", "Chat"}
+CHAT_KEYS = {"Name", "Chat"}
 def find_json_with_format(
         target_folder: str,
         required_keys: Set[str],
@@ -84,14 +84,12 @@ class Main:
         mainChat.ui.listWidget.clicked.connect(self.quick_select_chat)
         mainChat.ui.actionEdit_Message.triggered.connect(self.openEditMsg)
         mainChat.ui.actionSet_IP.triggered.connect(self.openIPSettings)
-        mainChat.ui.actionCreate_New_Chara.triggered.connect(self.newBot)
-        mainChat.ui.actionEdit_Chara.triggered.connect(self.loadBot)
+        mainChat.ui.actionCharacter_Settings.triggered.connect(self.openChatSettings)
+        mainChat.ui.actionImport_Settings.triggered.connect(self.importSettings)
+        mainChat.ui.actionExport_Settings.triggered.connect(self.exportSettings)
 
-        settingsChat.ui.pushButton_2.clicked.connect(self.newBot)
-        settingsChat.ui.pushButton_3.clicked.connect(self.cancelChatSettings)
-        settingsChat.ui.pushButton_5.clicked.connect(self.saveChatSettings)
-
-        settingsBot.ui.pushButton.clicked.connect(self.exitBotSettings)
+        settingsChat.ui.cancelButton.clicked.connect(self.cancelChatSettings)
+        settingsChat.ui.saveButton.clicked.connect(self.saveChatSettings)
 
         emptyStart.ui.pushButton.clicked.connect(self.newChatSettings)
 
@@ -99,82 +97,53 @@ class Main:
 
         settingsIP.ui.pushButton.clicked.connect(self.exitIPSettings)
 
-    def read_json_file(self, file_path):
-        """Read a JSON file and return its contents"""
-        try:
-            # Convert to Path object for better handling
-            json_path = Path(file_path)
-
-            if not json_path.exists():
-                print(f"❌ File not found from Main: {file_path}")
-                return None
-
-            # Read the file
-            with open(json_path, 'r', encoding='utf-8') as file:
-                data = json.load(file)
-
-            print(f"✅ JSON loaded successfully from: {json_path.name}")
-            return data
-
-        except json.JSONDecodeError as e:
-            print(f"❌ Invalid JSON format: {e}")
-            return None
-        except Exception as e:
-            print(f"❌ Error reading file: {e}")
-            return None
-
-    def get_currentChat(self):
-        log = self.read_json_file(paths.CHAT_INDEX_FILE)
-        return log["LastChat"]
-
-    def get_currentBot(self):
-        chatJson = self.get_currentChat()
-        botPath = chatJson["BotPath"]
-        return botPath
-
     def cancelChatSettings(self):
-
-        if noChats:
+        if mainChat.chat_path is None:
             warningLeaveEmpty.show()
         else:
             settingsChat.close()
 
     def saveChatSettings(self):
-        if False:
-            invalidChatSettings.show()
+        title, settings = settingsChat.title(), settingsChat.settings()
+        if settingsChat.is_new or mainChat.chat_path is None:
+            mainChat.create_chat(title, settings)
         else:
-            settingsChat.save_settings()
-            settingsChat.close()  # Close current window
-            if not mainChat.isVisible():
-                mainChat.show()
-            time.sleep(0.2)
-            mainChat.load_chat(self.get_currentChat())
-
-    def refreshModels(self):
-        settingsChat.set_models(mainChat.refresh_models())
+            mainChat.apply_settings(title, settings)
+        settingsChat.close()
+        if emptyStart.isVisible():
+            emptyStart.close()
+        if not mainChat.isVisible():
+            mainChat.show()
 
     def newChatSettings(self):
-        self.refreshModels()
-        settingsChat.loadSettings("")
-        settingsChat.show()
+        # A new chat starts from the defaults, on the model the open chat uses.
+        settings = chat_settings.defaults()
+        settings["Model"] = mainChat.settings["Model"]
+        settingsChat.open_for("", settings, is_new=True)
         if emptyStart.isVisible():
             emptyStart.close()
 
     def openChatSettings(self):
-        self.refreshModels()
-        settingsChat.loadSettings(str(self.get_currentChat()))
-        settingsChat.show()
+        if mainChat.chat_path is None:
+            self.newChatSettings()
+            return
+        settingsChat.open_for(mainChat.ui.lineEdit.text(), mainChat.settings, is_new=False)
 
-    def newBot(self):
-        settingsBot.loadSettings("")
-        settingsBot.show()
+    def importSettings(self):
+        """Character > Import: open the imported settings in the Chat Settings window to check, then Save."""
+        path = chatSettings.ask_import_path(mainChat)
+        if not path:
+            return
+        settings = chatSettings.read_import(mainChat, path)
+        if settings is None:
+            return
+        if mainChat.chat_path is None:
+            settingsChat.open_for("", settings, is_new=True)
+        else:
+            settingsChat.open_for(mainChat.ui.lineEdit.text(), settings, is_new=False)
 
-    def loadBot(self):
-        settingsBot.loadSettings(str(self.get_currentBot()))
-        settingsBot.show()
-
-    def exitBotSettings(self):
-        settingsBot.close()
+    def exportSettings(self):
+        chatSettings.export_to_file(mainChat, mainChat.settings)
 
     def quick_select_chat(self):
         chatName = mainChat.ui.listWidget.currentItem().text()
@@ -214,8 +183,7 @@ if __name__ == "__main__":
     app.setWindowIcon(QIcon(str(paths.IMG_DIR / "AppIcon.png")))
     mainChat = chatMain.ChatMain()
     emptyStart = warningWidget.EmptyStart()
-    settingsChat = chatSettings.ChatSettings()
-    settingsBot = botSettings.BotSettings()
+    settingsChat = chatSettings.ChatSettings(mainChat)
     warningLeaveEmpty = warningWidget.EmptyLeave()
     invalidChatSettings = warningWidget.InvalidChatSettings()
     messageEdit = chatMain.EditMessage()
@@ -223,12 +191,9 @@ if __name__ == "__main__":
 
     connector = Main()
 
-    if find_json_with_format(str(paths.CHAT_DIR), SETTINGS_KEYS) is not None:
-        noChats = False
+    if find_json_with_format(str(paths.CHAT_DIR), CHAT_KEYS) is not None:
         mainChat.show()
-
     else:
-        noChats = True
         emptyStart.show()
 
     sys.exit(app.exec())

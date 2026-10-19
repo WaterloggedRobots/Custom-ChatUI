@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('UI', 'UI'), ('Img', 'Img'), ('Save', 'Save')],
+    datas=[('UI', 'UI'), ('Img', 'Img')],
     hiddenimports=['local_tools.files', 'local_tools.git', 'local_tools.terminal'],
     hookspath=[],
     hooksconfig={},

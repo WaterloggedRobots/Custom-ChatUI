@@ -39,7 +39,6 @@ ATTACHMENT_TURNS = 2          # user turns whose attachments are re-sent in full
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
-WEB_MODES = ("auto", "on", "off")
 MAX_TOOL_ROUNDS = 12          # tool calls the model may make in a row before it must answer
 TOOL_LOG_CHARS = 3000         # how much of each tool result is kept in the saved chat
 
@@ -190,13 +189,6 @@ class LLMClient(QObject):
                 content = f"[Tools used for this answer:\n{used}]\n\n{content}"
             messages.append({"role": m["role"], "content": content})
         return messages
-
-    def export_payload(self, history):
-        """Plain-text copy of what the model sees, saved in the chat file for reference."""
-        payload = [{"role": "system", "content": self.preset}] if self.preset else []
-        for m in history:
-            payload.append({"role": m["role"], "content": self._content(m, False)})
-        return payload
 
     # ------------------------------------------------------------- summary
 

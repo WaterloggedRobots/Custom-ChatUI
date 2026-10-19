@@ -6,7 +6,7 @@ There are three places the client reads or writes:
                     images and the default network settings. Read-only at runtime.
                     In the packaged ChatUI.exe this is PyInstaller's unpack folder.
 
-  CLIENT_DATA_DIR   Your chats, bots and personal settings on this PC:
+  CLIENT_DATA_DIR   Your chats (each with its own settings) and your server address on this PC:
                     Windows: %APPDATA%\\Waterlogged\\ChatUI   (AppData\\Roaming)
                     Linux:   ~/.local/share/Waterlogged/ChatUI
                     (the same folder Qt's AppDataLocation gave earlier versions)
@@ -38,7 +38,7 @@ def ui_file(name: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# Client data folder (chats, bots, your settings)
+# Client data folder (chats and your server address)
 # --------------------------------------------------------------------------
 if sys.platform == "win32":
     CLIENT_DATA_DIR = Path(os.environ["APPDATA"]) / "Waterlogged" / "ChatUI"
@@ -46,15 +46,13 @@ else:
     CLIENT_DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "Waterlogged" / "ChatUI"
 
 SAVE_DIR = CLIENT_DATA_DIR / "Save"
-CHAT_DIR = SAVE_DIR / "Chat"                  # one <name>.json per chat
-BOT_DIR = SAVE_DIR / "Bot"                    # one folder per bot
+CHAT_DIR = SAVE_DIR / "Chat"                  # one <name>.json per chat, settings included
 CHAT_INDEX_FILE = SAVE_DIR / ".temp.json"     # last opened chat + recent-chats order
 USER_NETWORK_FILE = CLIENT_DATA_DIR / "network.json"   # your saved server address
 
 
 def ensure_data_dirs():
-    for d in (CHAT_DIR, BOT_DIR):
-        d.mkdir(parents=True, exist_ok=True)
+    CHAT_DIR.mkdir(parents=True, exist_ok=True)
     if not CHAT_INDEX_FILE.exists():
         CHAT_INDEX_FILE.write_text(json.dumps({"LastOpened": "", "LastChat": "", "ChatList": []}, indent=4),
                                    encoding="utf-8")

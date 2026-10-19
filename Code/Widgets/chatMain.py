@@ -1,10 +1,11 @@
+import chat_settings
 import llmClient
 import paths
 
-from PySide6.QtWidgets import (QMainWindow, QSizePolicy, QFileDialog, QComboBox, QCheckBox, QLabel, QMenu,
+from PySide6.QtWidgets import (QMainWindow, QSizePolicy, QFileDialog, QComboBox, QLabel, QMenu,
                                QMessageBox, QPushButton, QToolButton, QWidget, QHBoxLayout, QWidgetAction)
 from PySide6.QtUiTools import QUiLoader
-from PySide6.QtCore import QFile, Qt, QObject, QEvent, QUrl, QTimer
+from PySide6.QtCore import QFile, Qt, QObject, QEvent, QUrl, QTimer, Signal
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QDesktopServices
 import html
 import json
@@ -18,7 +19,7 @@ MUTED = "#8a8a8a"
 CAP_ICONS = (("vision", "👁"), ("thinking", "💭"), ("tools", "🔧"))
 WEB_LABELS = {"auto": "Web: Auto", "on": "Web: Always", "off": "Web: Off"}
 TOOL_STATE_ICONS = {"ok": "✓", "error": "⚠", "declined": "✗ declined"}
-APP_VERSION = "0.8.0_Folders"
+APP_VERSION = "0.9.0_Settings"
 
 
 def short_path(path) -> str:
@@ -75,6 +76,12 @@ class ShiftEnterFilter(QObject):
         return False                    # let Qt process other events
 
 
+def safe_file_name(name: str) -> str:
+    """A chat title as a Windows-safe file name."""
+    cleaned = "".join(c for c in name if c not in '<>:"/\\|?*' and ord(c) >= 32).strip().rstrip(".")
+    return cleaned or "New Chat"
+
+
 class ChatMain(QMainWindow):
     """Main chat window.
 
@@ -86,16 +93,20 @@ class ChatMain(QMainWindow):
       assistant: role, content (markdown), ts, response_time,
                  thinking, thinking_time, sources [{n, title, url}], usage,
                  tools [{name, summary, kind, state, output}]
+
+    `settings` are this chat's character, model and options (chat_settings.py),
+    saved in the chat file and edited in the Chat Settings window.
     """
+    model_changed = Signal(str)      # the quick model picker changed this chat's model
 
     def __init__(self):
         super().__init__()
         self.isShowImgWindow = True
         self.isShowImgWindowLock = False
         self.isShowChatList = False
-        self.bot_path = None
-        self.bot_desc_path = None
-        self.botName = ""
+        self.settings = chat_settings.defaults()
+        self.botName = self.settings["Character"]
+        self.status_tools_tip = ""
         self.chat_markdown = []
         self.chat_path = None  # active chat file path
         self.pending_attachments = []
@@ -152,13 +163,22 @@ class ChatMain(QMainWindow):
             print(f"Error loading UI: {e}")
 
     def add_controls(self):
-        """Web search mode, reasoning toggle and a status line, added to the bottom bar."""
-        bar = self.ui.horizontalLayout_4
+        """Status line in the bottom bar; quick model picker and the tools' folder buttons
+        above the input, on the left.
+
+        Web search, Think and Tools are set per chat in the Chat Settings window."""
+        bottom = self.ui.horizontalLayout_4
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(f"color:{MUTED}")
-        bar.insertWidget(0, self.status_label, 1)
+        bottom.insertWidget(0, self.status_label, 1)
+
+        # The row above the input (Reload Text / Reload Image). Keep its image-panel spacer by
+        # reference, since the controls below are inserted in front of it.
+        bar = self.ui.horizontalLayout_3
+        self.img_spacer = bar.itemAt(3)
 
         # Models come straight from Ollama through the server, refreshed whenever the list is opened.
+        # The same choice is the Model in Chat Settings.
         self.models = {}
         self.model_combo = LiveComboBox(self.refresh_models)
         self.model_combo.setToolTip("Models on the server's Ollama. ● = loaded in memory, 👁 vision, "
@@ -166,29 +186,13 @@ class ChatMain(QMainWindow):
         self.model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.model_combo.setStyleSheet("background:rgb(57,57,57);color:white")
         self.model_combo.activated.connect(self.on_model_chosen)
-        bar.insertWidget(bar.count() - 1, self.model_combo)
-
-        self.web_combo = QComboBox()
-        for mode in llmClient.WEB_MODES:
-            self.web_combo.addItem(WEB_LABELS[mode], mode)
-        self.web_combo.setToolTip("Auto: the model decides when a question needs a web search")
-        self.web_combo.setStyleSheet("background:rgb(57,57,57);color:white")
-        self.think_check = QCheckBox("Think")
-        self.think_check.setLayoutDirection(Qt.RightToLeft)      # box to the right of the label
-        self.think_check.setChecked(True)
-        self.think_check.setToolTip("Let the model reason before answering (thinking models only)")
-        bar.insertWidget(bar.count() - 1, self.web_combo)
-        bar.insertWidget(bar.count() - 1, self.think_check)
+        bar.insertWidget(0, self.model_combo)
 
         # Tools on this PC: files, git and terminal (local_tools/). Changes and commands ask first.
-        self.tools_check = QCheckBox("Tools")
-        self.tools_check.setLayoutDirection(Qt.RightToLeft)
-        self.tools_check.setChecked(True)
-        self.tools_check.setToolTip("Let the model browse and edit files, use git and run commands on this PC. "
-                                    "It asks you before any change or command.")
         # 📁 links another folder; ▾ drops down the linked folders, each with an x to remove it.
         self.folder_button = QPushButton("📁")
         self.folder_button.setStyleSheet("background:rgb(57,57,57);color:white")
+        self.folder_button.setFixedWidth(max(self.folder_button.sizeHint().width() // 2, 24))
         self.folder_button.clicked.connect(self.add_tools_folder)
         self.folder_list_button = QToolButton()
         self.folder_list_button.setText("▾")
@@ -197,15 +201,10 @@ class ChatMain(QMainWindow):
         self.folder_menu = QMenu(self)
         self.folder_menu.setStyleSheet("QMenu{background:rgb(45,45,45);color:white}")
         self.folder_list_button.clicked.connect(self.show_folder_menu)
-        bar.insertWidget(bar.count() - 1, self.tools_check)
-        bar.insertWidget(bar.count() - 1, self.folder_button)
-        bar.insertWidget(bar.count() - 1, self.folder_list_button)
-        self.tools_check.toggled.connect(self.on_options_changed)
+        bar.insertWidget(1, self.folder_button)
+        bar.insertWidget(2, self.folder_list_button)
         self._show_tools_folder()
         self.ui.label.setText(APP_VERSION)
-
-        self.web_combo.currentIndexChanged.connect(self.on_options_changed)
-        self.think_check.toggled.connect(self.on_options_changed)
 
     def setup_connections(self):
         """Connect button signals to functions"""
@@ -242,10 +241,13 @@ class ChatMain(QMainWindow):
             self.models = {m["id"]: m for m in found}
         if not found:
             self.status_label.setText(f"Can't get the model list from {self.client.base_url}")
+        if self.models and not self.settings["Model"]:
+            self.settings["Model"] = next(iter(self.models))     # a chat with no model yet takes the first
+            self.client.set_model(self.settings["Model"])
         self._fill_model_combo()
         return list(self.models)
 
-    def _model_label(self, m):
+    def model_label(self, m):
         icons = "".join(icon for cap, icon in CAP_ICONS if cap in m.get("capabilities", []))
         size = m.get("parameter_size") or ""
         return f"{'●' if m.get('loaded') else '○'} {m['id']}  {size} {icons}".rstrip()
@@ -255,7 +257,7 @@ class ChatMain(QMainWindow):
         combo.blockSignals(True)
         combo.clear()
         for mid, m in self.models.items():
-            combo.addItem(self._model_label(m), mid)
+            combo.addItem(self.model_label(m), mid)
             ctx = m.get("context_length")
             combo.setItemData(combo.count() - 1, ", ".join(
                 x for x in (m.get("parameter_size"), m.get("quantization"),
@@ -265,32 +267,34 @@ class ChatMain(QMainWindow):
             combo.addItem(f"   {current} (not on the server)", current)
         combo.setCurrentIndex(max(0, combo.findData(current)))
         combo.blockSignals(False)
-        self._update_think_check()
+        self._apply_options()
 
     def on_model_chosen(self, index):
         model = self.model_combo.itemData(index)
         if model and model != self.client.model_name:
+            self.settings["Model"] = model
             self.client.set_model(model)
             self.client.summary = None      # the old summary was written by another model; harmless to redo
             self.save_chat()
-        self._update_think_check()
+            self.model_changed.emit(model)
+        self._apply_options()
 
-    def _update_think_check(self):
+    def _apply_options(self):
+        """Send this chat's options to the client; Tools only counts for models that can call tools."""
+        s = self.settings
         caps = self.models.get(self.client.model_name, {}).get("capabilities")
-        can_think = not caps or "thinking" in caps
-        self.think_check.setEnabled(can_think)
-        self.think_check.setToolTip("Let the model reason before answering" if can_think
-                                    else f"{self.client.model_name} can't think; this setting is ignored")
         can_call = not caps or "tools" in caps
-        self.tools_check.setEnabled(can_call)
-        if not can_call:
-            self.tools_check.setToolTip(f"{self.client.model_name} can't call tools; pick a model marked 🔧")
-        self.on_options_changed()
-
-    def on_options_changed(self, *_):
-        self.client.web_mode = self.web_combo.currentData() or "auto"
-        self.client.think = self.think_check.isChecked()
-        self.client.tools_enabled = self.tools_check.isChecked() and self.tools_check.isEnabled()
+        self.client.web_mode = s["Web Search"]
+        self.client.think = s["Think"]
+        self.client.tools_enabled = s["Tools"] and can_call
+        if not s["Tools"]:
+            tip = "Tools are off for this chat (Character > Settings)"
+        elif not can_call:
+            tip = f"{self.client.model_name} can't call tools; pick a model marked 🔧"
+        else:
+            tip = ""
+        self.status_tools_tip = tip
+        self._show_tools_folder()
 
     def add_tools_folder(self):
         box = self.client.toolbox
@@ -344,8 +348,9 @@ class ChatMain(QMainWindow):
         box = self.client.toolbox
         n = len(box.folders)
         self.folder_list_button.setText(f"▾ {n}" if n else "▾")
+        tip = self.status_tools_tip
         self.folder_button.setToolTip(f"Link a folder for the tools ({n} linked)\n"
-                                      f"Working folder now: {box.working_dir}")
+                                      f"Working folder now: {box.working_dir}" + (f"\n{tip}" if tip else ""))
 
     def on_tool_event(self, ev):
         if ev["state"] == "running":
@@ -656,7 +661,8 @@ class ChatMain(QMainWindow):
         self.ui.graphicsView.setMaximumWidth(0)
         self.ui.graphicsView.setMinimumWidth(0)
 
-        layoutH3.itemAt(3).changeSize(0, 20, QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.img_spacer.changeSize(0, 20, QSizePolicy.Fixed, QSizePolicy.Fixed)
+        layoutH3.invalidate()
 
         self.ui.pushButton_7.setMaximumWidth(0)
         self.ui.pushButton_7.setEnabled(False)
@@ -674,7 +680,8 @@ class ChatMain(QMainWindow):
         self.ui.graphicsView.setMaximumWidth(16777215)
         self.ui.graphicsView.setMinimumWidth(0)
 
-        layoutH3.itemAt(3).changeSize(40, 20, QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.img_spacer.changeSize(40, 20, QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layoutH3.invalidate()
         self.ui.graphicsView.setEnabled(True)
         self.ui.graphicsView.setVisible(True)
 
@@ -756,7 +763,7 @@ class ChatMain(QMainWindow):
         self.chat_path = path
 
         self.update_lastChat(path)
-        self.ui.lineEdit.setText(chatHist["Name"])
+        self.ui.lineEdit.setText(chatHist.get("Name") or Path(path).stem)
 
         self.chat_markdown = chatHist.get("Chat", [])
         for msg in self.chat_markdown:
@@ -776,34 +783,17 @@ class ChatMain(QMainWindow):
         with open(logsPath, "w", encoding="utf-8") as f:
             json.dump(logs, f, indent=4)
 
-        self.load_bot(chatHist["Bot Path"])
-        self.client.set_model(chatHist["Model"])
-        self._fill_model_combo()
-        self.client.temperature = chatHist["Temperature"]
         self.client.summary = chatHist.get("Summary")
-
-        mode = chatHist.get("Web Search", "auto")
-        self.web_combo.blockSignals(True)
-        self.web_combo.setCurrentIndex(max(0, self.web_combo.findData(mode)))
-        self.web_combo.blockSignals(False)
-        self.think_check.blockSignals(True)
-        self.think_check.setChecked(chatHist.get("Think", True))
-        self.think_check.blockSignals(False)
-        self.tools_check.blockSignals(True)
-        self.tools_check.setChecked(chatHist.get("Tools", True))
-        self.tools_check.blockSignals(False)
         folders = chatHist.get("Tools Folders")
         if folders is None:          # 0.5 saved one working folder, which defaulted to home
             old = chatHist.get("Tools Folder")
             folders = [old] if old and Path(old) != Path.home() else []
         self.client.toolbox.set_folders(folders)
-        self._show_tools_folder()
-        self.on_options_changed()
+        self.set_settings(chat_settings.from_chat(chatHist))
+        if not isinstance(chatHist.get("Settings"), dict):
+            self.save_chat()         # move a pre-0.9 chat's settings into the chat file now
 
-        self.ui.listWidget.clear()
-        self.ui.listWidget.addItem("Create New Chat [+]")
-        for chatFile in reversed(logs["ChatList"]):
-            self.ui.listWidget.addItem(chatFile)
+        self._fill_chat_list(logs["ChatList"])
 
         self.expanded_thinking = set()
         self.expanded_tools = set()
@@ -816,16 +806,10 @@ class ChatMain(QMainWindow):
 
         data = {
             "Name": self.ui.lineEdit.text(),
-            "Bot Path": self.bot_path,
-            "Temperature": self.client.temperature,
-            "Model": self.client.model_name,
-            "Web Search": self.client.web_mode,
-            "Think": self.client.think,
-            "Tools": self.tools_check.isChecked(),
+            "Settings": self.settings,
             "Tools Folders": [str(f) for f in self.client.toolbox.folders],
             "Chat": self.chat_markdown,
             "Summary": self.client.summary,
-            "Payload": self.client.export_payload(self.chat_markdown),
         }
 
         try:
@@ -834,27 +818,84 @@ class ChatMain(QMainWindow):
         except Exception as e:
             print(f"Save failed: {e}")
 
-    def load_bot(self, path):
-        botJsonPath = path + "/Bot Description.json"
-        botJson = read_json_file(botJsonPath)
-        self.bot_path = path
-        self.bot_desc_path = botJsonPath
-        if botJson is None:
-            self.client.set_preset("")
-            self.botName = "Bot"
+    # ------------------------------------------------------------------
+    # Chat settings (character, model, options)
+    # ------------------------------------------------------------------
+
+    def set_settings(self, settings):
+        """Use `settings` for this chat: character, model and options."""
+        self.settings = chat_settings.normalize(settings)
+        s = self.settings
+        self.botName = s["Character"]
+        self.client.set_preset(s["Pretext"])
+        self.client.temperature = s["Temperature"]
+        if not s["Model"] and self.models:
+            s["Model"] = next(iter(self.models))
+        self.client.set_model(s["Model"] or None)
+        self._fill_model_combo()            # also applies Think, Web Search and Tools
+        # The image panel is for ComfyUI workflows, which chats can't set yet.
+        self.isShowImgWindowLock = True
+        self.hideImgWindow()
+        self.ui.pushButton.setEnabled(False)
+
+    def apply_settings(self, title, settings):
+        """Save from the Chat Settings window for the open chat; a new title renames its file."""
+        if self.client.busy:
+            self.client.abort_generation()
+            self._end_response()
+        old_model = self.client.model_name
+        self.set_settings(settings)
+        if self.client.model_name != old_model:
+            self.client.summary = None      # written by the old model; harmless to redo
+        if title != self.ui.lineEdit.text():
+            self.ui.lineEdit.setText(title)
+            self._rename_chat_file(title)
+        self.save_chat()
+        self._rebuild_chat_ui()
+
+    def create_chat(self, title, settings):
+        """A new, empty chat with these settings, opened straight away."""
+        path = self._free_chat_path(title)
+        data = {"Name": title, "Settings": chat_settings.normalize(settings), "Tools Folders": [], "Chat": []}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        self.load_chat(str(path))
+
+    def _free_chat_path(self, title, current=None):
+        """CHAT_DIR/<title>.json, or <title> (1).json and so on if that's taken by another chat."""
+        base = safe_file_name(title)
+        path, i = paths.CHAT_DIR / f"{base}.json", 1
+        while path.exists() and not (current and path.resolve() == Path(current).resolve()):
+            path = paths.CHAT_DIR / f"{base} ({i}).json"
+            i += 1
+        return path
+
+    def _rename_chat_file(self, title):
+        old = Path(self.chat_path)
+        new = self._free_chat_path(title, current=old)
+        if new == old:
             return
+        try:
+            os.replace(old, new)
+        except OSError as e:
+            print(f"Rename failed: {e}")
+            return
+        self.chat_path = str(new)
+        logs = read_json_file(paths.CHAT_INDEX_FILE) or {"LastOpened": "", "ChatList": []}
+        logs["ChatList"] = [new.stem if c == old.stem else c for c in logs.get("ChatList", [])]
+        if new.stem not in logs["ChatList"]:
+            logs["ChatList"].append(new.stem)
+        logs["LastChat"] = str(new)
+        with open(paths.CHAT_INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump(logs, f, indent=4)
+        self._fill_chat_list(logs["ChatList"])
 
-        self.client.set_preset(botJson["Description"])
-        self.botName = botJson["Name"]
-
-        if botJson['WorkflowPath'] == "":
-            self.isShowImgWindowLock = True
-            self.hideImgWindow()
-            self.ui.pushButton.setEnabled(False)
-        else:
-            self.isShowImgWindowLock = False
-            self.showImgWindow()
-            self.ui.pushButton.setEnabled(True)
+    def _fill_chat_list(self, chat_list):
+        self.ui.listWidget.clear()
+        self.ui.listWidget.addItem("Create New Chat [+]")
+        for chatFile in reversed(chat_list):
+            self.ui.listWidget.addItem(chatFile)
 
     # ------------------------------------------------------------------
     # Sending, editing, regenerating

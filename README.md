@@ -36,31 +36,30 @@ The Main interface of the client UI. With Top bar tools to create new chats, edi
 
 The main area is a window that shows all the interaction between the user and the bot.  The interactions are timestamped with response times recorded while the texts support markdown formats for enhanced readability.  The bottom bar allows multi row text input.  So code pasting is feasible for self sustained vibe coding development.  There are also 2 pop up side bars on the sides for chat selection list and image browser respectively, with edit and delete message functions, the UI functions really similar to modern chatbot applications on the market.
 
-## 2.2. Chat Creation and Settings
-The user can create new chats or edit existing ones with functions to name the chats, switch the bot LLM, and select bot settings, allowing users to hotswap models and presets for the chat to handle different tasks in various scenarios.
+## 2.2. Chat Settings (v0.9)
+Every chat has its own settings, saved inside the chat file: the chat title, the **character** (a name and the pretext sent first as the system message), the **model** and temperature, **web search**, **Think** and **Tools**. Open them from *Character > Settings…* or *Chat > Chat Settings* (Ctrl+E); *Chat > New Chat* opens them for a new chat. The model picker above the message box (left, next to the 📁 folder buttons) is a quick shortcut to the same setting: changing it there changes it in the settings too.
+
+*Export…* in the settings window saves a chat's settings to a small `.json` you can share; *Import…* loads one into the window to check before you press *Save*. Anything missing or invalid in an imported file takes its default, so partial files and the old `Bot Description.json` files import too. The defaults and checks live in `Code/chat_settings.py`.
+
+Chats from before 0.9 kept their character in a separate bot folder (`Save/Bot/<name>/Bot Description.json`) and a duplicate "Payload" copy of the conversation. Opening such a chat copies its character into the chat file and drops both; the old `Save/Bot` folders are no longer read and can be deleted.
 
 ![Chat Settings](Img/ChatSettings.png)
 
-## 2.3. Bot Creation and Settings
-The user can drag and drop images to give the bot a bit more personality together with the text description window for more specific and detailed context.  The bot also supports workflow.json for ComfyUI image generation, but that feature is still under development.  This setting is seperated from the chat settings page such that the same bot with the same personality can be use across multiple chats without manually doing all the settings every time.
-
-![Bot Settings](Img/BotSettings.png)
-
 # 2.4. Save Files
-Since the LLM server is only for processing text only. All of the settings and logs are saved by the client UI, hence more work was done on the UI itself instead of the LLM.  The UI Saves the bot settings separately as previously mentioned.  Meanwhile, each chat was saved as a massive .json file, which includes data such as the save path of the bot settings, visible chat history, invisible chat history, model name, llm temperature, etc.  Everytime the UI loads a chat, the .temp.json updates the order of the chats such that the chat list can reflect the most recently interacted chats for user convenience and organisation.  Meanwhile, the program follows the bot save path set in the chat.json to obtain the bot presets and combines it with the invisible chat history.  The user only sees the visible version of the chat history in the chat window, with all the presets and invisible instructions returned by the bot being hidden in the full version.  The 2 chat logs would then be updated with the latest user message to be sent as a .json to the llm and be reflected onto the chat window.  The program also asks the llm to summarize previous chat logs and compresses the payload chat log to minimise tokens used and optimise the LLM's work load.
+All settings and logs are saved by the client. Each chat is one `.json` in `Save/Chat` holding its title, its settings, its linked tool folders, the conversation and the rolling summary. `.temp.json` keeps the last opened chat and the order of the chat list, so the list shows the most recently used chats first. Each request to the LLM is rebuilt from the conversation, the pretext and the summary; older messages are folded into the summary to keep the prompt short.
 
-![Bot Settings](Img/ChatJson.png)
+![Chat Json](Img/ChatJson.png)
 
 # 2.5. Reasoning, Files and Web Search (v0.5)
 The client now talks to the Ollama server in `Server/ollama` (see its README). Each reply can:
-- **Think first.** With *Think* ticked, the model's own reasoning streams in grey and then folds into a "💭 Thought for Ns" line you can click to expand. Reasoning is never sent back as context.
+- **Think first.** With *Think* on in the chat's settings, the model's own reasoning streams in grey and then folds into a "💭 Thought for Ns" line you can click to expand. Reasoning is never sent back as context.
 - **Read images and files.** The *File* button attaches images (sent to vision models), PDFs, Word documents and text or code files.
-- **Search the web.** *Web: Auto* lets the model decide when a question needs a search; *Always* and *Off* force it. Answers cite their sources, listed under the reply.
+- **Search the web.** In the chat's settings, *Web: Auto* lets the model decide when a question needs a search; *Always* and *Off* force it. Answers cite their sources, listed under the reply.
 
 Long chats keep the newest messages word for word and fold older ones into a running summary that is only refreshed every few messages. The server address can include a port (`192.168.0.192:8100`); the default port is 8100.
 
 ## 2.6. Tools on your PC: files, git and terminal
-With *Tools* ticked (models marked 🔧 in the model list), the model can work on the Windows PC the client runs on, not only on files you attach:
+With *Tools* on in the chat's settings (models marked 🔧 in the model list), the model can work on the Windows PC the client runs on, not only on files you attach:
 - **Files and folders:** list folders, find files by name, search inside files, read text files (PDF and Word through the server), create, edit, copy, move and delete (to the Recycle Bin).
 - **Git:** status, diff, log, show and branches; add, commit, switch, pull, push and clone; any other git command.
 - **Terminal:** runs PowerShell (or cmd) commands and reads their output.
@@ -72,7 +71,7 @@ Reading never asks. Every change and every command opens an *Allow / Always allo
 |---|---|---|
 | LLM server | `192.168.0.192:8100` (Ubuntu), code in `Server/ollama/` | Ollama wrapper the client talks to. Addresses: `Server/ollama/chat_server/config.py`, overrides in `Server/ollama/.env` |
 | Client git folder | `Code/` (`paths.CLIENT_REPO_DIR`) | app files: UI layouts, images, default addresses in `Code/UI/network.json` |
-| Client data | `%APPDATA%\Waterlogged\ChatUI` (`paths.CLIENT_DATA_DIR`) | chats, bots, and your saved server address (`network.json`) |
+| Client data | `%APPDATA%\Waterlogged\ChatUI` (`paths.CLIENT_DATA_DIR`) | chats (each with its settings) and your saved server address (`network.json`) |
 | Client PC | `192.168.0.184` (Windows) | runs `Code/`; listed in `network.json` for reference |
 | NAS | `192.168.0.163` (Samba): `nas` in `Code/UI/network.json`, `NAS_IP` on the server | chat and bot saves move here next; nothing uses it yet |
 

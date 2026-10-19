@@ -418,8 +418,7 @@ color:rgb(255, 255, 255)</string>
     <property name="title">
      <string>Character</string>
     </property>
-    <addaction name="actionCreate_New_Chara"/>
-    <addaction name="actionEdit_Chara"/>
+    <addaction name="actionCharacter_Settings"/>
    </widget>
    <widget class="QMenu" name="menuServer">
     <property name="title">
@@ -478,14 +477,12 @@ color:rgb(255, 255, 255)</string>
     <string>Chat Settings</string>
    </property>
   </action>
-  <action name="actionCreate_New_Chara">
+  <action name="actionCharacter_Settings">
    <property name="text">
-    <string>Create New</string>
+    <string>Settings…</string>
    </property>
-  </action>
-  <action name="actionEdit_Chara">
-   <property name="text">
-    <string>Edit Chara</string>
+   <property name="toolTip">
+    <string>This chat's character, model, web search, Think and Tools</string>
    </property>
   </action>
   <action name="actionSet_IP">

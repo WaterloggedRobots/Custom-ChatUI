@@ -1,13 +1,12 @@
+import paths
 from PySide6.QtWidgets import QMainWindow
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, Qt
 
 class EmptyStart(QMainWindow):
-    def __init__(self,pd, fd):
+    def __init__(self):
         super().__init__()
         self.ui = None
-        self.directoryParent = pd
-        self.directoryDefault = fd
 
         self.load_ui()
         self.setup_connections()
@@ -17,7 +16,7 @@ class EmptyStart(QMainWindow):
     def load_ui(self):
         """Load the UI file"""
         try:
-            ui_file = QFile(self.directoryDefault+r"\UI\Empty Start.ui")  # Change to your .ui file name
+            ui_file = QFile(paths.ui_file("Empty Start.ui"))
             if not ui_file.open(QFile.ReadOnly):
                 print(f"Cannot open UI file: {ui_file.errorString()}")
                 return
@@ -42,11 +41,9 @@ class EmptyStart(QMainWindow):
 
 
 class EmptyLeave(QMainWindow):
-    def __init__(self, pd,fd):
+    def __init__(self):
         super().__init__()
         self.ui = None
-        self.directoryParent = pd
-        self.directoryDefault = fd
 
         self.load_ui()
         self.setup_connections()
@@ -56,7 +53,7 @@ class EmptyLeave(QMainWindow):
     def load_ui(self):
         """Load the UI file"""
         try:
-            ui_file = QFile(self.directoryDefault+r"\UI\Warning Chat.ui")  # Change to your .ui file name
+            ui_file = QFile(paths.ui_file("Warning Chat.ui"))
             if not ui_file.open(QFile.ReadOnly):
                 print(f"Cannot open UI file: {ui_file.errorString()}")
                 return
@@ -87,8 +84,6 @@ class EmptyLeave(QMainWindow):
         self.close()
 
 class InvalidChatSettings(QMainWindow):
-    def __init__(self, pd, fd):
+    def __init__(self):
         super().__init__()
         self.ui = None
-        self.directoryParent = pd
-        self.directoryDefault = fd

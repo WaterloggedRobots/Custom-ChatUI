@@ -51,6 +51,33 @@ Since the LLM server is only for processing text only. All of the settings and l
 
 ![Bot Settings](Img/ChatJson.png)
 
+# 2.5. Reasoning, Files and Web Search (v0.5)
+The client now talks to the Ollama server in `Server/ollama` (see its README). Each reply can:
+- **Think first.** With *Think* ticked, the model's own reasoning streams in grey and then folds into a "💭 Thought for Ns" line you can click to expand. Reasoning is never sent back as context.
+- **Read images and files.** The *File* button attaches images (sent to vision models), PDFs, Word documents and text or code files.
+- **Search the web.** *Web: Auto* lets the model decide when a question needs a search; *Always* and *Off* force it. Answers cite their sources, listed under the reply.
+
+Long chats keep the newest messages word for word and fold older ones into a running summary that is only refreshed every few messages. The server address can include a port (`192.168.0.192:8100`); the default port is 8100.
+
+## 2.6. Tools on your PC: files, git and terminal
+With *Tools* ticked (models marked 🔧 in the model list), the model can work on the Windows PC the client runs on, not only on files you attach:
+- **Files and folders:** list folders, find files by name, search inside files, read text files (PDF and Word through the server), create, edit, copy, move and delete (to the Recycle Bin).
+- **Git:** status, diff, log, show and branches; add, commit, switch, pull, push and clone; any other git command.
+- **Terminal:** runs PowerShell (or cmd) commands and reads their output.
+
+Reading never asks. Every change and every command opens an *Allow / Always allow / Deny* box first, showing exactly what will run ("Show Details" has the full arguments); *Always allow* lasts until the app is closed. The 📁 button links a folder for the model to work in, and you can link several. The ▾ next to it drops down the linked folders, shortened to drive, parent and folder (`C:/.../Projects/ChatUI`), each with an **x** to unlink it. The model is told which folders are linked and starts in the first one. Each chat remembers its own folders. The tools run in the client (`Code/local_tools/`), so the server never touches your files. Git must be installed (Git for Windows). Tests: `cd Code` then `python -m pytest -q tests`.
+
+## Where things live
+| Name | Where | What |
+|---|---|---|
+| LLM server | `192.168.0.192:8100` (Ubuntu), code in `Server/ollama/` | Ollama wrapper the client talks to. Addresses: `Server/ollama/chat_server/config.py`, overrides in `Server/ollama/.env` |
+| Client git folder | `Code/` (`paths.CLIENT_REPO_DIR`) | app files: UI layouts, images, default addresses in `Code/UI/network.json` |
+| Client data | `%APPDATA%\Waterlogged\ChatUI` (`paths.CLIENT_DATA_DIR`) | chats, bots, and your saved server address (`network.json`) |
+| Client PC | `192.168.0.184` (Windows) | runs `Code/`; listed in `network.json` for reference |
+| NAS | `192.168.0.163` (Samba): `nas` in `Code/UI/network.json`, `NAS_IP` on the server | chat and bot saves move here next; nothing uses it yet |
+
+Every client path and address is defined once, in `Code/paths.py`.
+
 # 3. Future Works
 I have packaged the program into a .exe app that can connect to my server machine on the same LAN.  It's now functioning enough that I can ask it to code its own code for me :).
 

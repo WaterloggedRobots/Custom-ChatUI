@@ -1,275 +1,403 @@
+"""Client for the ChatUI server (Server/ollama/ollama_server.py).
+
+The chat history in ChatMain is the single source of truth; every request
+builds its message list from it here:
+
+- the bot preset goes first as the system message;
+- long chats keep the newest messages verbatim and fold older ones into a
+  rolling summary, which is only refreshed after enough new messages have
+  dropped out of the window (not on every request);
+- images and files attached to recent user messages are sent inline
+  (OpenAI content parts); older ones are replaced by a short note;
+- the model's reasoning is requested with `think` and streamed separately,
+  and is never sent back as context;
+- with tools on, the model can use this PC's files, git and terminal
+  (local_tools/). The server streams the model's tool calls back; they run
+  here (changes and commands only after you allow them in the GUI), and the
+  results go back to the model in the next request, for up to
+  MAX_TOOL_ROUNDS rounds per answer.
+"""
+
+import base64
 import json
+import mimetypes
 import threading
-import requests
-import time
-from PySide6.QtCore import Signal, QObject
 from pathlib import Path
 
-# ======================
-# CONFIG
-# ======================
-#IP = "192.168.0.247"
-PORT = "8000"
+import requests
+from PySide6.QtCore import QObject, Signal
+
+import paths
+from local_tools import ToolBox
+
+DEFAULT_PORT = 8100
+
+MAX_CONTEXT_MESSAGES = 20     # at least this many newest messages are sent verbatim
+SUMMARY_REFRESH_STEP = 10     # re-summarise after this many more messages fall out of the window
+SUMMARY_MAX_TOKENS = 600
+ATTACHMENT_TURNS = 2          # user turns whose attachments are re-sent in full
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+WEB_MODES = ("auto", "on", "off")
+MAX_TOOL_ROUNDS = 12          # tool calls the model may make in a row before it must answer
+TOOL_LOG_CHARS = 3000         # how much of each tool result is kept in the saved chat
 
 
-MAX_CONTEXT_MESSAGES = 16
-SUMMARY_TRIGGER_COUNT = 24
-SUMMARY_MODEL_MAX_TOKENS = 512
+def attachment_kind(path) -> str:
+    return "image" if Path(path).suffix.lower() in IMAGE_EXT else "file"
+
+
+def _data_url(path: Path) -> str:
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
 
 
 class LLMClient(QObject):
-    token = Signal(str)
-    done = Signal(str)
+    token = Signal(str)        # answer text, as it streams
+    thinking = Signal(str)     # reasoning text, as it streams
+    status = Signal(str)       # "Searching: …" and similar; "" clears it
+    sources = Signal(list)     # [{"n", "title", "url"}]
+    done = Signal(dict)        # {"content", "thinking", "sources", "tools", "usage", "timings", "aborted"}
     error = Signal(str)
-    model_changed = Signal(str)
+    tool_event = Signal(dict)  # {"name", "summary", "kind", "state": running|ok|error|declined, "output"}
+    # A change or command wants to run: {"name", "summary", "kind", "details"}. Answer with answer_approval().
+    approval_needed = Signal(dict)
 
-    def __init__(self,fd):
+    def __init__(self):
         super().__init__()
         self.model_name = None
         self.temperature = 0.7
+        self.preset = ""
+        self.think = True
+        self.web_mode = "auto"
+        self.summary = None            # {"upto": n, "text": "..."} covering history[:n]
 
-        self.directoryDefault = fd
-        IP = self.read_json_file(str(self.directoryDefault) + r"\UI\config.json")
-        self.ip = IP["ip"]
-        self.port = PORT
-        self.VLLM_URL = f"http://{self.ip}:{self.port}/v1/chat/completions"
-        self.MODELS_URL = f"http://{self.ip}:{self.port}/v1/models"
-        self.ADMIN_URL = f"http://{self.ip}:9000/admin/switch_model"
-        
-        self.preset = ""                 # system role, immutable
-        self.messages = []               # visible chat
-        self.payload_messages = []       # full payload
+        # LLM server address: Code/UI/network.json, or your saved copy (see paths.py)
+        server = paths.load_network().get("llm_server", {})
+        self.server_ip = str(server.get("ip") or "127.0.0.1")
+        self.server_port = int(server.get("port") or DEFAULT_PORT)
 
-        self.current_response = ""
-        self.lock = threading.Lock()
+        self._worker = None
+        self._abort = threading.Event()
+        self._response = None
 
-        self._abort_flag = False
+        self.tools_enabled = True
+        self.toolbox = ToolBox(extract_text=self._extract_text)
+        self._approval = threading.Event()
+        self._approval_answer = "deny"
 
-    def read_json_file(self, file_path):
-        """Read a JSON file and return its contents"""
-        try:
-            # Convert to Path object for better handling
-            json_path = Path(file_path)
+    # ------------------------------------------------------------- settings
 
-            if not json_path.exists():
-                print(f"❌ File not found in ChatUI: {file_path}")
-                return None
+    @property
+    def server_address(self) -> str:
+        return f"{self.server_ip}:{self.server_port}"
 
-            # Read the file
-            with open(json_path, 'r', encoding='utf-8') as file:
-                data = json.load(file)
+    def set_server_address(self, text: str, save: bool = True):
+        """Accepts '192.168.0.192' or '192.168.0.192:8100'."""
+        self.server_ip, self.server_port = paths.split_address(text, self.server_port)
+        if save:
+            paths.save_server_address(self.server_ip, self.server_port)
 
-            print(f"✅ JSON loaded successfully from: {json_path.name}")
-            return data
+    @property
+    def base_url(self) -> str:
+        return f"http://{self.server_address}"
 
-        except json.JSONDecodeError as e:
-            print(f"❌ Invalid JSON format: {e}")
-            return None
-        except Exception as e:
-            print(f"❌ Error reading file: {e}")
-            return None
-
-    # ----------------------
-    # Configuration
-    # ----------------------
     def set_model(self, model: str):
         self.model_name = model
 
     def set_preset(self, text: str):
-        self.preset = text.strip()
+        self.preset = (text or "").strip()
 
-    # ----------------------
-    # Chat API
-    # ----------------------
-    def add_user_message(self, text: str):
-        with self.lock:
-            msg = {"role": "user", "content": text}
-            self.messages.append(msg)
-            self.payload_messages.append(msg)
+    @property
+    def busy(self) -> bool:
+        return self._worker is not None and self._worker.is_alive()
 
-    def generate(self):
+    # --------------------------------------------------------------- server
+
+    def list_models(self):
+        """Models on the server, with capabilities when it reports them."""
+        try:
+            r = requests.get(f"{self.base_url}/v1/models", params={"detailed": "true"}, timeout=4)
+            r.raise_for_status()
+            return r.json().get("data", [])
+        except requests.RequestException as e:
+            print(f"❌ Could not list models: {e}")
+            return []
+
+    def _extract_text(self, path: Path) -> str:
+        """PDF/Word text for read_file, from the server's extractor."""
+        with open(path, "rb") as f:
+            r = requests.post(f"{self.base_url}/v1/files/extract", files={"file": (path.name, f)}, timeout=120)
+        if r.status_code != 200:
+            raise RuntimeError(f"the server could not read {path.name}: {r.text[:300]}")
+        return r.json().get("text", "")
+
+    # ------------------------------------------------------------ messages
+
+    def _content(self, msg, full_attachments: bool):
+        text = msg.get("content", "")
+        atts = msg.get("attachments") or []
+        if not atts:
+            return text
+        if not full_attachments:
+            names = ", ".join(a["name"] for a in atts)
+            return f"{text}\n\n[Earlier attachments, no longer shown: {names}]".strip()
+        parts = [{"type": "text", "text": text}]
+        for a in atts:
+            path = Path(a["path"])
+            if not path.is_file():
+                parts[0]["text"] += f"\n\n[Attachment {a['name']} is missing from {path}]"
+                continue
+            if a.get("kind") == "image":
+                parts.append({"type": "image_url", "name": a["name"], "image_url": {"url": _data_url(path)}})
+            else:
+                parts.append({"type": "file", "file": {"filename": a["name"], "file_data": _data_url(path)}})
+        return parts
+
+    def _split_history(self, history):
+        """(older, recent): recent is the verbatim window and starts with a user turn.
+
+        The window moves in steps of SUMMARY_REFRESH_STEP rather than one message per
+        turn (it holds MAX_CONTEXT_MESSAGES to MAX_CONTEXT_MESSAGES + step - 1 messages).
+        Between steps the start of the prompt doesn't change, so Ollama reuses its
+        cached prompt and only reads the new messages; the summary refreshes at the
+        same steps."""
+        cut = max(0, len(history) - MAX_CONTEXT_MESSAGES)
+        cut -= cut % SUMMARY_REFRESH_STEP
+        while cut < len(history) - 1 and history[cut]["role"] != "user":
+            cut += 1
+        return history[:cut], history[cut:]
+
+    def build_messages(self, history, summary_text=None):
+        _, recent = self._split_history(history)
+        messages = []
+        if self.preset:
+            messages.append({"role": "system", "content": self.preset})
+        if summary_text:
+            messages.append({"role": "system", "content": f"Summary of the earlier conversation:\n{summary_text}"})
+        user_idx = [i for i, m in enumerate(recent) if m["role"] == "user"]
+        full = set(user_idx[-ATTACHMENT_TURNS:])
+        if self.tools_enabled:
+            messages.append({"role": "system", "content": self.toolbox.system_note()})
+        for i, m in enumerate(recent):
+            if m["role"] not in ("user", "assistant"):
+                continue
+            content = self._content(m, i in full)
+            if m.get("tools"):
+                # Earlier tool use, in one line each, so follow-up questions have the context.
+                used = "\n".join(f"- {t['summary'].splitlines()[0]} ({t['state']})" for t in m["tools"])
+                content = f"[Tools used for this answer:\n{used}]\n\n{content}"
+            messages.append({"role": m["role"], "content": content})
+        return messages
+
+    def export_payload(self, history):
+        """Plain-text copy of what the model sees, saved in the chat file for reference."""
+        payload = [{"role": "system", "content": self.preset}] if self.preset else []
+        for m in history:
+            payload.append({"role": m["role"], "content": self._content(m, False)})
+        return payload
+
+    # ------------------------------------------------------------- summary
+
+    def _summary_for(self, older):
+        """Summary text covering `older`, refreshing it only when it lags by SUMMARY_REFRESH_STEP."""
+        if not older:
+            return None
+        s = self.summary
+        if s and s.get("upto", 0) > len(older):
+            s = None                                  # history was edited underneath it
+        if s and len(older) - s["upto"] < SUMMARY_REFRESH_STEP:
+            return s["text"]
+        start = s["upto"] if s else 0
+        new_msgs = [{"role": m["role"], "content": self._content(m, False)} for m in older[start:]]
+        self.status.emit("Summarising earlier messages…")
+        prompt = [
+            {"role": "system", "content": "Update the running summary of a conversation. Keep goals, decisions, "
+                                          "constraints, names, numbers and technical details. Be concise; "
+                                          "write it as notes, not prose."},
+            {"role": "user", "content": (f"Current summary:\n{s['text']}\n\n" if s else "")
+                                        + "New messages:\n" + json.dumps(new_msgs, ensure_ascii=False)},
+        ]
+        r = requests.post(f"{self.base_url}/v1/chat/completions", json={
+            "model": self.model_name, "messages": prompt, "think": False, "temperature": 0.2,
+            "max_tokens": SUMMARY_MAX_TOKENS, "stream": False}, timeout=300)
+        r.raise_for_status()
+        text = r.json()["choices"][0]["message"]["content"].strip()
+        self.summary = {"upto": len(older), "text": text}
+        return text
+
+    # ------------------------------------------------------------- request
+
+    def generate(self, history):
+        """Answer the last user message in `history` (a list of chat messages)."""
         if not self.model_name:
             self.error.emit("No model selected")
             return
-
-        self._abort_flag = False
-        self.current_response = ""
-        """
-        if self.preset:
-            if not self.payload_messages or self.payload_messages[0]["role"] != "system":
-                self.payload_messages.insert(0, {
-                    "role": "system",
-                    "content": self.preset
-                })
-        """
-
-        threading.Thread(
-            target=self._stream_request,
-            daemon=True
-        ).start()
-
-    # ----------------------
-    # Context logic
-    # ----------------------
-    def _build_payload(self):
-        payload = []
-
-        # 1️⃣ Preset (never summarized)
-        if self.preset:
-            payload.append({
-                "role": "system",
-                "content": self.preset
-            })
-
-        # 2️⃣ Summarize ONLY payload_messages
-        msgs = list(self.payload_messages)
-
-        if len(msgs) > SUMMARY_TRIGGER_COUNT:
-            summary = self._summarize(msgs[:-MAX_CONTEXT_MESSAGES])
-            payload.append({
-                "role": "system",
-                "content": f"Conversation summary:\n{summary}"
-            })
-            payload.extend(msgs[-MAX_CONTEXT_MESSAGES:])
-        else:
-            payload.extend(msgs)
-
-        return payload
-
-    def _summarize(self, messages):
-        payload = {
-            "model": self.model_name,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "Summarize the conversation. Preserve goals, constraints, "
-                        "technical details. Be concise."
-                    )
-                },
-                *messages
-            ],
-            "temperature": 0.3,
-            "max_tokens": SUMMARY_MODEL_MAX_TOKENS,
-            "stream": False
-        }
-
-        r = requests.post(self.VLLM_URL, json=payload, timeout=300)
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
-
-    # ----------------------
-    # Streaming
-    # ----------------------
-    def _stream_request(self):
-        payload = {
-            "model": self.model_name,
-            "messages": self._build_payload(),
-            "temperature": self.temperature,
-            "stream": True
-        }
-
-        try:
-            with requests.post(
-                self.VLLM_URL,
-                json=payload,
-                stream=True,
-                timeout=600
-            ) as r:
-                for line in r.iter_lines():
-                    if self._abort_flag:
-                        return
-
-                    if not line or not line.startswith(b"data: "):
-                        continue
-
-                    data = line[6:]
-                    if data == b"[DONE]":
-                        break
-
-                    chunk = json.loads(data)
-                    delta = chunk["choices"][0]["delta"]
-                    if "content" in delta:
-                        self.current_response += delta["content"]
-                        self.token.emit(delta["content"])
-
-        except Exception as e:
-            self.error.emit(str(e))
+        if self.busy:
+            self.error.emit("Still answering the previous message")
             return
-
-        with self.lock:
-            msg = {"role": "assistant", "content": self.current_response}
-            self.messages.append(msg)
-            self.payload_messages.append(msg)
-
-        self.done.emit(self.current_response)
-
-    # ----------------------
-    # Persistence helpers
-    # ----------------------
-    def export_payload(self):
-        """Full payload sent to LLM (including preset)."""
-        payload = []
-        if self.preset:
-            payload.append({
-                "role": "system",
-                "content": self.preset
-            })
-        payload.extend(self.payload_messages)
-        return payload
-
-
-    def import_payload(self, payload):
-        """Restore payload from disk."""
-        self.messages.clear()
-        self.payload_messages.clear()
-        #self.preset = ""
-
-        for msg in payload:
-            if msg["role"] == "system" and not self.preset:
-                self.preset = msg["content"]
-            else:
-                self.payload_messages.append(msg)
-                if msg["role"] in ("user", "assistant"):
-                    self.messages.append(msg)
-
-    # ----------------------
-    # Switch Models
-    # ----------------------
-    def request_model_switch(self, model_name: str):
-        r = requests.post(
-            self.ADMIN_URL,
-            params={"model": model_name},
-            timeout=5
-        )
-        r.raise_for_status()
+        self._abort.clear()
+        self._worker = threading.Thread(target=self._run, args=([dict(m) for m in history],), daemon=True)
+        self._worker.start()
 
     def abort_generation(self):
-        self._abort_flag = True
-
-    def wait_for_server_ready(self, timeout=120):
-        deadline = time.time() + timeout
-        while time.time() < deadline:
+        self._abort.set()
+        self._approval.set()
+        r = self._response
+        if r is not None:
             try:
-                r = requests.get(self.MODELS_URL, timeout=2)
-                if r.ok:
-                    return True
-            except requests.RequestException:
+                r.close()
+            except Exception:
                 pass
-            time.sleep(1)
-        raise RuntimeError("LLM server did not come back online")
 
-    def switch_model(self, model_name: str):
-        self.abort_generation()
-        self.request_model_switch(model_name)
-        self.wait_for_server_ready()
-        #reset server context
-        self.model_name = model_name
+    def answer_approval(self, answer: str):
+        """From the GUI: "allow", "always" (this tool, until the app closes) or "deny"."""
+        self._approval_answer = answer
+        self._approval.set()
 
-    def get_model(self):
-        r = requests.get(self.MODELS_URL, timeout=2)
-        q = r.json()
-        #print(q)
-        model_name = q['data'][0]["id"]
-        #print(model_name)
-        return model_name
+    def _ask_approval(self, name, summary, kind, args) -> bool:
+        if not self.toolbox.needs_approval(name):
+            return True
+        self._approval.clear()
+        self._approval_answer = "deny"
+        details = json.dumps(args, indent=2, ensure_ascii=False)
+        self.approval_needed.emit({"name": name, "summary": summary, "kind": kind,
+                                   "details": details[:8000] + ("\n…" if len(details) > 8000 else "")})
+        self._approval.wait()
+        if self._abort.is_set():
+            return False
+        if self._approval_answer == "always":
+            self.toolbox.always_allow.add(name)
+        return self._approval_answer in ("allow", "always")
+
+    def _run_tools(self, calls, result):
+        """Run the model's tool calls in order; returns the role=tool messages."""
+        replies = []
+        for call in calls:
+            fn = call.get("function") or {}
+            name = fn.get("name", "")
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+                if not isinstance(args, dict):
+                    raise ValueError("arguments must be an object")
+            except ValueError as e:
+                args, output, state = {}, f"Error: arguments were not valid JSON ({e})", "error"
+            else:
+                state = None
+            summary = self.toolbox.describe(name, args)
+            kind = self.toolbox.kind(name)
+            if state is None:
+                if self._abort.is_set():
+                    break
+                if self._ask_approval(name, summary, kind, args):
+                    self.tool_event.emit({"name": name, "summary": summary, "kind": kind, "state": "running"})
+                    output = self.toolbox.run(name, args)
+                    state = "error" if output.startswith("Error:") else "ok"
+                elif self._abort.is_set():
+                    break
+                else:
+                    output, state = "The user declined this action. Don't try it again; ask them or carry on without it.", "declined"
+            entry = {"name": name, "summary": summary, "kind": kind, "state": state,
+                     "output": output[:TOOL_LOG_CHARS] + ("…" if len(output) > TOOL_LOG_CHARS else "")}
+            result["tools"].append(entry)
+            self.tool_event.emit(entry)
+            replies.append({"role": "tool", "tool_call_id": call.get("id", ""), "name": name, "content": output})
+        return replies
+
+    def _stream(self, payload, result):
+        """One streamed request. Adds text to `result`; returns (this round's text, tool calls)."""
+        text, calls = "", {}
+        with requests.post(f"{self.base_url}/v1/chat/completions", json=payload, stream=True,
+                           timeout=(10, 600)) as r:
+            self._response = r
+            if r.status_code != 200:
+                try:
+                    msg = r.json()["error"]["message"]
+                except Exception:
+                    msg = r.text
+                raise RuntimeError(f"Server error {r.status_code}: {msg}")
+            for line in r.iter_lines(decode_unicode=True):
+                if self._abort.is_set():
+                    result["aborted"] = True
+                    break
+                if not line or not line.startswith("data: "):
+                    continue
+                data = line[6:]
+                if data == "[DONE]":
+                    break
+                chunk = json.loads(data)
+                if "error" in chunk:
+                    raise RuntimeError(chunk["error"].get("message", str(chunk["error"])))
+                if "status" in chunk:
+                    self.status.emit(chunk["status"])
+                if "sources" in chunk:
+                    result["sources"] = chunk["sources"]
+                    self.sources.emit(chunk["sources"])
+                if chunk.get("usage"):
+                    for k, v in chunk["usage"].items():
+                        result["usage"][k] = result["usage"].get(k, 0) + v
+                    result["timings"] = chunk.get("timings", {})
+                for choice in chunk.get("choices") or []:
+                    delta = choice.get("delta") or {}
+                    if delta.get("reasoning_content"):
+                        result["thinking"] += delta["reasoning_content"]
+                        self.thinking.emit(delta["reasoning_content"])
+                    if delta.get("content"):
+                        text += delta["content"]
+                        result["content"] += delta["content"]
+                        self.token.emit(delta["content"])
+                    for tc in delta.get("tool_calls") or []:
+                        # OpenAI streams may split one call over several chunks, keyed by index.
+                        slot = calls.setdefault(tc.get("index", len(calls)),
+                                                {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                        slot["id"] = tc.get("id") or slot["id"]
+                        fn = tc.get("function") or {}
+                        slot["function"]["name"] += fn.get("name") or ""
+                        slot["function"]["arguments"] += fn.get("arguments") or ""
+        return text, [calls[k] for k in sorted(calls)]
+
+    def _run(self, history):
+        result = {"content": "", "thinking": "", "sources": [], "tools": [], "usage": {}, "timings": {},
+                  "aborted": False}
+        try:
+            older, _ = self._split_history(history)
+            summary = self._summary_for(older)
+            messages = self.build_messages(history, summary)
+            for round_no in range(MAX_TOOL_ROUNDS + 1):
+                payload = {
+                    "model": self.model_name,
+                    "messages": messages,
+                    "temperature": self.temperature,
+                    "think": self.think,
+                    # "Always" searches once per question, not again after every tool result.
+                    "web_search": "off" if round_no and self.web_mode == "on" else self.web_mode,
+                    "stream": True,
+                }
+                if self.tools_enabled and round_no < MAX_TOOL_ROUNDS:
+                    payload["tools"] = self.toolbox.schemas()
+                text, calls = self._stream(payload, result)
+                if not calls or result["aborted"]:
+                    break
+                if text and not text.endswith("\n"):
+                    result["content"] += "\n\n"
+                    self.token.emit("\n\n")
+                messages = messages + [{"role": "assistant", "content": text, "tool_calls": calls}]
+                messages += self._run_tools(calls, result)
+                if self._abort.is_set():
+                    result["aborted"] = True
+                    break
+                self.status.emit("Reading the results…")
+        except Exception as e:
+            if self._abort.is_set():
+                result["aborted"] = True
+            else:
+                if isinstance(e, requests.ConnectionError):
+                    e = f"Can't reach the chat server at {self.base_url}. Is it running? (Server > Set IP)"
+                self.status.emit("")
+                self.error.emit(str(e))
+                return
+        finally:
+            self._response = None
+        self.status.emit("")
+        self.done.emit(result)

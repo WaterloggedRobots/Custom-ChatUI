@@ -85,8 +85,6 @@ class Main:
         mainChat.ui.actionEdit_Message.triggered.connect(self.openEditMsg)
         mainChat.ui.actionSet_IP.triggered.connect(self.openIPSettings)
         mainChat.ui.actionCharacter_Settings.triggered.connect(self.openChatSettings)
-        mainChat.ui.actionImport_Settings.triggered.connect(self.importSettings)
-        mainChat.ui.actionExport_Settings.triggered.connect(self.exportSettings)
 
         settingsChat.ui.cancelButton.clicked.connect(self.cancelChatSettings)
         settingsChat.ui.saveButton.clicked.connect(self.saveChatSettings)
@@ -128,22 +126,6 @@ class Main:
             self.newChatSettings()
             return
         settingsChat.open_for(mainChat.ui.lineEdit.text(), mainChat.settings, is_new=False)
-
-    def importSettings(self):
-        """Character > Import: open the imported settings in the Chat Settings window to check, then Save."""
-        path = chatSettings.ask_import_path(mainChat)
-        if not path:
-            return
-        settings = chatSettings.read_import(mainChat, path)
-        if settings is None:
-            return
-        if mainChat.chat_path is None:
-            settingsChat.open_for("", settings, is_new=True)
-        else:
-            settingsChat.open_for(mainChat.ui.lineEdit.text(), settings, is_new=False)
-
-    def exportSettings(self):
-        chatSettings.export_to_file(mainChat, mainChat.settings)
 
     def quick_select_chat(self):
         chatName = mainChat.ui.listWidget.currentItem().text()

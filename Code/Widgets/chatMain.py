@@ -163,13 +163,19 @@ class ChatMain(QMainWindow):
             print(f"Error loading UI: {e}")
 
     def add_controls(self):
-        """Status line, quick model picker and the tools' folder buttons, added to the bottom bar.
+        """Status line in the bottom bar; quick model picker and the tools' folder buttons
+        above the input, on the left.
 
         Web search, Think and Tools are set per chat in the Chat Settings window."""
-        bar = self.ui.horizontalLayout_4
+        bottom = self.ui.horizontalLayout_4
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(f"color:{MUTED}")
-        bar.insertWidget(0, self.status_label, 1)
+        bottom.insertWidget(0, self.status_label, 1)
+
+        # The row above the input (Reload Text / Reload Image). Keep its image-panel spacer by
+        # reference, since the controls below are inserted in front of it.
+        bar = self.ui.horizontalLayout_3
+        self.img_spacer = bar.itemAt(3)
 
         # Models come straight from Ollama through the server, refreshed whenever the list is opened.
         # The same choice is the Model in Chat Settings.
@@ -180,7 +186,7 @@ class ChatMain(QMainWindow):
         self.model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.model_combo.setStyleSheet("background:rgb(57,57,57);color:white")
         self.model_combo.activated.connect(self.on_model_chosen)
-        bar.insertWidget(bar.count() - 1, self.model_combo)
+        bar.insertWidget(0, self.model_combo)
 
         # Tools on this PC: files, git and terminal (local_tools/). Changes and commands ask first.
         # 📁 links another folder; ▾ drops down the linked folders, each with an x to remove it.
@@ -195,8 +201,8 @@ class ChatMain(QMainWindow):
         self.folder_menu = QMenu(self)
         self.folder_menu.setStyleSheet("QMenu{background:rgb(45,45,45);color:white}")
         self.folder_list_button.clicked.connect(self.show_folder_menu)
-        bar.insertWidget(bar.count() - 1, self.folder_button)
-        bar.insertWidget(bar.count() - 1, self.folder_list_button)
+        bar.insertWidget(1, self.folder_button)
+        bar.insertWidget(2, self.folder_list_button)
         self._show_tools_folder()
         self.ui.label.setText(APP_VERSION)
 
@@ -655,7 +661,8 @@ class ChatMain(QMainWindow):
         self.ui.graphicsView.setMaximumWidth(0)
         self.ui.graphicsView.setMinimumWidth(0)
 
-        layoutH3.itemAt(3).changeSize(0, 20, QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.img_spacer.changeSize(0, 20, QSizePolicy.Fixed, QSizePolicy.Fixed)
+        layoutH3.invalidate()
 
         self.ui.pushButton_7.setMaximumWidth(0)
         self.ui.pushButton_7.setEnabled(False)
@@ -673,7 +680,8 @@ class ChatMain(QMainWindow):
         self.ui.graphicsView.setMaximumWidth(16777215)
         self.ui.graphicsView.setMinimumWidth(0)
 
-        layoutH3.itemAt(3).changeSize(40, 20, QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.img_spacer.changeSize(40, 20, QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layoutH3.invalidate()
         self.ui.graphicsView.setEnabled(True)
         self.ui.graphicsView.setVisible(True)
 

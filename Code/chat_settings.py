@@ -13,10 +13,14 @@ No Qt here, so it can be tested on its own (tests/test_chat_settings.py).
 """
 
 import json
+import re
 from pathlib import Path
 
 WEB_MODES = ("auto", "on", "off")
 TEMPERATURE_RANGE = (0.0, 2.0)
+TTS_ENGINES = ("edge", "kokoro", "chatterbox", "piper")   # the server's; it may add more
+TTS_SPEED_RANGE = (0.5, 2.0)
+TOOL_KEYS = {"files": "Tool Files", "git": "Tool Git", "run": "Tool Run"}   # local_tools group -> setting
 EXPORT_TAG = "ChatUI Settings"        # marks an exported file; the value is the format version
 EXPORT_VERSION = 1
 
@@ -27,8 +31,23 @@ DEFAULTS = {
     "Temperature": 0.7,
     "Think": True,
     "Web Search": "auto",             # one of WEB_MODES
-    "Tools": True,                    # files, git and terminal on this PC (local_tools/)
+    # Tools on this PC (local_tools/), one switch per group. Chats saved before 0.12 had one "Tools" switch.
+    "Tool Files": True,               # browse, read and edit files and folders
+    "Tool Git": True,                 # git in the user's repositories
+    "Tool Run": True,                 # run scripts, programs and terminal commands
+    # Text to speech, done by the server (Server/ollama/chat_server/tts.py)
+    "TTS": False,                     # off: no Play buttons and no voice settings shown
+    "TTS Engine": "edge",             # an engine id from the server, e.g. one of TTS_ENGINES
+    "TTS Voice": "",                  # "" = the server's default voice for the engine
+    "TTS Speed": 1.0,
+    "TTS Auto Play": True,            # read each new reply aloud when it arrives
+    "TTS Translate": False,           # speak in the voice's language: the chat model translates the reply first
 }
+
+
+def tool_groups(settings: dict) -> set:
+    """The local_tools groups these settings turn on."""
+    return {group for group, key in TOOL_KEYS.items() if settings.get(key)}
 
 
 def defaults() -> dict:
@@ -44,7 +63,7 @@ def normalize(data) -> dict:
     s = defaults()
     if not isinstance(data, dict):
         return s
-    for key in ("Character", "Pretext", "Model"):
+    for key in ("Character", "Pretext", "Model", "TTS Voice"):
         if isinstance(data.get(key), str):
             s[key] = data[key]
     if not s["Character"].strip():
@@ -53,7 +72,17 @@ def normalize(data) -> dict:
     if temp is not None:
         lo, hi = TEMPERATURE_RANGE
         s["Temperature"] = round(min(max(float(temp), lo), hi), 2)
-    for key in ("Think", "Tools"):
+    speed = _number(data.get("TTS Speed"))
+    if speed is not None:
+        lo, hi = TTS_SPEED_RANGE
+        s["TTS Speed"] = round(min(max(float(speed), lo), hi), 2)
+    engine = data.get("TTS Engine")
+    if isinstance(engine, str) and re.fullmatch(r"[a-z0-9_-]{1,32}", engine):
+        s["TTS Engine"] = data["TTS Engine"]
+    if isinstance(data.get("Tools"), bool):          # the old single switch
+        for key in TOOL_KEYS.values():
+            s[key] = data["Tools"]
+    for key in ("Think", *TOOL_KEYS.values(), "TTS", "TTS Auto Play", "TTS Translate"):
         if isinstance(data.get(key), bool):
             s[key] = data[key]
     if data.get("Web Search") in WEB_MODES:

@@ -75,5 +75,29 @@ class Config:
     MAX_ATTACHMENT_BYTES = _int("MAX_ATTACHMENT_BYTES", 25 * 1024 * 1024)
     FILE_TEXT_CHARS = _int("FILE_TEXT_CHARS", 40000)
 
-    # Optional extras (TTS/STT and the experimental tool-calling endpoints)
+    # Speech to text for the GUI's mic button (speech.py)
+    STT_ENGINE = os.getenv("STT_ENGINE", "auto")            # auto | whisper | google | off
+    STT_MODEL = os.getenv("STT_MODEL", "")                  # "" = large-v3-turbo on a GPU, small on the CPU
+    STT_DEVICE = os.getenv("STT_DEVICE", "auto")            # auto (GPU, else CPU) | cuda | cpu
+    STT_COMPUTE_TYPE = os.getenv("STT_COMPUTE_TYPE", "")    # "" = float16 on a GPU, int8 on the CPU
+    STT_MODEL_DIR = os.getenv("STT_MODEL_DIR", "")          # "" = the Hugging Face cache (~/.cache/huggingface)
+    STT_PRELOAD = os.getenv("STT_PRELOAD", "0") not in ("0", "false", "no")
+    STT_MAX_BYTES = _int("STT_MAX_BYTES", 50 * 1024 * 1024)
+
+    # Text to speech for the GUI's ▶ Play buttons (tts.py)
+    TTS_ENGINE = os.getenv("TTS_ENGINE") or "edge"          # default engine: edge (online) | piper (offline)
+    TTS_VOICE = os.getenv("TTS_VOICE") or "en-US-JennyNeural" # default Edge voice
+    TTS_PIPER_DIR = os.getenv("TTS_PIPER_DIR") or str(SERVER_DIR / "voices")   # Piper .onnx voices
+    TTS_MAX_CHARS = _int("TTS_MAX_CHARS", 8000)
+    # Model that translates replies when a chat speaks in its voice's language; "" = the chat's own model
+    TTS_TRANSLATE_MODEL = os.getenv("TTS_TRANSLATE_MODEL", "")
+    TTS_KOKORO_DIR = os.getenv("TTS_KOKORO_DIR") or str(SERVER_DIR / "voices" / "kokoro")
+    TTS_KOKORO_MODEL = os.getenv("TTS_KOKORO_MODEL") or "kokoro-v1.0.onnx"    # or kokoro-v1.0.int8.onnx (smaller)
+    TTS_CHATTERBOX_DIR = os.getenv("TTS_CHATTERBOX_DIR") or str(SERVER_DIR / "voices" / "chatterbox")  # clips to copy
+    TTS_CHATTERBOX_LANGUAGES = os.getenv("TTS_CHATTERBOX_LANGUAGES") or "en,zh,ja"
+    TTS_CHATTERBOX_DEVICE = os.getenv("TTS_CHATTERBOX_DEVICE") or "auto"       # auto | cuda | cpu
+    # Engines to load when the server starts (so the first Play doesn't wait for a download)
+    TTS_PRELOAD = os.getenv("TTS_PRELOAD", "kokoro")
+
+    # Optional extras (the experimental tool-calling endpoints)
     ENABLE_EXTRAS = os.getenv("ENABLE_EXTRAS", "1") not in ("0", "false", "no")

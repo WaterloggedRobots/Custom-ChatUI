@@ -38,7 +38,12 @@ if port_in_use "$PORT"; then
     exit 1
 fi
 
-gnome-terminal -- bash -c "source '$VENV/bin/activate'; cd '$DIR'; python ollama_server.py; exec bash"
+# CUDA libraries for Whisper on the GPU, when they were pip-installed into the venv (see README)
+NV_LIBS="$("$VENV/bin/python" -c 'import nvidia.cublas.lib as b, nvidia.cudnn.lib as d; print(b.__path__[0] + ":" + d.__path__[0])' 2>/dev/null)"
+LIBS=""
+[ -n "$NV_LIBS" ] && LIBS="export LD_LIBRARY_PATH='$NV_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}'; "
+
+gnome-terminal -- bash -c "source '$VENV/bin/activate'; cd '$DIR'; ${LIBS}python ollama_server.py; exec bash"
 echo "ChatUI server starting on port $PORT in a new terminal."
 
 #gnome-terminal -- bash -c "source ~/functiongemma/functiongemma-env/bin/activate; python ~/functiongemma/functiongemma_server.py; exec bash"

@@ -27,7 +27,7 @@ def test_missing_and_wrong_entries_take_defaults():
 
 def test_export_then_import_round_trip(tmp_path):
     s = {**chat_settings.DEFAULTS, "Character": "Ada", "Pretext": "You are Ada.", "Model": "qwen3:14b",
-         "Temperature": 0.3, "Think": False, "Web Search": "off", "Tools": False}
+         "Temperature": 0.3, "Think": False, "Web Search": "off", "Tool Git": False}
     path = tmp_path / "Ada settings.json"
     chat_settings.export_file(s, path)
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -127,7 +127,7 @@ def test_settings_are_saved_in_the_chat_and_follow_the_quick_picker(gui):
     assert _saved(main)["Settings"]["Model"] == "m2"
     assert win.settings()["Model"] == "m2"                              # the open settings window follows
     assert not main.client.tools_enabled                                # m2 can't call tools
-    assert not win.ui.toolsCheck.isEnabled()
+    assert not win.ui.gitToolsCheck.isEnabled()
 
 
 def test_saving_from_the_window_renames_and_applies(gui):

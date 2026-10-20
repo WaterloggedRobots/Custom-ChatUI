@@ -114,6 +114,7 @@ class ChatSettings(QMainWindow):
         self.tts_voice = s["TTS Voice"]
         self.ui.ttsSpeedSpin.setValue(s["TTS Speed"])
         self.ui.ttsAutoCheck.setChecked(s["TTS Auto Play"])
+        self.ui.ttsTranslateCheck.setChecked(s["TTS Translate"])
         self._tts_engine = s["TTS Engine"]
         self.ui.ttsCheck.blockSignals(True)
         self.ui.ttsCheck.setChecked(s["TTS"])
@@ -137,6 +138,7 @@ class ChatSettings(QMainWindow):
             "TTS Voice": self.tts_voice,
             "TTS Speed": self.ui.ttsSpeedSpin.value(),
             "TTS Auto Play": self.ui.ttsAutoCheck.isChecked(),
+            "TTS Translate": self.ui.ttsTranslateCheck.isChecked(),
         })
 
     # ------------------------------------------------------------------

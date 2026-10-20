@@ -279,3 +279,50 @@ def test_real_kokoro(monkeypatch):
     data = tts.kokoro.speak("Hello there, this is a test.", "af_heart", 1.0)
     with wave.open(io.BytesIO(data)) as w:
         assert w.getframerate() == 24000 and w.getnframes() > 24000
+
+
+# ------------------------------------------------------------ translation
+
+def test_translated_speech(fakes, monkeypatch):
+    import urllib.parse
+    import httpx
+    asked = []
+
+    def ollama(request):
+        body = json.loads(request.content)
+        asked.append(body)
+        return httpx.Response(200, json={"message": {"role": "assistant", "content": "「こんにちは、元気ですか？」"},
+                                         "done": True})
+
+    with TestClient(create_app(ollama_transport=httpx.MockTransport(ollama))) as c:
+        asked.clear()                        # start-up asks Ollama for its models
+        r = c.post("/v1/audio/speech", json={"input": "**Hello**, how are you? [1]", "model": "kokoro",
+                                             "voice": "jf_alpha", "translate": True, "translate_model": "gemma4:31b"})
+        assert r.status_code == 200, r.text
+        assert r.headers["x-spoken-language"] == "ja-JP"
+        assert urllib.parse.unquote(r.headers["x-spoken-text"]) == "こんにちは、元気ですか？"
+        assert FakeKokoro.calls[-1][:2] == ("こんにちは、元気ですか？", "jf_alpha")
+        body = [b for b in asked if b.get("messages")][0]
+        assert body["model"] == "gemma4:31b" and body["think"] is False
+        assert "Japanese" in body["messages"][0]["content"]
+        assert body["messages"][1]["content"] == "Hello, how are you?"      # cleaned before translating
+
+        # Cantonese voices get written Cantonese; Chatterbox voices carry their language in the id
+        c.post("/v1/audio/speech", json={"input": "Hi", "model": "edge", "voice": "zh-HK-HiuGaaiNeural", "translate": True})
+        assert "Cantonese" in [b for b in asked if b.get("messages")][-1]["messages"][0]["content"]
+
+        # translate off: no Ollama call
+        n = len(asked)
+        c.post("/v1/audio/speech", json={"input": "Hi", "model": "kokoro", "voice": "jf_alpha"})
+        assert len(asked) == n
+
+
+def test_voice_language():
+    import asyncio
+    run = asyncio.run
+    assert run(tts.voice_language("edge", "ja-JP-NanamiNeural")) == "ja-JP"
+    assert run(tts.voice_language("edge", "")) == "en-US"
+    assert run(tts.voice_language("kokoro", "zf_xiaoxiao")) == "zh-CN"
+    assert run(tts.voice_language("chatterbox", "Grandpa|ja")) == "ja"
+    assert tts.language_name("zh-HK").startswith("spoken Cantonese")
+    assert tts.language_name("fr-CA") == "French"

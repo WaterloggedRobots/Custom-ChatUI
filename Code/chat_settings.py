@@ -37,6 +37,7 @@ DEFAULTS = {
     "TTS Voice": "",                  # "" = the server's default voice for the engine
     "TTS Speed": 1.0,
     "TTS Auto Play": True,            # read each new reply aloud when it arrives
+    "TTS Translate": False,           # speak in the voice's language: the chat model translates the reply first
 }
 
 
@@ -69,7 +70,7 @@ def normalize(data) -> dict:
     engine = data.get("TTS Engine")
     if isinstance(engine, str) and re.fullmatch(r"[a-z0-9_-]{1,32}", engine):
         s["TTS Engine"] = data["TTS Engine"]
-    for key in ("Think", "Tools", "TTS", "TTS Auto Play"):
+    for key in ("Think", "Tools", "TTS", "TTS Auto Play", "TTS Translate"):
         if isinstance(data.get(key), bool):
             s[key] = data[key]
     if data.get("Web Search") in WEB_MODES:

@@ -285,7 +285,7 @@ def test_play_buttons_follow_the_tts_setting(gui, monkeypatch):
     monkeypatch.setattr(main.speaker, "toggle", lambda *a: calls.append(a))
     from PySide6.QtCore import QUrl
     main.on_anchor(QUrl("speak:1"))
-    assert calls == [(1, "Hello **there**", "edge", "zh-HK-HiuGaaiNeural", 1.5)]
+    assert calls == [(1, "Hello **there**", "edge", "zh-HK-HiuGaaiNeural", 1.5, None)]
 
     monkeypatch.setattr(main.speaker, "state_of", lambda key: "playing" if key == 1 else "stopped")
     main.on_speaker_changed()
@@ -361,3 +361,59 @@ def test_settings_window_engine_hints(gui, monkeypatch):
     assert not win.ui.ttsSpeedSpin.isEnabled()                 # Chatterbox has no speed setting
     assert win.ui.ttsVoiceCombo.currentData() == "default|en"
     assert win.ui.ttsStatusLabel.text() == ""
+
+
+def test_speaker_translation_is_sent_and_remembered(monkeypatch, tmp_path):
+    import urllib.parse
+    posts = []
+
+    class Resp:
+        status_code = 200
+        headers = {"content-type": "audio/wav", "x-spoken-language": "ja-JP",
+                   "x-spoken-text": urllib.parse.quote("こんにちは")}
+        content = b"RIFFwav"
+        text = ""
+
+    def post(url, json, timeout):
+        posts.append(json)
+        return Resp()
+
+    monkeypatch.setattr(voice.requests, "post", post)
+    sp = voice.Speaker(lambda: "http://s", tmp_path)
+    spoken = []
+    sp.spoken.connect(lambda *a: spoken.append(a))
+    sp._fetched.disconnect()
+    sp._fetch(2, "Hello", "kokoro", "jf_alpha", 1.0, "gemma4:31b")
+    sp._fetch(2, "Hello", "kokoro", "jf_alpha", 1.0, "gemma4:31b")     # from the cache
+    assert posts == [{"input": "Hello", "model": "kokoro", "voice": "jf_alpha", "speed": 1.0,
+                      "translate": True, "translate_model": "gemma4:31b"}]
+    assert spoken == [(2, "ja-JP", "こんにちは")] * 2
+    sp._fetch(2, "Hello", "kokoro", "jf_alpha", 1.0)                    # untranslated is another clip
+    assert len(posts) == 2 and "translate" not in posts[1]
+
+
+def test_translated_reply_shows_what_was_spoken(gui, monkeypatch):
+    import chat_settings
+    from PySide6.QtCore import QUrl
+    main, _, _ = gui
+    main.create_chat("Talk", {**chat_settings.DEFAULTS, "Model": "m1", "TTS": True, "TTS Translate": True,
+                              "TTS Engine": "kokoro", "TTS Voice": "jf_alpha"})
+    main.chat_markdown += [{"role": "user", "content": "hi", "ts": 1},
+                           {"role": "assistant", "content": "Hello!", "ts": 2}]
+    calls = []
+    monkeypatch.setattr(main.speaker, "toggle", lambda *a: calls.append(a))
+    main.speak(1)
+    assert calls == [(1, "Hello!", "kokoro", "jf_alpha", 1.0, "m1")]   # the chat's model translates
+
+    main.speaker.spoken.emit(1, "ja-JP", "こんにちは！")
+    assert main.chat_markdown[1]["spoken"] == {"language": "ja-JP", "text": "こんにちは！"}
+    assert json.loads(open(main.chat_path, encoding="utf-8").read())["Chat"][1]["spoken"]["text"] == "こんにちは！"
+    assert "Spoken in ja-JP" in main.chat.toPlainText() and "こんにちは" not in main.chat.toPlainText()
+    main.on_anchor(QUrl("spoken:1"))
+    assert "こんにちは！" in main.chat.toPlainText()
+
+    main.apply_settings("Talk", {**main.settings, "TTS Translate": False})
+    assert "Spoken in" not in main.chat.toPlainText()
+    calls.clear()
+    main.speak(1)
+    assert calls[0][-1] is None                                        # no translation

@@ -86,6 +86,7 @@ The server makes the audio, so each chat's choice goes to it with every request:
   Engines the server doesn't have yet say so, with the command to install them (see *Text to speech* in `Server/ollama/README.md`).
 - **Language** narrows the voice list; **Voice** picks the speaker, and **▶ Test** plays a short line in that voice.
 - **Speed**, from 0.5× to 2×.
+- **Speak in the voice's language**: the reply stays as written in the chat, but before it is read out the chat's own model translates it into the voice's language, so an English reply can be heard in Japanese from a Japanese voice (or in Cantonese from a `zh-HK` voice). A **🌐 Spoken in ja-JP ▸** link under the reply shows the translation; it is saved with the chat, and replays reuse the audio without translating again.
 
 Markdown, code blocks, links and source numbers like `[1]` are left out of what is read.
 

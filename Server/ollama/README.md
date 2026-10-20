@@ -75,6 +75,7 @@ keep tokens there. All addresses are summarised at the top of
 | `TTS_KOKORO_DIR` / `TTS_KOKORO_MODEL` | `voices/kokoro` / `kokoro-v1.0.onnx` | Kokoro model files (downloaded by themselves) |
 | `TTS_CHATTERBOX_DIR` / `TTS_CHATTERBOX_LANGUAGES` | `voices/chatterbox` / `en,zh,ja` | voice clips for Chatterbox to copy, and the languages offered |
 | `TTS_PRELOAD` | `kokoro` | engines loaded at start-up (`kokoro,chatterbox`, or empty) |
+| `TTS_TRANSLATE_MODEL` | (the chat's model) | Ollama model that translates replies for "speak in the voice's language" |
 | `ENABLE_EXTRAS` | `1` | the tool-calling test routes |
 
 ## Endpoints
@@ -89,7 +90,7 @@ keep tokens there. All addresses are summarised at the top of
 | POST | `/v1/models/load`, `/v1/models/unload/{model}` | preload or free a model |
 | POST | `/v1/audio/transcriptions` (also `/stt`) | multipart `file` (+ optional `language`, `prompt`, `response_format=text`) → `{"text", "language", "duration", "engine"}` |
 | GET | `/v1/audio/stt` | whether speech to text is available, and which engine/model |
-| POST | `/v1/audio/speech` (also `/tts`) | `{"input", "model": "edge"\|"kokoro"\|"chatterbox"\|"piper", "voice", "speed"}` → mp3 (Edge) or wav |
+| POST | `/v1/audio/speech` (also `/tts`) | `{"input", "model": "edge"\|"kokoro"\|"chatterbox"\|"piper", "voice", "speed", "translate", "translate_model"}` → mp3 (Edge) or wav; with `translate`, the `X-Spoken-Language` and `X-Spoken-Text` (URL-encoded) headers carry the translation |
 | GET | `/v1/audio/voices` | the engines and their voices `{"engines", "voices": [{"id", "engine", "language", "name"}]}` |
 | POST | `/v1/audio/voices/download` | `{"voice": "en_US-lessac-medium"}` fetches a Piper voice |
 | GET | `/health` | Ollama reachability and optional features |
@@ -209,6 +210,13 @@ once into `voices/` (names at https://huggingface.co/rhasspy/piper-voices):
 
 or, with the server running,
 `curl -X POST localhost:8100/v1/audio/voices/download -H 'Content-Type: application/json' -d '{"voice": "en_US-lessac-medium"}'`.
+
+**Speaking another language.** With `"translate": true` the text is first
+translated by an Ollama model into the language of the voice (`ja-JP` for
+`ja-JP-NanamiNeural` or `jf_alpha`, written Cantonese for `zh-HK` voices, the
+part after `|` for Chatterbox), then read. The GUI sends the chat's own model,
+which is usually already loaded, so this costs one short extra answer;
+`TTS_TRANSLATE_MODEL` picks a different (e.g. smaller) one.
 
 New voices and clips show up in the GUI the next time the list is opened.
 Markdown, code blocks, links and citation numbers are removed before reading.

@@ -25,7 +25,9 @@ wav_bytes() has no Qt in it, so it can be tested on its own (tests/test_voice.py
 """
 
 import hashlib
+import json
 import struct
+import urllib.parse
 import threading
 from pathlib import Path
 
@@ -240,9 +242,10 @@ def list_voices(base_url: str, engine: str = "") -> dict:
     return r.json()
 
 
-def clip_name(text: str, engine: str, voice: str, speed: float) -> str:
+def clip_name(text: str, engine: str, voice: str, speed: float, translate: bool = False) -> str:
     """Cache file name (without extension) for one reading of one text."""
-    return hashlib.sha1(f"{engine}|{voice}|{speed:.2f}|{text}".encode("utf-8")).hexdigest()
+    tag = "|translated" if translate else ""
+    return hashlib.sha1(f"{engine}|{voice}|{speed:.2f}{tag}|{text}".encode("utf-8")).hexdigest()
 
 
 class Speaker(QObject):
@@ -250,6 +253,7 @@ class Speaker(QObject):
     replies apart (ChatMain uses the message's index)."""
     changed = Signal()           # the playing key or its state changed: redraw the buttons
     failed = Signal(str)
+    spoken = Signal(object, str, str)       # key, language, text: what a translated reply was spoken as
     _fetched = Signal(object, str)          # key, file (from the worker thread)
     _fetch_failed = Signal(object, str)
 
@@ -277,8 +281,10 @@ class Speaker(QObject):
             return "loading"
         return self._player_state()
 
-    def toggle(self, key, text: str, engine: str, voice: str, speed: float):
-        """Play `key`, or pause/resume it if it's the one already playing."""
+    def toggle(self, key, text: str, engine: str, voice: str, speed: float, translate_model: str = None):
+        """Play `key`, or pause/resume it if it's the one already playing.
+        With `translate_model` (the chat's model; "" for the server's), the server
+        first translates the text into the voice's language."""
         if key == self.key and self.key is not None:
             state = self.state_of(key)
             if state == "loading":
@@ -297,7 +303,8 @@ class Speaker(QObject):
         self.key = key
         self._loading = True
         self.changed.emit()
-        threading.Thread(target=self._fetch, args=(key, text, engine, voice, speed), daemon=True).start()
+        threading.Thread(target=self._fetch, args=(key, text, engine, voice, speed, translate_model),
+                         daemon=True).start()
 
     def stop(self):
         self._wants_play = False
@@ -312,20 +319,23 @@ class Speaker(QObject):
 
     # -------------------------------------------------------------- fetching
 
-    def cached(self, text, engine, voice, speed):
-        name = clip_name(text, engine, voice, speed)
+    def cached(self, text, engine, voice, speed, translate=False):
+        name = clip_name(text, engine, voice, speed, translate)
         for ext in (".mp3", ".wav"):
             path = self.cache_dir / (name + ext)
             if path.is_file() and path.stat().st_size > 0:
                 return path
         return None
 
-    def _fetch(self, key, text, engine, voice, speed):
-        path = self.cached(text, engine, voice, speed)
+    def _fetch(self, key, text, engine, voice, speed, translate_model=None):
+        translate = translate_model is not None
+        path = self.cached(text, engine, voice, speed, translate)
         if path is None:
+            body = {"input": text, "model": engine, "voice": voice, "speed": speed}
+            if translate:
+                body.update(translate=True, translate_model=translate_model)
             try:
-                r = requests.post(f"{self._base_url()}/v1/audio/speech",
-                                  json={"input": text, "model": engine, "voice": voice, "speed": speed},
+                r = requests.post(f"{self._base_url()}/v1/audio/speech", json=body,
                                   timeout=(5, 900))     # the first use of a local engine downloads its model
             except requests.RequestException as e:
                 self._fetch_failed.emit(key, f"Can't reach the server for text to speech: {e}")
@@ -342,16 +352,27 @@ class Speaker(QObject):
                 return
             ext = ".wav" if "wav" in r.headers.get("content-type", "") else ".mp3"
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-            path = self.cache_dir / (clip_name(text, engine, voice, speed) + ext)
+            path = self.cache_dir / (clip_name(text, engine, voice, speed, translate) + ext)
             path.write_bytes(r.content)
+            if r.headers.get("x-spoken-text"):
+                path.with_suffix(".json").write_text(json.dumps({
+                    "language": r.headers.get("x-spoken-language", ""),
+                    "text": urllib.parse.unquote(r.headers["x-spoken-text"])}, ensure_ascii=False), encoding="utf-8")
             self._prune()
+        if translate:
+            try:
+                info = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+                self.spoken.emit(key, info.get("language", ""), info.get("text", ""))
+            except (OSError, ValueError):
+                pass
         self._fetched.emit(key, str(path))
 
     def _prune(self):
         try:
-            clips = sorted(self.cache_dir.glob("*.*"), key=lambda p: p.stat().st_mtime)
+            clips = sorted((p for p in self.cache_dir.glob("*.*") if p.suffix != ".json"), key=lambda p: p.stat().st_mtime)
             for old in clips[:-AUDIO_CACHE_FILES]:
                 old.unlink()
+                old.with_suffix(".json").unlink(missing_ok=True)
         except OSError:
             pass
 

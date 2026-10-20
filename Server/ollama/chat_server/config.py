@@ -89,6 +89,8 @@ class Config:
     TTS_VOICE = os.getenv("TTS_VOICE") or "en-US-JennyNeural" # default Edge voice
     TTS_PIPER_DIR = os.getenv("TTS_PIPER_DIR") or str(SERVER_DIR / "voices")   # Piper .onnx voices
     TTS_MAX_CHARS = _int("TTS_MAX_CHARS", 8000)
+    # Model that translates replies when a chat speaks in its voice's language; "" = the chat's own model
+    TTS_TRANSLATE_MODEL = os.getenv("TTS_TRANSLATE_MODEL", "")
     TTS_KOKORO_DIR = os.getenv("TTS_KOKORO_DIR") or str(SERVER_DIR / "voices" / "kokoro")
     TTS_KOKORO_MODEL = os.getenv("TTS_KOKORO_MODEL") or "kokoro-v1.0.onnx"    # or kokoro-v1.0.int8.onnx (smaller)
     TTS_CHATTERBOX_DIR = os.getenv("TTS_CHATTERBOX_DIR") or str(SERVER_DIR / "voices" / "chatterbox")  # clips to copy

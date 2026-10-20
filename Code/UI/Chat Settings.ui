@@ -307,7 +307,24 @@ QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px}</string>
          <item row="4" column="2">
           <widget class="QCheckBox" name="ttsAutoCheck"/>
          </item>
-         <item row="5" column="0" colspan="3">
+         <item row="5" column="0" colspan="2">
+          <widget class="QLabel" name="label_ttsTranslate">
+           <property name="text">
+            <string>Speak in the voice's language (the model translates each reply first)</string>
+           </property>
+           <property name="wordWrap">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="2">
+          <widget class="QCheckBox" name="ttsTranslateCheck">
+           <property name="toolTip">
+            <string>E.g. English replies read out in Japanese by a Japanese voice. The text in the chat stays as it is.</string>
+           </property>
+          </widget>
+         </item>
+         <item row="6" column="0" colspan="3">
           <widget class="QLabel" name="ttsStatusLabel">
            <property name="wordWrap">
             <bool>true</bool>

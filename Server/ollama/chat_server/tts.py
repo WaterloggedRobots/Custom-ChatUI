@@ -17,7 +17,10 @@ switches itself off when its package is missing:
               (README), or with POST /v1/audio/voices/download.
 
 Markdown, code blocks, links and citation marks are taken out of the text
-first, so they aren't read aloud.
+first, so they aren't read aloud. With `translate` on, the chat model (through
+Ollama) first translates the text into the voice's language, so an English
+reply can be spoken by a Japanese voice in Japanese; the translation comes back
+in the X-Spoken-Text header.
 """
 
 import asyncio
@@ -28,11 +31,12 @@ import logging
 import re
 import threading
 import time
+import urllib.parse
 import wave
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -426,6 +430,70 @@ def preload():
 
 
 # ---------------------------------------------------------------------------
+# Translation into the voice's language
+# ---------------------------------------------------------------------------
+
+# What the translator is told to write for each language code. Cantonese gets
+# written Cantonese, since that is what zh-HK voices read naturally.
+LANGUAGE_NAMES = {
+    "en": "English", "ja": "Japanese", "ko": "Korean", "fr": "French", "de": "German", "es": "Spanish",
+    "it": "Italian", "pt": "Portuguese", "pt-BR": "Brazilian Portuguese", "ru": "Russian", "hi": "Hindi",
+    "ar": "Arabic", "nl": "Dutch", "pl": "Polish", "tr": "Turkish", "vi": "Vietnamese", "th": "Thai",
+    "id": "Indonesian", "ms": "Malay", "sv": "Swedish", "da": "Danish", "no": "Norwegian", "fi": "Finnish",
+    "el": "Greek", "he": "Hebrew", "sw": "Swahili", "uk": "Ukrainian",
+    "zh": "Mandarin Chinese in simplified characters",
+    "zh-CN": "Mandarin Chinese in simplified characters",
+    "zh-TW": "Mandarin Chinese in traditional characters (Taiwan)",
+    "zh-HK": "spoken Cantonese written in traditional characters (Hong Kong colloquial, e.g. 係, 嘅, 唔)",
+    "yue": "spoken Cantonese written in traditional characters (Hong Kong colloquial, e.g. 係, 嘅, 唔)",
+}
+
+TRANSLATE_PROMPT = """You translate text for a text-to-speech voice.
+Translate the user's text into {language}. Keep the meaning, tone and names; write it the way a
+native speaker would say it out loud. If it is already in {language}, return it unchanged.
+Reply with the translation only: no notes, no quotes, no romanisation."""
+
+
+def language_name(code: str) -> str:
+    code = (code or "").replace("_", "-")
+    return LANGUAGE_NAMES.get(code) or LANGUAGE_NAMES.get(code.split("-")[0]) or code
+
+
+async def voice_language(engine: str, voice: str) -> str:
+    """The language a voice speaks, e.g. "ja-JP"; "" if unknown."""
+    if engine == "edge":
+        voice = voice or Config.TTS_VOICE
+        m = re.match(r"([a-z]{2,3}-[A-Z]{2})", voice)
+        return m.group(1) if m else ""
+    if engine == "kokoro":
+        voice = voice if voice in KOKORO_VOICES else "af_heart"
+        return KOKORO_LANGUAGES[voice[0]][0]
+    if engine == "chatterbox":
+        return (voice or "default|en").partition("|")[2] or "en"
+    if engine == "piper":
+        for v in piper_voices():
+            if v["id"] == voice or not voice:
+                return v["language"]
+    return ""
+
+
+async def translate(ollama, text: str, language: str, model: str) -> str:
+    """`text` in `language`, written by the chat model."""
+    reply = await ollama.chat({
+        "model": model,
+        "messages": [{"role": "system", "content": TRANSLATE_PROMPT.format(language=language_name(language))},
+                     {"role": "user", "content": text}],
+        "think": False,
+        "keep_alive": Config.KEEP_ALIVE,
+        # Same num_ctx as the chat, so Ollama doesn't reload the model for this.
+        "options": {"temperature": 0.2, "num_ctx": Config.NUM_CTX, "num_predict": max(256, len(text) * 3)},
+    })
+    out = (reply.get("message") or {}).get("content") or ""
+    out = re.sub(r"<think>.*?</think>", "", out, flags=re.S).strip().strip('"「」').strip()
+    return clean_for_speech(out)
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -439,6 +507,8 @@ class SpeechRequest(BaseModel):
     voice: str = ""
     speed: float = 1.0
     rate: str = ""             # old /tts: "+10%"
+    translate: bool = False    # first translate the text into the voice's language
+    translate_model: str = ""  # the chat's model, which translates (TTS_TRANSLATE_MODEL overrides it)
 
 
 class DownloadRequest(BaseModel):
@@ -470,7 +540,7 @@ async def list_voices(engine: str = ""):
 
 @router.post("/v1/audio/speech")
 @router.post("/tts")
-async def text_to_speech(req: SpeechRequest):
+async def text_to_speech(req: SpeechRequest, request: Request):
     engine = (req.model or req.engine or default_engine() or "").lower()
     if engine not in ENGINE_NAMES:
         raise HTTPException(400, f"Unknown speech engine {engine!r}; use one of {', '.join(ENGINE_NAMES)}")
@@ -486,6 +556,17 @@ async def text_to_speech(req: SpeechRequest):
     lo, hi = SPEED_RANGE
     speed = min(max(speed, lo), hi)
     started = time.time()
+    headers = {"Content-Disposition": f"inline; filename=speech.{'mp3' if engine == 'edge' else 'wav'}"}
+    if req.translate:
+        language = await voice_language(engine, req.voice)
+        if language:
+            model = Config.TTS_TRANSLATE_MODEL or req.translate_model or Config.DEFAULT_MODEL
+            text = (await translate(request.app.state.ollama, text, language, model))[:Config.TTS_MAX_CHARS]
+            if not text:
+                raise HTTPException(502, f"{model} returned no translation")
+            log.info("TTS translated into %s with %s in %.1fs", language, model, time.time() - started)
+            headers["X-Spoken-Language"] = language
+            headers["X-Spoken-Text"] = urllib.parse.quote(text[:3000])
     if engine == "edge":
         try:
             audio, media = await edge_speak(text, req.voice, speed), "audio/mpeg"
@@ -506,8 +587,7 @@ async def text_to_speech(req: SpeechRequest):
             raise HTTPException(500, f"{ENGINE_NAMES[engine]} failed: {e}")
     log.info("TTS %s %s: %d chars -> %d KB in %.1fs", engine, req.voice or "(default)", len(text),
              len(audio) // 1024, time.time() - started)
-    return Response(audio, media_type=media,
-                    headers={"Content-Disposition": f"inline; filename=speech.{'mp3' if engine == 'edge' else 'wav'}"})
+    return Response(audio, media_type=media, headers=headers)
 
 
 @router.post("/v1/audio/voices/download")

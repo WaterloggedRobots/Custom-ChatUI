@@ -148,6 +148,8 @@ class ChatMain(QMainWindow):
         self.speaker = voice.Speaker(lambda: self.client.base_url, paths.AUDIO_DIR, self)
         self.speaker.changed.connect(self.on_speaker_changed)
         self.speaker.failed.connect(lambda err: self.status_label.setText("🔊 " + err))
+        self.speaker.spoken.connect(self.on_spoken)
+        self.expanded_spoken = set()     # indices of replies showing what they were spoken as
         self._speak_redraw_pending = False
 
         self.load_ui()
@@ -611,11 +613,19 @@ class ChatMain(QMainWindow):
             footer.append(f"{tokens} tokens")
         if msg.get("stopped"):
             footer.append("stopped")
+        spoken = msg.get("spoken") if self.settings["TTS"] and self.settings["TTS Translate"] else None
         if self.settings["TTS"] and msg.get("content", "").strip():
             label = SPEAK_LABELS[self.speaker.state_of(index)]
             footer.append(f"<a href='speak:{index}' style='color:#7aa7ff;text-decoration:none;font-size:13px'>{label}</a>")
+            if spoken:
+                arrow = "▾" if index in self.expanded_spoken else "▸"
+                footer.append(f"<a href='spoken:{index}' style='color:{MUTED};text-decoration:none'>"
+                              f"🌐 Spoken in {html.escape(spoken.get('language', ''))} {arrow}</a>")
         if footer:
             parts.append(f"<div style='color:{MUTED};font-size:11px'>{' · '.join(footer)}</div>")
+        if spoken and index in self.expanded_spoken:
+            body = html.escape(spoken.get("text", "")).replace("\n", "<br/>")
+            parts.append(f"<div style='color:{MUTED};font-size:12px;margin-left:12px'><i>{body}</i></div>")
         return "".join(parts)
 
     def _append_message(self, msg, index):
@@ -655,6 +665,11 @@ class ChatMain(QMainWindow):
             self._rebuild_chat_ui(keep_scroll=True)
         elif target.startswith("speak:"):
             self.speak(int(target.split(":", 1)[1]))
+        elif target.startswith("spoken:"):
+            if self.client.busy:
+                return
+            self.expanded_spoken ^= {int(target.split(":", 1)[1])}
+            self._rebuild_chat_ui(keep_scroll=True)
         elif url.scheme() in ("http", "https"):
             QDesktopServices.openUrl(url)
 
@@ -667,8 +682,18 @@ class ChatMain(QMainWindow):
         if not self.settings["TTS"] or not 0 <= index < len(self.chat_markdown):
             return
         s = self.settings
+        translate_model = (self.client.model_name or "") if s["TTS Translate"] else None
         self.speaker.toggle(index, self.chat_markdown[index].get("content", ""),
-                            s["TTS Engine"], s["TTS Voice"], s["TTS Speed"])
+                            s["TTS Engine"], s["TTS Voice"], s["TTS Speed"], translate_model)
+
+    def on_spoken(self, index, language, text):
+        """A reply was translated for its voice: keep the translation with the message."""
+        if 0 <= index < len(self.chat_markdown) and self.chat_markdown[index].get("role") == "assistant":
+            msg = self.chat_markdown[index]
+            if msg.get("spoken") != {"language": language, "text": text}:
+                msg["spoken"] = {"language": language, "text": text}
+                self.save_chat()
+                self.on_speaker_changed()
 
     def on_speaker_changed(self):
         # Redrawing mid-answer would wipe the streamed text, so wait for the answer to finish.
@@ -958,6 +983,7 @@ class ChatMain(QMainWindow):
 
         self.expanded_thinking = set()
         self.expanded_tools = set()
+        self.expanded_spoken = set()
         self.clear_attachments()
         self._rebuild_chat_ui()
 
@@ -1005,10 +1031,10 @@ class ChatMain(QMainWindow):
             self.client.abort_generation()
             self._end_response()
         old_model = self.client.model_name
-        old_tts = (self.settings["TTS"], self.settings["TTS Engine"], self.settings["TTS Voice"], self.settings["TTS Speed"])
+        tts_keys = ("TTS", "TTS Engine", "TTS Voice", "TTS Speed", "TTS Translate")
+        old_tts = [self.settings[k] for k in tts_keys]
         self.set_settings(settings)
-        s = self.settings
-        if (s["TTS"], s["TTS Engine"], s["TTS Voice"], s["TTS Speed"]) != old_tts:
+        if [self.settings[k] for k in tts_keys] != old_tts:
             self.speaker.stop()                 # the voice changed or TTS is off: the next Play reads it anew
             self._rebuild_chat_ui(keep_scroll=True)
         if self.client.model_name != old_model:
@@ -1169,6 +1195,7 @@ class ChatMain(QMainWindow):
         del self.chat_markdown[i + 1:]
         self.expanded_thinking = {x for x in self.expanded_thinking if x <= i}
         self.expanded_tools = {x for x in self.expanded_tools if x <= i}
+        self.expanded_spoken = {x for x in self.expanded_spoken if x <= i}
         self._rebuild_chat_ui()
         self._start_response()
 

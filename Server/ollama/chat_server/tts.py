@@ -1,20 +1,27 @@
 """Text to speech for the chat's ▶ Play buttons.
 
 The GUI sends a reply's text with the chat's engine, voice and speed (set per
-chat in Chat Settings) and plays the audio that comes back. Two engines, each
-switched off when its package is missing:
+chat in Chat Settings) and plays the audio that comes back. Each engine
+switches itself off when its package is missing:
 
-  edge    Microsoft Edge's online voices (edge-tts): 400+ natural voices in
-          most languages, Cantonese (zh-HK) included. Needs internet. Default.
-  piper   Piper, running on this machine (piper-tts): no internet needed, but
-          each voice is a file to download once into TTS_PIPER_DIR (README),
-          or with POST /v1/audio/voices/download.
+  edge        Microsoft Edge's online voices (edge-tts): 400+ natural voices in
+              most languages, Cantonese (zh-HK) included. Needs internet. Default.
+  kokoro      Kokoro-82M on this machine (kokoro-onnx): natural voices, offline,
+              fast even on the CPU. Its model (about 340 MB) downloads by
+              itself once. English, Mandarin, Japanese, Spanish, French, ...
+  chatterbox  Chatterbox on this machine (chatterbox-tts): the most human
+              sounding, and it can copy any voice from a short clip you put in
+              TTS_CHATTERBOX_DIR. Wants an NVIDIA GPU; slow on the CPU.
+  piper       Piper on this machine (piper-tts): light and offline, plainer
+              voices; each is a file to download once into TTS_PIPER_DIR
+              (README), or with POST /v1/audio/voices/download.
 
 Markdown, code blocks, links and citation marks are taken out of the text
 first, so they aren't read aloud.
 """
 
 import asyncio
+import importlib.util
 import io
 import json
 import logging
@@ -45,12 +52,66 @@ except Exception as e:          # onnxruntime can fail to import on odd systems
     piper = None
     log.info("piper not available: %s", e)
 
-ENGINE_NAMES = {"edge": "Microsoft Edge voices (online)", "piper": "Piper (on the server, offline)"}
+try:
+    import kokoro_onnx
+except Exception as e:
+    kokoro_onnx = None
+    log.info("kokoro not available: %s", e)
+
+# Chatterbox pulls in torch, which takes seconds to import: only look for it here.
+HAVE_CHATTERBOX = importlib.util.find_spec("chatterbox") is not None
+
+ENGINE_NAMES = {"edge": "Microsoft Edge voices (online)",
+                "kokoro": "Kokoro (on the server, offline, natural)",
+                "chatterbox": "Chatterbox (on the server, most human, clones voices; GPU)",
+                "piper": "Piper (on the server, offline, light)"}
+ENGINE_INSTALL = {"edge": "pip install edge-tts", "kokoro": "pip install kokoro-onnx",
+                  "chatterbox": "pip install chatterbox-tts", "piper": "pip install piper-tts"}
+ENGINE_SPEED = {"edge": True, "kokoro": True, "chatterbox": False, "piper": True}
 SPEED_RANGE = (0.5, 2.0)
 
 
 def available() -> dict:
-    return {"edge": edge_tts is not None, "piper": piper is not None}
+    return {"edge": edge_tts is not None, "kokoro": kokoro_onnx is not None,
+            "chatterbox": HAVE_CHATTERBOX, "piper": piper is not None}
+
+
+def to_wav(samples, rate: int) -> bytes:
+    """16-bit mono WAV from float samples in -1..1 (a numpy array)."""
+    import numpy as np
+    pcm = (np.clip(np.asarray(samples, dtype=np.float32).reshape(-1), -1.0, 1.0) * 32767).astype("<i2")
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(int(rate))
+        w.writeframes(pcm.tobytes())
+    return buf.getvalue()
+
+
+def split_sentences(text: str, limit: int) -> list:
+    """Pieces of at most about `limit` characters, cut at sentence ends where possible."""
+    parts = re.split(r"(?<=[.!?;])\s+|(?<=[。！？；])\s*|\n+", text)
+    chunks, current = [], ""
+    for part in (p.strip() for p in parts):
+        if not part:
+            continue
+        if len(part) > limit and current:
+            chunks.append(current)
+            current = ""
+        while len(part) > limit:                       # one very long sentence: cut at a comma or space
+            cut = max(part.rfind(",", 0, limit), part.rfind("，", 0, limit), part.rfind(" ", 0, limit))
+            cut = cut + 1 if cut > limit // 3 else limit
+            chunks.append(part[:cut].strip())
+            part = part[cut:].strip()
+        if current and len(current) + 1 + len(part) > limit:
+            chunks.append(current)
+            current = part
+        else:
+            current = f"{current} {part}".strip()
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def default_engine() -> Optional[str]:
@@ -184,6 +245,187 @@ def piper_download(name: str):
 
 
 # ---------------------------------------------------------------------------
+# Kokoro (model files in TTS_KOKORO_DIR, downloaded once by itself)
+# ---------------------------------------------------------------------------
+
+KOKORO_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
+KOKORO_VOICES_FILE = "voices-v1.0.bin"
+# First letter of a voice: its language, as (shown, espeak code for kokoro-onnx).
+KOKORO_LANGUAGES = {"a": ("en-US", "en-us"), "b": ("en-GB", "en-gb"), "e": ("es-ES", "es"), "f": ("fr-FR", "fr-fr"),
+                    "h": ("hi-IN", "hi"), "i": ("it-IT", "it"), "j": ("ja-JP", "ja"), "p": ("pt-BR", "pt-br"),
+                    "z": ("zh-CN", "cmn")}
+KOKORO_VOICES = (
+    "af_heart af_bella af_nicole af_aoede af_kore af_sarah af_nova af_sky af_alloy af_jessica af_river "
+    "am_michael am_fenrir am_puck am_echo am_eric am_liam am_onyx am_adam am_santa "
+    "bf_emma bf_isabella bf_alice bf_lily bm_george bm_fable bm_lewis bm_daniel "
+    "ef_dora em_alex em_santa ff_siwis hf_alpha hf_beta hm_omega hm_psi if_sara im_nicola "
+    "jf_alpha jf_gongitsune jf_nezumi jf_tebukuro jm_kumo pf_dora pm_alex pm_santa "
+    "zf_xiaobei zf_xiaoni zf_xiaoxiao zf_xiaoyi zm_yunjian zm_yunxi zm_yunxia zm_yunyang").split()
+KOKORO_BEST = {"af_heart", "af_bella", "bf_emma", "ff_siwis", "jf_alpha", "zf_xiaoxiao"}   # the model card's top grades
+
+
+def kokoro_voices() -> list:
+    if kokoro_onnx is None:
+        return []
+    voices = []
+    for v in KOKORO_VOICES:
+        lang = KOKORO_LANGUAGES[v[0]][0]
+        gender = "Female" if v[1] == "f" else "Male"
+        star = " ★" if v in KOKORO_BEST else ""
+        voices.append({"id": v, "engine": "kokoro", "language": lang, "gender": gender,
+                       "name": f"{v[3:].title()}{star} ({lang}, {gender})"})
+    return sorted(voices, key=lambda v: (v["language"], v["id"] not in KOKORO_BEST, v["id"]))
+
+
+class _Kokoro:
+    def __init__(self):
+        self.model = None
+        self.lock = threading.Lock()
+
+    def files(self):
+        folder = Path(Config.TTS_KOKORO_DIR)
+        return folder / Config.TTS_KOKORO_MODEL, folder / KOKORO_VOICES_FILE
+
+    def load(self):
+        with self.lock:
+            if self.model is None:
+                model, voices = self.files()
+                for path in (model, voices):
+                    if not path.is_file():
+                        download(KOKORO_URL + path.name, path)
+                self.model = kokoro_onnx.Kokoro(str(model), str(voices))
+                log.info("Kokoro loaded from %s", model)
+            return self.model
+
+    def speak(self, text: str, voice: str, speed: float) -> bytes:
+        voice = voice if voice in KOKORO_VOICES else "af_heart"
+        model = self.load()
+        with self.lock:
+            samples, rate = model.create(text, voice=voice, speed=speed, lang=KOKORO_LANGUAGES[voice[0]][1])
+        return to_wav(samples, rate)
+
+
+kokoro = _Kokoro()
+
+
+def download(url: str, path: Path):
+    """Fetch `url` to `path` (through a .part file, so a broken download is retried next time)."""
+    import httpx
+    path.parent.mkdir(parents=True, exist_ok=True)
+    part = path.with_name(path.name + ".part")
+    log.info("Downloading %s ...", url)
+    started = time.time()
+    with httpx.stream("GET", url, follow_redirects=True, timeout=60) as r:
+        r.raise_for_status()
+        with open(part, "wb") as f:
+            for chunk in r.iter_bytes(1 << 20):
+                f.write(chunk)
+    part.replace(path)
+    log.info("Downloaded %s (%d MB) in %.0fs", path.name, path.stat().st_size >> 20, time.time() - started)
+
+
+# ---------------------------------------------------------------------------
+# Chatterbox (voice clips to copy in TTS_CHATTERBOX_DIR)
+# ---------------------------------------------------------------------------
+
+CHATTERBOX_CLIP_TYPES = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
+CHATTERBOX_CHUNK = 280          # characters per generate() call; longer pieces drift or get cut off
+
+
+def chatterbox_languages() -> list:
+    return [x.strip() for x in Config.TTS_CHATTERBOX_LANGUAGES.split(",") if x.strip()]
+
+
+def chatterbox_clips() -> list:
+    folder = Path(Config.TTS_CHATTERBOX_DIR)
+    if not folder.is_dir():
+        return []
+    return sorted(p for p in folder.iterdir() if p.suffix.lower() in CHATTERBOX_CLIP_TYPES)
+
+
+def chatterbox_voices() -> list:
+    """One entry per voice and language: "default|en", "<clip name>|zh", ..."""
+    if not HAVE_CHATTERBOX:
+        return []
+    voices = []
+    for lang in chatterbox_languages():
+        voices.append({"id": f"default|{lang}", "engine": "chatterbox", "language": lang, "gender": "",
+                       "name": f"Default voice ({lang})"})
+        for clip in chatterbox_clips():
+            voices.append({"id": f"{clip.stem}|{lang}", "engine": "chatterbox", "language": lang, "gender": "",
+                           "name": f"{clip.stem} ({lang}, copied from {clip.name})"})
+    return voices
+
+
+class _Chatterbox:
+    """The English model, and the multilingual one for other languages, each loaded on first use."""
+
+    def __init__(self):
+        self.models = {}
+        self.lock = threading.Lock()
+
+    def device(self) -> str:
+        if Config.TTS_CHATTERBOX_DEVICE != "auto":
+            return Config.TTS_CHATTERBOX_DEVICE
+        import torch
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
+    def model(self, multilingual: bool):
+        key = "multi" if multilingual else "en"
+        if key not in self.models:
+            device = self.device()
+            started = time.time()
+            if multilingual:
+                from chatterbox.mtl_tts import ChatterboxMultilingualTTS as Model
+            else:
+                from chatterbox.tts import ChatterboxTTS as Model
+            self.models[key] = Model.from_pretrained(device=device)
+            log.info("Chatterbox %s loaded on %s in %.0fs", key, device, time.time() - started)
+        return self.models[key]
+
+    def speak(self, text: str, voice: str) -> bytes:
+        import numpy as np
+        name, _, lang = (voice or "default|en").partition("|")
+        lang = lang or "en"
+        clip = None
+        if name and name != "default":
+            clip = next((c for c in chatterbox_clips() if c.stem == name), None)
+            if clip is None:
+                raise HTTPException(404, f"The Chatterbox voice clip {name!r} isn't in {Config.TTS_CHATTERBOX_DIR}")
+        pieces = []
+        with self.lock:
+            model = self.model(multilingual=lang != "en")
+            for chunk in split_sentences(text, CHATTERBOX_CHUNK):
+                kwargs = {"audio_prompt_path": str(clip)} if clip else {}
+                if lang != "en":
+                    kwargs["language_id"] = lang
+                wav = model.generate(chunk, **kwargs)
+                pieces.append(wav.detach().cpu().numpy().reshape(-1))
+                pieces.append(np.zeros(int(model.sr * 0.2), dtype=np.float32))     # a breath between sentences
+            rate = model.sr
+        return to_wav(np.concatenate(pieces) if pieces else np.zeros(1, np.float32), rate)
+
+
+chatterbox = _Chatterbox()
+
+
+def preload():
+    """Load the engines named in TTS_PRELOAD in the background, so the first ▶ Play
+    doesn't wait for a download."""
+    wanted = {x.strip() for x in Config.TTS_PRELOAD.split(",") if x.strip()}
+    if "kokoro" in wanted and kokoro_onnx is not None:
+        try:
+            kokoro.load()
+        except Exception as e:
+            log.warning("Kokoro preload failed: %s", e)
+    if "chatterbox" in wanted and HAVE_CHATTERBOX:
+        try:
+            chatterbox.model(multilingual=False)
+        except Exception as e:
+            log.warning("Chatterbox preload failed: %s", e)
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -192,7 +434,7 @@ class SpeechRequest(BaseModel):
     (`text`, `engine`, `rate`) still work."""
     input: str = ""
     text: str = ""
-    model: str = ""            # the engine: edge | piper ("" = TTS_ENGINE)
+    model: str = ""            # the engine: edge | kokoro | chatterbox | piper ("" = TTS_ENGINE)
     engine: str = ""
     voice: str = ""
     speed: float = 1.0
@@ -207,7 +449,8 @@ class DownloadRequest(BaseModel):
 async def list_voices(engine: str = ""):
     """The engines and their voices, for the voice pickers in Chat Settings."""
     have = available()
-    engines = [{"id": e, "name": ENGINE_NAMES[e], "available": ok} for e, ok in have.items()]
+    engines = [{"id": e, "name": ENGINE_NAMES[e], "available": ok, "install": ENGINE_INSTALL[e],
+                "speed": ENGINE_SPEED[e]} for e, ok in have.items()]
     voices = []
     errors = {}
     if engine in ("", "edge") and have["edge"]:
@@ -215,6 +458,10 @@ async def list_voices(engine: str = ""):
             voices += await edge_voices()
         except Exception as e:      # offline: the list comes from Microsoft
             errors["edge"] = f"can't get the Edge voice list: {e}"
+    if engine in ("", "kokoro"):
+        voices += kokoro_voices()
+    if engine in ("", "chatterbox"):
+        voices += chatterbox_voices()
     if engine in ("", "piper"):
         voices += piper_voices()
     return {"engines": engines, "default_engine": default_engine(),
@@ -226,10 +473,9 @@ async def list_voices(engine: str = ""):
 async def text_to_speech(req: SpeechRequest):
     engine = (req.model or req.engine or default_engine() or "").lower()
     if engine not in ENGINE_NAMES:
-        raise HTTPException(400, f"Unknown speech engine {engine!r}; use edge or piper")
+        raise HTTPException(400, f"Unknown speech engine {engine!r}; use one of {', '.join(ENGINE_NAMES)}")
     if not available()[engine]:
-        raise HTTPException(503, f"{ENGINE_NAMES[engine]} isn't installed on the server; "
-                                 f"pip install {'edge-tts' if engine == 'edge' else 'piper-tts'}")
+        raise HTTPException(503, f"{ENGINE_NAMES[engine]} isn't installed on the server; {ENGINE_INSTALL[engine]}")
     text = clean_for_speech(req.input or req.text)[:Config.TTS_MAX_CHARS]
     if not text:
         raise HTTPException(400, "There is nothing to read aloud in this text")
@@ -248,7 +494,16 @@ async def text_to_speech(req: SpeechRequest):
         except Exception as e:
             raise HTTPException(502, f"The Edge voice service failed (it needs internet): {e}")
     else:
-        audio, media = await asyncio.to_thread(piper_speak, text, req.voice, speed), "audio/wav"
+        work = {"kokoro": lambda: kokoro.speak(text, req.voice, speed),
+                "chatterbox": lambda: chatterbox.speak(text, req.voice),
+                "piper": lambda: piper_speak(text, req.voice, speed)}[engine]
+        try:
+            audio, media = await asyncio.to_thread(work), "audio/wav"
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.exception("TTS %s failed", engine)
+            raise HTTPException(500, f"{ENGINE_NAMES[engine]} failed: {e}")
     log.info("TTS %s %s: %d chars -> %d KB in %.1fs", engine, req.voice or "(default)", len(text),
              len(audio) // 1024, time.time() - started)
     return Response(audio, media_type=media,

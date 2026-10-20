@@ -77,7 +77,13 @@ The client records with Qt Multimedia, which comes with PySide6, so there is not
 Turn on *Text to speech* in a chat's settings (the *Voice* box) and every reply gets a **▶ Play** button under it. Click it to hear the reply; it turns into **⏸ Pause**, then **▶ Resume**. Once a reply has played, the button goes back to **▶ Play**, so you can play it again as often as you like; replays come from a copy kept on this PC (`Audio/` in the client data folder), so they start straight away. With *Play each new reply automatically* on, new replies are read out as they arrive. Turn text to speech off and the Play buttons and the voice settings disappear.
 
 The server makes the audio, so each chat's choice goes to it with every request:
-- **Engine**: *Microsoft Edge voices* (online, natural, hundreds of voices in most languages, Cantonese `zh-HK` included) or *Piper* (runs on the server itself with no internet, but each voice has to be downloaded there once; see the server README).
+- **Engine**:
+  - *Microsoft Edge voices*: online, natural, hundreds of voices in most languages, Cantonese `zh-HK` included. Nothing to set up.
+  - *Kokoro*: runs on the server with no internet, natural voices (★ marks the best ones), English, Mandarin, Japanese and more. One `pip install` on the server; its model downloads by itself.
+  - *Chatterbox*: runs on the server, the most human-sounding, and can copy anyone's voice from a short recording you drop into `Server/ollama/voices/chatterbox/`. Best with an NVIDIA GPU; speed is fixed.
+  - *Piper*: runs on the server, very light, plainer voices that are downloaded one by one.
+
+  Engines the server doesn't have yet say so, with the command to install them (see *Text to speech* in `Server/ollama/README.md`).
 - **Language** narrows the voice list; **Voice** picks the speaker, and **▶ Test** plays a short line in that voice.
 - **Speed**, from 0.5× to 2×.
 

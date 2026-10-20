@@ -42,6 +42,7 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
         log.info("Speech to text: %s", speech.ENGINE or "off")
         if Config.STT_PRELOAD:
             asyncio.get_running_loop().run_in_executor(None, speech.preload)
+        asyncio.get_running_loop().run_in_executor(None, tts.preload)
         yield
         await app.state.ollama.close()
         await app.state.http.aclose()

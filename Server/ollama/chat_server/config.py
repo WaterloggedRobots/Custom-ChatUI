@@ -89,6 +89,13 @@ class Config:
     TTS_VOICE = os.getenv("TTS_VOICE") or "en-US-JennyNeural" # default Edge voice
     TTS_PIPER_DIR = os.getenv("TTS_PIPER_DIR") or str(SERVER_DIR / "voices")   # Piper .onnx voices
     TTS_MAX_CHARS = _int("TTS_MAX_CHARS", 8000)
+    TTS_KOKORO_DIR = os.getenv("TTS_KOKORO_DIR") or str(SERVER_DIR / "voices" / "kokoro")
+    TTS_KOKORO_MODEL = os.getenv("TTS_KOKORO_MODEL") or "kokoro-v1.0.onnx"    # or kokoro-v1.0.int8.onnx (smaller)
+    TTS_CHATTERBOX_DIR = os.getenv("TTS_CHATTERBOX_DIR") or str(SERVER_DIR / "voices" / "chatterbox")  # clips to copy
+    TTS_CHATTERBOX_LANGUAGES = os.getenv("TTS_CHATTERBOX_LANGUAGES") or "en,zh,ja"
+    TTS_CHATTERBOX_DEVICE = os.getenv("TTS_CHATTERBOX_DEVICE") or "auto"       # auto | cuda | cpu
+    # Engines to load when the server starts (so the first Play doesn't wait for a download)
+    TTS_PRELOAD = os.getenv("TTS_PRELOAD", "kokoro")
 
     # Optional extras (the experimental tool-calling endpoints)
     ENABLE_EXTRAS = os.getenv("ENABLE_EXTRAS", "1") not in ("0", "false", "no")

@@ -21,7 +21,7 @@ OpenAI-style client, such as Futu-Network later) one chat endpoint that adds:
   into text on this machine. See [Speech to text](#speech-to-text).
 - **Text to speech.** The GUI's ▶ Play buttons send a reply here with the
   chat's engine, voice and speed and play the audio that comes back: Microsoft
-  Edge's online voices or Piper running offline on this machine. See
+  Edge's online voices, or Kokoro, Chatterbox or Piper running on this machine. See
   [Text to speech](#text-to-speech).
 
 ## Setup (Ubuntu 24.04)
@@ -72,6 +72,9 @@ keep tokens there. All addresses are summarised at the top of
 | `STT_PRELOAD` | `0` | `1` loads Whisper at start-up instead of on the first clip |
 | `TTS_ENGINE` / `TTS_VOICE` | `edge` / `en-US-JennyNeural` | engine and Edge voice used when the GUI asks for "Server default" |
 | `TTS_PIPER_DIR` | `Server/ollama/voices` | where Piper voices (`.onnx` + `.onnx.json`) are kept |
+| `TTS_KOKORO_DIR` / `TTS_KOKORO_MODEL` | `voices/kokoro` / `kokoro-v1.0.onnx` | Kokoro model files (downloaded by themselves) |
+| `TTS_CHATTERBOX_DIR` / `TTS_CHATTERBOX_LANGUAGES` | `voices/chatterbox` / `en,zh,ja` | voice clips for Chatterbox to copy, and the languages offered |
+| `TTS_PRELOAD` | `kokoro` | engines loaded at start-up (`kokoro,chatterbox`, or empty) |
 | `ENABLE_EXTRAS` | `1` | the tool-calling test routes |
 
 ## Endpoints
@@ -86,7 +89,7 @@ keep tokens there. All addresses are summarised at the top of
 | POST | `/v1/models/load`, `/v1/models/unload/{model}` | preload or free a model |
 | POST | `/v1/audio/transcriptions` (also `/stt`) | multipart `file` (+ optional `language`, `prompt`, `response_format=text`) → `{"text", "language", "duration", "engine"}` |
 | GET | `/v1/audio/stt` | whether speech to text is available, and which engine/model |
-| POST | `/v1/audio/speech` (also `/tts`) | `{"input", "model": "edge"\|"piper", "voice", "speed"}` → mp3 (Edge) or wav (Piper) |
+| POST | `/v1/audio/speech` (also `/tts`) | `{"input", "model": "edge"\|"kokoro"\|"chatterbox"\|"piper", "voice", "speed"}` → mp3 (Edge) or wav |
 | GET | `/v1/audio/voices` | the engines and their voices `{"engines", "voices": [{"id", "engine", "language", "name"}]}` |
 | POST | `/v1/audio/voices/download` | `{"voice": "en_US-lessac-medium"}` fetches a Piper voice |
 | GET | `/health` | Ollama reachability and optional features |
@@ -159,31 +162,61 @@ curl -F file=@clip.wav http://localhost:8100/v1/audio/transcriptions
 
 ## Text to speech
 
-Two engines; the GUI picks one per chat (Chat Settings > Voice):
+The GUI picks an engine and voice per chat (Chat Settings > Voice). Engines
+that aren't installed show up there as "not installed on the server".
 
-- **edge** (default): Microsoft Edge's online voices through `edge-tts`, which
-  `requirements.txt` installs. Natural voices in most languages, Cantonese
-  (`zh-HK-HiuGaaiNeural`, `zh-HK-WanLungNeural`, ...) included. It needs this
-  machine to reach the internet; nothing is downloaded or set up.
-- **piper**: runs here, offline and fast even on the CPU, but each voice is a
-  file to download once. Install it and fetch voices into `voices/` (the list
-  of names is at https://huggingface.co/rhasspy/piper-voices):
+| Engine | Runs | Sounds | Languages | Setup |
+|---|---|---|---|---|
+| `edge` (default) | Microsoft's servers (needs internet) | natural | 100+ incl. Cantonese `zh-HK` | none (in `requirements.txt`) |
+| `kokoro` | here, CPU is fine | natural; ★ voices are the best | English (US/UK), Mandarin, Japanese, Spanish, French, Hindi, Italian, Portuguese | `pip install kokoro-onnx` |
+| `chatterbox` | here, wants an NVIDIA GPU | the most human; copies any voice from a clip | 23, set by `TTS_CHATTERBOX_LANGUAGES` | `pip install chatterbox-tts` (large) |
+| `piper` | here, very light | plainer | many, one file per voice | `pip install piper-tts` + download voices |
 
-  ```bash
-  .venv/bin/pip install piper-tts
-  .venv/bin/python -m piper.download_voices en_US-lessac-medium zh_CN-huayan-medium --download-dir voices
-  ```
+**Kokoro** (82M parameters, Apache 2.0). Install it and restart the server:
 
-  or, with the server running,
-  `curl -X POST localhost:8100/v1/audio/voices/download -H 'Content-Type: application/json' -d '{"voice": "en_US-lessac-medium"}'`.
-  Restart nothing: new voices show up in the GUI's list the next time it is opened.
+```bash
+.venv/bin/pip install kokoro-onnx
+```
 
+Its model (`kokoro-v1.0.onnx`, 310 MB, plus `voices-v1.0.bin`, 28 MB) downloads
+from GitHub into `voices/kokoro/` by itself when the server starts
+(`TTS_PRELOAD=kokoro`), so the first Play doesn't wait. 54 voices; the model
+card rates `af_heart`, `af_bella`, `bf_emma`, `ff_siwis`, `jf_alpha` and
+`zf_xiaoxiao` best (★ in the list). `TTS_KOKORO_MODEL=kokoro-v1.0.int8.onnx`
+uses the 90 MB version, a little rougher. No Cantonese: use Edge's `zh-HK` voices for that.
+
+**Chatterbox** (Resemble AI, MIT). The most natural of the four, and it can
+speak in *any* voice: put a clean 5 to 20 second recording of someone speaking
+(`.wav`, `.mp3`, `.flac`, ...) into `voices/chatterbox/`, and it shows up in the
+voice list under the file's name, once per language. Without clips there is a
+built-in default voice. English uses the English model; other languages use
+the multilingual one (both download from Hugging Face on first use, a few GB).
+It installs PyTorch, so it is a big install, and it is slow without an NVIDIA
+GPU. Speed can't be changed for it.
+
+```bash
+.venv/bin/pip install chatterbox-tts
+# TTS_PRELOAD=kokoro,chatterbox in .env loads it at start-up instead of on the first Play
+```
+
+**Piper**: light and offline, plainer voices; each voice is a file to fetch
+once into `voices/` (names at https://huggingface.co/rhasspy/piper-voices):
+
+```bash
+.venv/bin/pip install piper-tts
+.venv/bin/python -m piper.download_voices en_US-lessac-medium zh_CN-huayan-medium --download-dir voices
+```
+
+or, with the server running,
+`curl -X POST localhost:8100/v1/audio/voices/download -H 'Content-Type: application/json' -d '{"voice": "en_US-lessac-medium"}'`.
+
+New voices and clips show up in the GUI the next time the list is opened.
 Markdown, code blocks, links and citation numbers are removed before reading.
-Check it by hand:
+Check an engine by hand:
 
 ```bash
 curl -X POST localhost:8100/v1/audio/speech -H 'Content-Type: application/json' \
-     -d '{"input": "Hello there", "model": "edge", "voice": "en-GB-SoniaNeural"}' -o hello.mp3
+     -d '{"input": "Hello there", "model": "kokoro", "voice": "af_heart"}' -o hello.wav
 ```
 
 ## Why Python and not C++

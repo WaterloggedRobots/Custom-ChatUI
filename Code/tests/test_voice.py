@@ -198,8 +198,10 @@ def test_export_defaults_to_chat_name_and_remembers_the_folder(gui, monkeypatch,
 # Text to speech
 # ---------------------------------------------------------------------------
 
-VOICES = {"engines": [{"id": "edge", "name": "Microsoft Edge voices (online)", "available": True},
-                      {"id": "piper", "name": "Piper (on the server, offline)", "available": False}],
+VOICES = {"engines": [{"id": "edge", "name": "Microsoft Edge voices (online)", "available": True, "speed": True},
+                      {"id": "chatterbox", "name": "Chatterbox", "available": True, "speed": False},
+                      {"id": "piper", "name": "Piper (on the server, offline)", "available": False,
+                       "install": "pip install piper-tts", "speed": True}],
           "voices": [{"id": "en-US-JennyNeural", "engine": "edge", "language": "en-US", "name": "Jenny (en-US, Female)"},
                      {"id": "en-US-GuyNeural", "engine": "edge", "language": "en-US", "name": "Guy (en-US, Male)"},
                      {"id": "zh-HK-HiuGaaiNeural", "engine": "edge", "language": "zh-HK", "name": "HiuGaai (zh-HK, Female)"}],
@@ -208,7 +210,8 @@ VOICES = {"engines": [{"id": "edge", "name": "Microsoft Edge voices (online)", "
 
 def test_tts_settings_normalize():
     import chat_settings
-    s = chat_settings.normalize({"TTS": True, "TTS Engine": "robot", "TTS Speed": 9, "TTS Voice": 3})
+    assert chat_settings.normalize({"TTS Engine": "kokoro"})["TTS Engine"] == "kokoro"
+    s = chat_settings.normalize({"TTS": True, "TTS Engine": "Robot Voice!", "TTS Speed": 9, "TTS Voice": 3})
     assert s["TTS"] is True and s["TTS Engine"] == "edge" and s["TTS Speed"] == 2.0 and s["TTS Voice"] == ""
     assert chat_settings.defaults()["TTS"] is False
 
@@ -310,7 +313,7 @@ def test_settings_window_voice_group(gui, monkeypatch):
     assert win.ui.ttsBox.isHidden()                            # TTS off: no voice settings
     win.ui.ttsCheck.setChecked(True)
     assert not win.ui.ttsBox.isHidden()
-    assert win.ui.ttsEngineCombo.count() == 2
+    assert win.ui.ttsEngineCombo.count() == 3
     lang = win.ui.ttsLanguageCombo
     lang.setCurrentIndex(lang.findData("zh-HK"))
     lang.activated.emit(lang.currentIndex())
@@ -342,3 +345,19 @@ def test_voice_sample():
     assert voice_sample("zh-HK", "Ada").startswith("你好，我係Ada")
     assert voice_sample("zh-CN", "Ada").startswith("你好，我是Ada")
     assert voice_sample("en-GB", "Ada") == "Hello, I'm Ada. This is how I sound."
+
+
+def test_settings_window_engine_hints(gui, monkeypatch):
+    import chat_settings
+    main, win, _ = gui
+    voices = {**VOICES, "voices": VOICES["voices"] + [
+        {"id": "default|en", "engine": "chatterbox", "language": "en", "name": "Default voice (en)"}]}
+    monkeypatch.setattr(voice, "list_voices", lambda base_url, engine="": voices)
+    win.open_for("Talk", {**chat_settings.DEFAULTS, "TTS": True, "TTS Engine": "piper"}, is_new=False)
+    assert "pip install piper-tts" in win.ui.ttsStatusLabel.text()
+    combo = win.ui.ttsEngineCombo
+    combo.setCurrentIndex(combo.findData("chatterbox"))
+    combo.activated.emit(combo.currentIndex())
+    assert not win.ui.ttsSpeedSpin.isEnabled()                 # Chatterbox has no speed setting
+    assert win.ui.ttsVoiceCombo.currentData() == "default|en"
+    assert win.ui.ttsStatusLabel.text() == ""

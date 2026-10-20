@@ -13,11 +13,12 @@ No Qt here, so it can be tested on its own (tests/test_chat_settings.py).
 """
 
 import json
+import re
 from pathlib import Path
 
 WEB_MODES = ("auto", "on", "off")
 TEMPERATURE_RANGE = (0.0, 2.0)
-TTS_ENGINES = ("edge", "piper")
+TTS_ENGINES = ("edge", "kokoro", "chatterbox", "piper")   # the server's; it may add more
 TTS_SPEED_RANGE = (0.5, 2.0)
 EXPORT_TAG = "ChatUI Settings"        # marks an exported file; the value is the format version
 EXPORT_VERSION = 1
@@ -32,7 +33,7 @@ DEFAULTS = {
     "Tools": True,                    # files, git and terminal on this PC (local_tools/)
     # Text to speech, done by the server (Server/ollama/chat_server/tts.py)
     "TTS": False,                     # off: no Play buttons and no voice settings shown
-    "TTS Engine": "edge",             # one of TTS_ENGINES
+    "TTS Engine": "edge",             # an engine id from the server, e.g. one of TTS_ENGINES
     "TTS Voice": "",                  # "" = the server's default voice for the engine
     "TTS Speed": 1.0,
     "TTS Auto Play": True,            # read each new reply aloud when it arrives
@@ -65,7 +66,8 @@ def normalize(data) -> dict:
     if speed is not None:
         lo, hi = TTS_SPEED_RANGE
         s["TTS Speed"] = round(min(max(float(speed), lo), hi), 2)
-    if data.get("TTS Engine") in TTS_ENGINES:
+    engine = data.get("TTS Engine")
+    if isinstance(engine, str) and re.fullmatch(r"[a-z0-9_-]{1,32}", engine):
         s["TTS Engine"] = data["TTS Engine"]
     for key in ("Think", "Tools", "TTS", "TTS Auto Play"):
         if isinstance(data.get(key), bool):

@@ -26,6 +26,7 @@ class ChatSettings(QMainWindow):
         self.model = ""
         self.tts_voice = ""            # the chosen voice id; kept even if the server doesn't list it
         self._tts_engine = chat_settings.DEFAULTS["TTS Engine"]
+        self.engine_info = {}          # engine id -> {"name", "available", "install", "speed"}
         self.voice_list = None         # from the server: {"engines": [...], "voices": [...]}
         self.preview = voice.Speaker(lambda: chat_main.client.base_url, paths.AUDIO_DIR, self)
         self.preview.changed.connect(self._show_preview_state)
@@ -215,15 +216,30 @@ class ChatSettings(QMainWindow):
         combo = self.ui.ttsEngineCombo
         engines = (self.voice_list or {}).get("engines") or [{"id": e, "name": e, "available": True}
                                                             for e in chat_settings.TTS_ENGINES]
+        self.engine_info = {e["id"]: e for e in engines}
         combo.clear()
         for e in engines:
-            if e["id"] in chat_settings.TTS_ENGINES:
-                combo.addItem(e["name"] + ("" if e.get("available") else "  (not installed on the server)"), e["id"])
+            combo.addItem(e["name"] + ("" if e.get("available") else "  (not installed on the server)"), e["id"])
+        if combo.findData(self._tts_engine) < 0:
+            combo.addItem(f"{self._tts_engine} (not on the server)", self._tts_engine)
         combo.setCurrentIndex(max(0, combo.findData(self._tts_engine)))
         self._fill_languages()
 
+    def _show_engine_info(self):
+        """Say how to install an engine the server lacks; grey out Speed for engines without it."""
+        info = self.engine_info.get(self.tts_engine(), {})
+        speed = info.get("speed", True)
+        self.ui.ttsSpeedSpin.setEnabled(speed)
+        self.ui.ttsSpeedSpin.setToolTip("" if speed else "This engine always speaks at its own pace")
+        if info and not info.get("available", True):
+            self.ui.ttsStatusLabel.setText(f"Not installed on the server yet. On the server, in Server/ollama: "
+                                           f".venv/bin/{info.get('install', 'pip install ...')}, then restart it.")
+        elif self.voice_list is not None:
+            self.ui.ttsStatusLabel.setText("; ".join((self.voice_list.get("errors") or {}).values()))
+
     def _fill_languages(self):
         self._tts_engine = self.tts_engine()
+        self._show_engine_info()
         voices = self._voices()
         current = next((v["language"] for v in voices if v["id"] == self.tts_voice), None)
         if current is None and voices:
@@ -231,7 +247,7 @@ class ChatSettings(QMainWindow):
             from PySide6.QtCore import QLocale
             mine = QLocale.system().name().replace("_", "-")
             langs = {v["language"] for v in voices}
-            current = mine if mine in langs else "en-US" if "en-US" in langs else ""
+            current = next((x for x in (mine, mine.split("-")[0], "en-US", "en") if x in langs), "")
         combo = self.ui.ttsLanguageCombo
         combo.clear()
         combo.addItem("All languages", "")

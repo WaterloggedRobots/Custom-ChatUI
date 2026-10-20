@@ -19,7 +19,10 @@ numpy>=1.26
 
 # Text to speech for the GUI's Play buttons (tts.py)
 edge-tts>=6.1             # Microsoft Edge online voices (default engine)
-# piper-tts>=1.3          # optional: offline voices on this machine (see README)
+# Optional engines that run on this machine (see README):
+# kokoro-onnx>=0.4        # natural voices, CPU is fine, model downloads by itself
+# chatterbox-tts          # most human, copies voices from a clip; installs PyTorch, wants a GPU
+# piper-tts>=1.3          # light, plainer voices
 
 # Optional extras (each switches itself off if missing)
 SpeechRecognition>=3.10   # STT_ENGINE=google fallback (needs internet)

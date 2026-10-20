@@ -326,7 +326,7 @@ class Speaker(QObject):
             try:
                 r = requests.post(f"{self._base_url()}/v1/audio/speech",
                                   json={"input": text, "model": engine, "voice": voice, "speed": speed},
-                                  timeout=(5, 180))
+                                  timeout=(5, 900))     # the first use of a local engine downloads its model
             except requests.RequestException as e:
                 self._fetch_failed.emit(key, f"Can't reach the server for text to speech: {e}")
                 return

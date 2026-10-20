@@ -192,3 +192,153 @@ def test_export_defaults_to_chat_name_and_remembers_the_folder(gui, monkeypatch,
     assert asked[1] == str(out / "Trip Tokyo.json")       # opens where the last export went
     assert (out / "second.json").exists()
     assert chatSettings._last_folder() == out
+
+
+# ---------------------------------------------------------------------------
+# Text to speech
+# ---------------------------------------------------------------------------
+
+VOICES = {"engines": [{"id": "edge", "name": "Microsoft Edge voices (online)", "available": True},
+                      {"id": "piper", "name": "Piper (on the server, offline)", "available": False}],
+          "voices": [{"id": "en-US-JennyNeural", "engine": "edge", "language": "en-US", "name": "Jenny (en-US, Female)"},
+                     {"id": "en-US-GuyNeural", "engine": "edge", "language": "en-US", "name": "Guy (en-US, Male)"},
+                     {"id": "zh-HK-HiuGaaiNeural", "engine": "edge", "language": "zh-HK", "name": "HiuGaai (zh-HK, Female)"}],
+          "errors": {}}
+
+
+def test_tts_settings_normalize():
+    import chat_settings
+    s = chat_settings.normalize({"TTS": True, "TTS Engine": "robot", "TTS Speed": 9, "TTS Voice": 3})
+    assert s["TTS"] is True and s["TTS Engine"] == "edge" and s["TTS Speed"] == 2.0 and s["TTS Voice"] == ""
+    assert chat_settings.defaults()["TTS"] is False
+
+
+def test_speaker_fetches_once_then_uses_the_cache(monkeypatch, tmp_path):
+    posts = []
+
+    class Resp:
+        status_code = 200
+        headers = {"content-type": "audio/mpeg"}
+        content = b"ID3audio"
+        text = ""
+
+    def post(url, json, timeout):
+        posts.append((url, json))
+        return Resp()
+
+    monkeypatch.setattr(voice.requests, "post", post)
+    sp = voice.Speaker(lambda: "http://server:8100", tmp_path)
+    got = []
+    sp._fetched.disconnect()
+    sp._fetched.connect(lambda key, path: got.append((key, path)))
+    sp._fetch(3, "Hello", "edge", "en-US-GuyNeural", 1.0)
+    sp._fetch(3, "Hello", "edge", "en-US-GuyNeural", 1.0)
+    assert posts == [("http://server:8100/v1/audio/speech",
+                      {"input": "Hello", "model": "edge", "voice": "en-US-GuyNeural", "speed": 1.0})]
+    assert got[0] == got[1] and got[0][1].endswith(".mp3")
+    assert open(got[0][1], "rb").read() == b"ID3audio"
+    sp._fetch(3, "Hello", "edge", "en-US-GuyNeural", 1.2)        # another speed is another clip
+    assert len(posts) == 2
+
+
+def test_speaker_failure_is_reported(monkeypatch, tmp_path):
+    class Resp:
+        status_code = 502
+        headers = {}
+        text = '{"error": {"message": "no internet"}}'
+
+        def json(self):
+            return json.loads(self.text)
+
+    monkeypatch.setattr(voice.requests, "post", lambda *a, **k: Resp())
+    sp = voice.Speaker(lambda: "http://s", tmp_path)
+    errors = []
+    sp.failed.connect(errors.append)
+    sp.toggle(0, "Hi", "edge", "", 1.0)
+    sp._worker_join = None
+    import time
+    from PySide6.QtWidgets import QApplication
+    for _ in range(50):
+        QApplication.processEvents()
+        if errors:
+            break
+        time.sleep(0.02)
+    assert errors == ["Text to speech failed: no internet"]
+    assert sp.key is None and sp.state_of(0) == "stopped"
+
+
+def test_play_buttons_follow_the_tts_setting(gui, monkeypatch):
+    import chat_settings
+    main, _, _ = gui
+    main.create_chat("Talk", {**chat_settings.DEFAULTS, "Model": "m1"})
+    main.chat_markdown += [{"role": "user", "content": "hi", "ts": 1},
+                           {"role": "assistant", "content": "Hello **there**", "ts": 2}]
+    main._rebuild_chat_ui()
+    assert "speak:1" not in main.chat.toHtml()                 # TTS off: no Play button
+
+    main.apply_settings("Talk", {**main.settings, "TTS": True, "TTS Voice": "zh-HK-HiuGaaiNeural", "TTS Speed": 1.5})
+    assert "speak:1" in main.chat.toHtml() and "▶ Play" in main.chat.toPlainText()
+    calls = []
+    monkeypatch.setattr(main.speaker, "toggle", lambda *a: calls.append(a))
+    from PySide6.QtCore import QUrl
+    main.on_anchor(QUrl("speak:1"))
+    assert calls == [(1, "Hello **there**", "edge", "zh-HK-HiuGaaiNeural", 1.5)]
+
+    monkeypatch.setattr(main.speaker, "state_of", lambda key: "playing" if key == 1 else "stopped")
+    main.on_speaker_changed()
+    assert "⏸ Pause" in main.chat.toPlainText()
+
+
+def test_new_reply_plays_by_itself(gui, monkeypatch):
+    import chat_settings
+    main, _, _ = gui
+    main.create_chat("Talk", {**chat_settings.DEFAULTS, "Model": "m1", "TTS": True})
+    spoken = []
+    monkeypatch.setattr(main, "speak", spoken.append)
+    main.chat_markdown.append({"role": "user", "content": "hi", "ts": 1})
+    main._start_response = lambda: None
+    main.response_start_pos = main.chat.textCursor().position()
+    main.on_done({"content": "Hello!"})
+    assert spoken == [1]
+
+
+def test_settings_window_voice_group(gui, monkeypatch):
+    import chat_settings
+    main, win, _ = gui
+    monkeypatch.setattr(voice, "list_voices", lambda base_url, engine="": VOICES)
+    win.open_for("Talk", {**chat_settings.DEFAULTS, "Model": "m1"}, is_new=False)
+    assert win.ui.ttsBox.isHidden()                            # TTS off: no voice settings
+    win.ui.ttsCheck.setChecked(True)
+    assert not win.ui.ttsBox.isHidden()
+    assert win.ui.ttsEngineCombo.count() == 2
+    lang = win.ui.ttsLanguageCombo
+    lang.setCurrentIndex(lang.findData("zh-HK"))
+    lang.activated.emit(lang.currentIndex())
+    assert win.ui.ttsVoiceCombo.currentData() == "zh-HK-HiuGaaiNeural"
+    win.ui.ttsSpeedSpin.setValue(1.3)
+    s = win.settings()
+    assert (s["TTS"], s["TTS Engine"], s["TTS Voice"], s["TTS Speed"]) == (True, "edge", "zh-HK-HiuGaaiNeural", 1.3)
+
+    win.open_for("Talk", s, is_new=False)                      # reopening shows the saved voice
+    assert win.ui.ttsLanguageCombo.currentData() == "zh-HK"
+    assert win.ui.ttsVoiceCombo.currentData() == "zh-HK-HiuGaaiNeural"
+
+
+def test_settings_window_keeps_the_voice_when_the_server_is_down(gui, monkeypatch):
+    import chat_settings
+    main, win, _ = gui
+
+    def down(base_url, engine=""):
+        raise RuntimeError("Can't reach the server")
+
+    monkeypatch.setattr(voice, "list_voices", down)
+    win.open_for("Talk", {**chat_settings.DEFAULTS, "TTS": True, "TTS Voice": "en-US-GuyNeural"}, is_new=False)
+    assert "Can't reach the server" in win.ui.ttsStatusLabel.text()
+    assert win.settings()["TTS Voice"] == "en-US-GuyNeural"
+
+
+def test_voice_sample():
+    from Widgets.chatSettings import voice_sample
+    assert voice_sample("zh-HK", "Ada").startswith("你好，我係Ada")
+    assert voice_sample("zh-CN", "Ada").startswith("你好，我是Ada")
+    assert voice_sample("en-GB", "Ada") == "Hello, I'm Ada. This is how I sound."

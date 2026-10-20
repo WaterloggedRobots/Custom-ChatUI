@@ -17,6 +17,8 @@ from pathlib import Path
 
 WEB_MODES = ("auto", "on", "off")
 TEMPERATURE_RANGE = (0.0, 2.0)
+TTS_ENGINES = ("edge", "piper")
+TTS_SPEED_RANGE = (0.5, 2.0)
 EXPORT_TAG = "ChatUI Settings"        # marks an exported file; the value is the format version
 EXPORT_VERSION = 1
 
@@ -28,6 +30,12 @@ DEFAULTS = {
     "Think": True,
     "Web Search": "auto",             # one of WEB_MODES
     "Tools": True,                    # files, git and terminal on this PC (local_tools/)
+    # Text to speech, done by the server (Server/ollama/chat_server/tts.py)
+    "TTS": False,                     # off: no Play buttons and no voice settings shown
+    "TTS Engine": "edge",             # one of TTS_ENGINES
+    "TTS Voice": "",                  # "" = the server's default voice for the engine
+    "TTS Speed": 1.0,
+    "TTS Auto Play": True,            # read each new reply aloud when it arrives
 }
 
 
@@ -44,7 +52,7 @@ def normalize(data) -> dict:
     s = defaults()
     if not isinstance(data, dict):
         return s
-    for key in ("Character", "Pretext", "Model"):
+    for key in ("Character", "Pretext", "Model", "TTS Voice"):
         if isinstance(data.get(key), str):
             s[key] = data[key]
     if not s["Character"].strip():
@@ -53,7 +61,13 @@ def normalize(data) -> dict:
     if temp is not None:
         lo, hi = TEMPERATURE_RANGE
         s["Temperature"] = round(min(max(float(temp), lo), hi), 2)
-    for key in ("Think", "Tools"):
+    speed = _number(data.get("TTS Speed"))
+    if speed is not None:
+        lo, hi = TTS_SPEED_RANGE
+        s["TTS Speed"] = round(min(max(float(speed), lo), hi), 2)
+    if data.get("TTS Engine") in TTS_ENGINES:
+        s["TTS Engine"] = data["TTS Engine"]
+    for key in ("Think", "Tools", "TTS", "TTS Auto Play"):
         if isinstance(data.get(key), bool):
             s[key] = data[key]
     if data.get("Web Search") in WEB_MODES:

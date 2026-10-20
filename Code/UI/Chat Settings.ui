@@ -194,6 +194,136 @@ QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px}</string>
     </widget>
    </item>
    <item>
+    <widget class="QGroupBox" name="groupVoice">
+     <property name="title">
+      <string>Voice</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_voice">
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_tts">
+        <item>
+         <widget class="QLabel" name="label_tts">
+          <property name="text">
+           <string>Text to speech: read the replies aloud (the server makes the audio)</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer_tts">
+          <property name="orientation">
+           <enum>Qt::Orientation::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>10</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="ttsCheck">
+          <property name="toolTip">
+           <string>Off: no Play buttons in the chat and no voice settings here</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QWidget" name="ttsBox" native="true">
+        <layout class="QGridLayout" name="gridLayout_tts" columnstretch="0,1,0">
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+       <item row="0" column="0">
+        <widget class="QLabel" name="label_ttsEngine">
+         <property name="text">
+          <string>Engine</string>
+         </property>
+        </widget>
+       </item>
+         <item row="0" column="1" colspan="2">
+          <widget class="QComboBox" name="ttsEngineCombo">
+           <property name="toolTip">
+            <string>Edge: Microsoft's natural online voices, many languages (needs internet on the server)&#10;Piper: runs on the server itself, offline; voices are downloaded once (see the server README)</string>
+           </property>
+          </widget>
+         </item>
+       <item row="1" column="0">
+        <widget class="QLabel" name="label_ttsLanguage">
+         <property name="text">
+          <string>Language</string>
+         </property>
+        </widget>
+       </item>
+         <item row="1" column="1" colspan="2">
+          <widget class="QComboBox" name="ttsLanguageCombo"/>
+         </item>
+       <item row="2" column="0">
+        <widget class="QLabel" name="label_ttsVoice">
+         <property name="text">
+          <string>Voice</string>
+         </property>
+        </widget>
+       </item>
+         <item row="2" column="1">
+          <widget class="QComboBox" name="ttsVoiceCombo"/>
+         </item>
+         <item row="2" column="2">
+          <widget class="QPushButton" name="ttsTestButton">
+           <property name="toolTip">
+            <string>Hear this voice</string>
+           </property>
+           <property name="text">
+            <string>▶ Test</string>
+           </property>
+          </widget>
+         </item>
+       <item row="3" column="0">
+        <widget class="QLabel" name="label_ttsSpeed">
+         <property name="text">
+          <string>Speed</string>
+         </property>
+        </widget>
+       </item>
+         <item row="3" column="1" colspan="2">
+          <widget class="QDoubleSpinBox" name="ttsSpeedSpin">
+           <property name="suffix">
+            <string>×</string>
+           </property>
+          </widget>
+         </item>
+       <item row="4" column="0">
+        <widget class="QLabel" name="label_ttsAuto">
+         <property name="text">
+          <string>Play each new reply automatically</string>
+         </property>
+        </widget>
+       </item>
+         <item row="4" column="2">
+          <widget class="QCheckBox" name="ttsAutoCheck"/>
+         </item>
+         <item row="5" column="0" colspan="3">
+          <widget class="QLabel" name="ttsStatusLabel">
+           <property name="wordWrap">
+            <bool>true</bool>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">color:#8a8a8a</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <layout class="QHBoxLayout" name="horizontalLayout_buttons">
      <item>
       <widget class="QPushButton" name="importButton">

@@ -73,6 +73,16 @@ The 🎤 button between the message box and *Send* lets you speak instead of typ
 
 The client records with Qt Multimedia, which comes with PySide6, so there is nothing extra to install on Windows. Windows must allow desktop apps to use the microphone (*Settings > Privacy & security > Microphone*). The server needs `faster-whisper` (in its `requirements.txt`); the first clip after the server starts takes longer while it loads the model, and the very first one also downloads it. See *Speech to text* in `Server/ollama/README.md`.
 
+## 2.8. Text to speech (v0.11)
+Turn on *Text to speech* in a chat's settings (the *Voice* box) and every reply gets a **▶ Play** button under it. Click it to hear the reply; it turns into **⏸ Pause**, then **▶ Resume**. Once a reply has played, the button goes back to **▶ Play**, so you can play it again as often as you like; replays come from a copy kept on this PC (`Audio/` in the client data folder), so they start straight away. With *Play each new reply automatically* on, new replies are read out as they arrive. Turn text to speech off and the Play buttons and the voice settings disappear.
+
+The server makes the audio, so each chat's choice goes to it with every request:
+- **Engine**: *Microsoft Edge voices* (online, natural, hundreds of voices in most languages, Cantonese `zh-HK` included) or *Piper* (runs on the server itself with no internet, but each voice has to be downloaded there once; see the server README).
+- **Language** narrows the voice list; **Voice** picks the speaker, and **▶ Test** plays a short line in that voice.
+- **Speed**, from 0.5× to 2×.
+
+Markdown, code blocks, links and source numbers like `[1]` are left out of what is read.
+
 ## Where things live
 | Name | Where | What |
 |---|---|---|

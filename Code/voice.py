@@ -1,6 +1,7 @@
-"""Voice input: record the microphone and turn it into text on the server.
+"""Voice: speech to text for the 🎤 button, and text to speech for the ▶ Play
+buttons on the bot's replies. The server does the heavy lifting both ways.
 
-The 🎤 button in the chat window (ChatMain) uses the two halves here:
+The 🎤 button in the chat window (ChatMain) uses:
 
   Recorder      records the default microphone with Qt Multimedia (part of
                 PySide6, nothing extra to install) and hands back a WAV file.
@@ -12,14 +13,24 @@ The 🎤 button in the chat window (ChatMain) uses the two halves here:
                 (Server/ollama/chat_server/speech.py) on a worker thread and
                 emits the text.
 
+The ▶ Play buttons use:
+
+  Speaker       asks the server's /v1/audio/speech (chat_server/tts.py) to read
+                a reply with the chat's engine, voice and speed, keeps the
+                audio in CLIENT_DATA_DIR/Audio so replays are instant, and
+                plays and pauses it with Qt Multimedia.
+  list_voices() the engines and voices the server offers, for Chat Settings.
+
 wav_bytes() has no Qt in it, so it can be tested on its own (tests/test_voice.py).
 """
 
+import hashlib
 import struct
 import threading
+from pathlib import Path
 
 import requests
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 
 MAX_SECONDS = 300            # a recording stops by itself after this long
 LEVEL_INTERVAL_MS = 100
@@ -207,3 +218,208 @@ class Transcriber(QObject):
             self.failed.emit(f"Speech to text failed: {msg}")
             return
         self.done.emit(r.json().get("text", "").strip())
+
+
+# ---------------------------------------------------------------------------
+# Text to speech
+# ---------------------------------------------------------------------------
+
+AUDIO_CACHE_FILES = 300      # oldest clips are deleted beyond this many
+
+
+def list_voices(base_url: str, engine: str = "") -> dict:
+    """{"engines": [...], "voices": [{"id", "engine", "language", "name"}], ...}; raises RuntimeError."""
+    try:
+        r = requests.get(f"{base_url}/v1/audio/voices", params={"engine": engine} if engine else None, timeout=10)
+    except requests.RequestException as e:
+        raise RuntimeError(f"Can't reach the server: {e}") from e
+    if r.status_code == 404:
+        raise RuntimeError("This server has no text to speech yet; update it (git pull) and restart it")
+    if r.status_code != 200:
+        raise RuntimeError(f"The server couldn't list voices: {r.text[:200]}")
+    return r.json()
+
+
+def clip_name(text: str, engine: str, voice: str, speed: float) -> str:
+    """Cache file name (without extension) for one reading of one text."""
+    return hashlib.sha1(f"{engine}|{voice}|{speed:.2f}|{text}".encode("utf-8")).hexdigest()
+
+
+class Speaker(QObject):
+    """Plays one reply at a time. `key` is whatever the caller uses to tell
+    replies apart (ChatMain uses the message's index)."""
+    changed = Signal()           # the playing key or its state changed: redraw the buttons
+    failed = Signal(str)
+    _fetched = Signal(object, str)          # key, file (from the worker thread)
+    _fetch_failed = Signal(object, str)
+
+    def __init__(self, base_url, cache_dir: Path, parent=None):
+        super().__init__(parent)
+        self._base_url = base_url              # a function, so a changed server address is picked up
+        self.cache_dir = Path(cache_dir)
+        self.key = None                        # the reply playing, paused or loading
+        self._loading = False
+        self._player = None
+        self._output = None
+        self._last_state = "stopped"
+        self._wants_play = False
+        self._poll = QTimer(self)              # PySide6 6.12 can't hand some Qt Multimedia signals to Python
+        self._poll.setInterval(150)
+        self._poll.timeout.connect(self._check_player)
+        self._fetched.connect(self._on_fetched)
+        self._fetch_failed.connect(self._on_fetch_failed)
+
+    def state_of(self, key) -> str:
+        """"loading", "playing", "paused" or "stopped"."""
+        if key != self.key or key is None:
+            return "stopped"
+        if self._loading:
+            return "loading"
+        return self._player_state()
+
+    def toggle(self, key, text: str, engine: str, voice: str, speed: float):
+        """Play `key`, or pause/resume it if it's the one already playing."""
+        if key == self.key and self.key is not None:
+            state = self.state_of(key)
+            if state == "loading":
+                return
+            if state == "playing":
+                self._wants_play = False
+                self._player.pause()
+            else:
+                self._wants_play = True
+                self._player.play()
+            self._last_state = "paused" if state == "playing" else "playing"
+            self._poll.start()
+            self.changed.emit()
+            return
+        self.stop()
+        self.key = key
+        self._loading = True
+        self.changed.emit()
+        threading.Thread(target=self._fetch, args=(key, text, engine, voice, speed), daemon=True).start()
+
+    def stop(self):
+        self._wants_play = False
+        if self._player is not None:
+            self._player.stop()
+        was = self.key
+        self.key = None
+        self._loading = False
+        self._poll.stop()
+        if was is not None:
+            self.changed.emit()
+
+    # -------------------------------------------------------------- fetching
+
+    def cached(self, text, engine, voice, speed):
+        name = clip_name(text, engine, voice, speed)
+        for ext in (".mp3", ".wav"):
+            path = self.cache_dir / (name + ext)
+            if path.is_file() and path.stat().st_size > 0:
+                return path
+        return None
+
+    def _fetch(self, key, text, engine, voice, speed):
+        path = self.cached(text, engine, voice, speed)
+        if path is None:
+            try:
+                r = requests.post(f"{self._base_url()}/v1/audio/speech",
+                                  json={"input": text, "model": engine, "voice": voice, "speed": speed},
+                                  timeout=(5, 180))
+            except requests.RequestException as e:
+                self._fetch_failed.emit(key, f"Can't reach the server for text to speech: {e}")
+                return
+            if r.status_code == 404 and "voice" not in r.text.lower():
+                self._fetch_failed.emit(key, "This server has no text to speech yet; update it (git pull) and restart it.")
+                return
+            if r.status_code != 200:
+                try:
+                    msg = r.json()["error"]["message"]
+                except (ValueError, KeyError, TypeError):
+                    msg = r.text[:300]
+                self._fetch_failed.emit(key, f"Text to speech failed: {msg}")
+                return
+            ext = ".wav" if "wav" in r.headers.get("content-type", "") else ".mp3"
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            path = self.cache_dir / (clip_name(text, engine, voice, speed) + ext)
+            path.write_bytes(r.content)
+            self._prune()
+        self._fetched.emit(key, str(path))
+
+    def _prune(self):
+        try:
+            clips = sorted(self.cache_dir.glob("*.*"), key=lambda p: p.stat().st_mtime)
+            for old in clips[:-AUDIO_CACHE_FILES]:
+                old.unlink()
+        except OSError:
+            pass
+
+    def _on_fetched(self, key, path):
+        if key != self.key:            # another reply was picked meanwhile
+            return
+        self._loading = False
+        if not self._ensure_player():
+            self.stop()
+            return
+        self._player.setSource(QUrl.fromLocalFile(path))
+        self._wants_play = True
+        self._player.play()
+        self._last_state = "loading"
+        self._poll.start()
+        self.changed.emit()
+
+    def _on_fetch_failed(self, key, err):
+        if key == self.key:
+            self.stop()
+        self.failed.emit(err)
+
+    # -------------------------------------------------------------- playback
+
+    def _ensure_player(self) -> bool:
+        if self._player is not None:
+            return True
+        try:
+            from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+        except ImportError as e:
+            self.failed.emit(f"Qt Multimedia is missing from this PySide6 install: {e}")
+            return False
+        self._output = QAudioOutput(self)
+        self._player = QMediaPlayer(self)
+        self._player.setAudioOutput(self._output)
+        return True
+
+    def _player_state(self) -> str:
+        if self._player is None:
+            return "stopped"
+        from PySide6.QtMultimedia import QMediaPlayer
+        state = self._player.playbackState()
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            return "playing"
+        if state == QMediaPlayer.PlaybackState.PausedState:
+            return "paused"
+        # Right after play() the player still says Stopped while it opens the file.
+        status = self._player.mediaStatus()
+        if status in (QMediaPlayer.MediaStatus.LoadingMedia, QMediaPlayer.MediaStatus.LoadedMedia,
+                      QMediaPlayer.MediaStatus.BufferingMedia, QMediaPlayer.MediaStatus.BufferedMedia) \
+                and self._wants_play:
+            return "loading"
+        return "stopped"
+
+    def _check_player(self):
+        if self._player is None or self.key is None:
+            self._poll.stop()
+            return
+        from PySide6.QtMultimedia import QMediaPlayer
+        if self._player.error() != QMediaPlayer.Error.NoError:
+            err = self._player.errorString()
+            self.stop()
+            self.failed.emit(f"Can't play the audio: {err}")
+            return
+        state = self._player_state()
+        if state == "stopped":             # played to the end
+            self.stop()
+            return
+        if state != self._last_state:
+            self._last_state = state
+            self.changed.emit()

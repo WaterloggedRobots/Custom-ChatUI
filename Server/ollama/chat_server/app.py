@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import search as web
 from . import speech
+from . import tts
 from .config import Config
 from .documents import AttachmentError, load_attachment
 from .ollama import Ollama, OllamaError
@@ -67,6 +68,7 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
         return JSONResponse(status_code=400, content={"error": {"message": str(e), "type": "attachment_error"}})
 
     app.include_router(speech.router)
+    app.include_router(tts.router)
     if Config.ENABLE_EXTRAS:
         from . import extras
         app.include_router(extras.router)
@@ -74,6 +76,7 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
     else:
         extras_available = {}
     extras_available["stt"] = speech.ENGINE is not None
+    extras_available["tts"] = tts.default_engine() is not None
 
     # ------------------------------------------------------------------ info
 
@@ -88,6 +91,7 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
                 "web_search": "POST /web_search",
                 "browse": "POST /v1/web/browse",
                 "extract": "POST /v1/files/extract",
+                "text_to_speech": "POST /v1/audio/speech {input, model: edge|piper, voice, speed}; GET /v1/audio/voices",
                 "speech_to_text": "POST /v1/audio/transcriptions (multipart: file, language); GET /v1/audio/stt",
                 "health": "GET /health",
             },

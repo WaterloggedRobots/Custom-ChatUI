@@ -84,5 +84,11 @@ class Config:
     STT_PRELOAD = os.getenv("STT_PRELOAD", "0") not in ("0", "false", "no")
     STT_MAX_BYTES = _int("STT_MAX_BYTES", 50 * 1024 * 1024)
 
-    # Optional extras (TTS and the experimental tool-calling endpoints)
+    # Text to speech for the GUI's ▶ Play buttons (tts.py)
+    TTS_ENGINE = os.getenv("TTS_ENGINE") or "edge"          # default engine: edge (online) | piper (offline)
+    TTS_VOICE = os.getenv("TTS_VOICE") or "en-US-JennyNeural" # default Edge voice
+    TTS_PIPER_DIR = os.getenv("TTS_PIPER_DIR") or str(SERVER_DIR / "voices")   # Piper .onnx voices
+    TTS_MAX_CHARS = _int("TTS_MAX_CHARS", 8000)
+
+    # Optional extras (the experimental tool-calling endpoints)
     ENABLE_EXTRAS = os.getenv("ENABLE_EXTRAS", "1") not in ("0", "false", "no")

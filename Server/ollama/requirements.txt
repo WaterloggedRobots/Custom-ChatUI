@@ -17,8 +17,11 @@ Pillow>=10.0              # converts webp/gif/bmp images for the model
 faster-whisper>=1.1       # local Whisper; pulls in numpy, ctranslate2 and av
 numpy>=1.26
 
+# Text to speech for the GUI's Play buttons (tts.py)
+edge-tts>=6.1             # Microsoft Edge online voices (default engine)
+# piper-tts>=1.3          # optional: offline voices on this machine (see README)
+
 # Optional extras (each switches itself off if missing)
-edge-tts>=6.1             # /tts
 SpeechRecognition>=3.10   # STT_ENGINE=google fallback (needs internet)
 ollama>=0.4               # gemma_four.py tool-calling test endpoints
 

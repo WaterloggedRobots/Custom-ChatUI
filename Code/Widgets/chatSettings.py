@@ -1,12 +1,15 @@
-"""The settings window of one chat: title, character, model and options.
+"""The settings window of one chat: title, character, model, options and voice.
 
 It edits a copy of the chat's settings (chat_settings.py) and hands them back
 to main.py on Save; ChatMain applies and saves them in the chat file. The
-model list is the same one the main window's quick model picker shows.
+model list is the same one the main window's quick model picker shows. The
+voice lists come from the server (GET /v1/audio/voices) the first time text
+to speech is switched on here.
 """
 
 import chat_settings
 import paths
+import voice
 from Widgets.chatMain import LiveComboBox, WEB_LABELS, safe_file_name
 
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QComboBox, QMessageBox
@@ -21,6 +24,12 @@ class ChatSettings(QMainWindow):
         self.chat_main = chat_main
         self.is_new = True             # True: Save creates a chat; False: it updates the open one
         self.model = ""
+        self.tts_voice = ""            # the chosen voice id; kept even if the server doesn't list it
+        self._tts_engine = chat_settings.DEFAULTS["TTS Engine"]
+        self.voice_list = None         # from the server: {"engines": [...], "voices": [...]}
+        self.preview = voice.Speaker(lambda: chat_main.client.base_url, paths.AUDIO_DIR, self)
+        self.preview.changed.connect(self._show_preview_state)
+        self.preview.failed.connect(lambda err: self.ui.ttsStatusLabel.setText(err))
         self.load_ui()
         self.setup_connections()
         chat_main.model_changed.connect(self.on_main_model_changed)
@@ -51,6 +60,12 @@ class ChatSettings(QMainWindow):
         slider.setRange(int(lo * 100), int(hi * 100))
         slider.setPageStep(10)
 
+        lo, hi = chat_settings.TTS_SPEED_RANGE
+        self.ui.ttsSpeedSpin.setRange(lo, hi)
+        self.ui.ttsSpeedSpin.setSingleStep(0.1)
+        self.ui.ttsSpeedSpin.setDecimals(2)
+        self.ui.ttsBox.setVisible(False)
+
     def setup_connections(self):
         spin, slider = self.ui.temperatureSpin, self.ui.temperatureSlider
         spin.valueChanged.connect(lambda v: self._quietly(slider, slider.setValue, round(v * 100)))
@@ -58,6 +73,11 @@ class ChatSettings(QMainWindow):
         self.model_combo.activated.connect(self.on_model_chosen)
         self.ui.importButton.clicked.connect(self.import_settings)
         self.ui.exportButton.clicked.connect(self.export_settings)
+        self.ui.ttsCheck.toggled.connect(self.on_tts_toggled)
+        self.ui.ttsEngineCombo.activated.connect(lambda _: self._fill_languages())
+        self.ui.ttsLanguageCombo.activated.connect(lambda _: self._fill_voices())
+        self.ui.ttsVoiceCombo.activated.connect(self.on_voice_chosen)
+        self.ui.ttsTestButton.clicked.connect(self.test_voice)
 
     @staticmethod
     def _quietly(widget, setter, value):
@@ -90,6 +110,14 @@ class ChatSettings(QMainWindow):
         self.ui.toolsCheck.setChecked(s["Tools"])
         self.model = s["Model"]
         self.refresh_models()
+        self.tts_voice = s["TTS Voice"]
+        self.ui.ttsSpeedSpin.setValue(s["TTS Speed"])
+        self.ui.ttsAutoCheck.setChecked(s["TTS Auto Play"])
+        self._tts_engine = s["TTS Engine"]
+        self.ui.ttsCheck.blockSignals(True)
+        self.ui.ttsCheck.setChecked(s["TTS"])
+        self.ui.ttsCheck.blockSignals(False)
+        self.on_tts_toggled(s["TTS"])
 
     def title(self) -> str:
         return self.ui.titleEdit.text().strip() or "New Chat"
@@ -103,6 +131,11 @@ class ChatSettings(QMainWindow):
             "Think": self.ui.thinkCheck.isChecked(),
             "Web Search": self.ui.webCombo.currentData(),
             "Tools": self.ui.toolsCheck.isChecked(),
+            "TTS": self.ui.ttsCheck.isChecked(),
+            "TTS Engine": self.tts_engine(),
+            "TTS Voice": self.tts_voice,
+            "TTS Speed": self.ui.ttsSpeedSpin.value(),
+            "TTS Auto Play": self.ui.ttsAutoCheck.isChecked(),
         })
 
     # ------------------------------------------------------------------
@@ -145,6 +178,112 @@ class ChatSettings(QMainWindow):
         self.ui.toolsCheck.setToolTip("" if can_call else f"{self.model} can't call tools; pick a model marked 🔧")
 
     # ------------------------------------------------------------------
+    # Voice (text to speech)
+    # ------------------------------------------------------------------
+
+    def on_tts_toggled(self, on):
+        """Off hides every voice setting; on fetches the voices from the server the first time."""
+        self.ui.ttsBox.setVisible(on)
+        if on:
+            if self.voice_list is None:
+                self.load_voices()
+            else:
+                self._fill_engines()
+        else:
+            self.preview.stop()
+        self.adjustSize()
+
+    def load_voices(self):
+        self.ui.ttsStatusLabel.setText("Getting the voices from the server…")
+        try:
+            self.voice_list = voice.list_voices(self.chat_main.client.base_url)
+            errors = self.voice_list.get("errors") or {}
+            self.ui.ttsStatusLabel.setText("; ".join(errors.values()))
+        except RuntimeError as e:
+            self.voice_list = None
+            self.ui.ttsStatusLabel.setText(f"{e}. The voice you pick is kept and used once the server has it.")
+        self._fill_engines()
+
+    def tts_engine(self) -> str:
+        return self.ui.ttsEngineCombo.currentData() or self._tts_engine
+
+    def _voices(self, engine=None):
+        engine = engine or self.tts_engine()
+        return [v for v in (self.voice_list or {}).get("voices", []) if v.get("engine") == engine]
+
+    def _fill_engines(self):
+        combo = self.ui.ttsEngineCombo
+        engines = (self.voice_list or {}).get("engines") or [{"id": e, "name": e, "available": True}
+                                                            for e in chat_settings.TTS_ENGINES]
+        combo.clear()
+        for e in engines:
+            if e["id"] in chat_settings.TTS_ENGINES:
+                combo.addItem(e["name"] + ("" if e.get("available") else "  (not installed on the server)"), e["id"])
+        combo.setCurrentIndex(max(0, combo.findData(self._tts_engine)))
+        self._fill_languages()
+
+    def _fill_languages(self):
+        self._tts_engine = self.tts_engine()
+        voices = self._voices()
+        current = next((v["language"] for v in voices if v["id"] == self.tts_voice), None)
+        if current is None and voices:
+            # A new chat, or a voice from the other engine: start in the language of this PC.
+            from PySide6.QtCore import QLocale
+            mine = QLocale.system().name().replace("_", "-")
+            langs = {v["language"] for v in voices}
+            current = mine if mine in langs else "en-US" if "en-US" in langs else ""
+        combo = self.ui.ttsLanguageCombo
+        combo.clear()
+        combo.addItem("All languages", "")
+        for lang in sorted({v["language"] for v in voices}):
+            combo.addItem(lang, lang)
+        combo.setCurrentIndex(max(0, combo.findData(current or "")))
+        self._fill_voices()
+
+    def _fill_voices(self):
+        """Voices of the chosen engine and language. "Server default" is only offered
+        under All languages; picking a language takes its first voice unless the
+        chosen voice is one of them."""
+        lang = self.ui.ttsLanguageCombo.currentData() or ""
+        voices = [v for v in self._voices() if not lang or v["language"] == lang]
+        combo = self.ui.ttsVoiceCombo
+        combo.clear()
+        if not lang or not voices:
+            combo.addItem("Server default", "")
+        for v in voices:
+            combo.addItem(v["name"], v["id"])
+        known = any(v["id"] == self.tts_voice for v in self._voices())
+        if self.tts_voice and not known:
+            combo.addItem(f"{self.tts_voice} (not on the server)", self.tts_voice)
+        index = combo.findData(self.tts_voice)
+        if index < 0:
+            index = 0
+            self.tts_voice = combo.itemData(0) or ""
+        combo.setCurrentIndex(index)
+
+    def on_voice_chosen(self, index):
+        self.tts_voice = self.ui.ttsVoiceCombo.itemData(index) or ""
+
+    def test_voice(self):
+        if self.preview.state_of("test") in ("playing", "loading"):
+            self.preview.stop()
+            return
+        lang = next((v["language"] for v in self._voices() if v["id"] == self.tts_voice), "") or \
+            (self.ui.ttsLanguageCombo.currentData() or "")
+        name = self.ui.characterEdit.text().strip() or "Bot"
+        self.ui.ttsStatusLabel.setText("")
+        self.preview.toggle("test", voice_sample(lang, name), self.tts_engine(), self.tts_voice,
+                            self.ui.ttsSpeedSpin.value())
+
+    def _show_preview_state(self):
+        state = self.preview.state_of("test")
+        self.ui.ttsTestButton.setText({"loading": "⏳", "playing": "■ Stop"}.get(state, "▶ Test"))
+
+    def closeEvent(self, event):
+        self.preview.stop()
+        super().closeEvent(event)
+
+    # ------------------------------------------------------------------
     # Import / export
     # ------------------------------------------------------------------
 
@@ -157,6 +296,24 @@ class ChatSettings(QMainWindow):
 
     def export_settings(self):
         export_to_file(self, self.settings(), self.title())
+
+
+VOICE_SAMPLES = {
+    "zh-HK": "你好，我係{name}。我把聲聽落係咁樣。",
+    "zh": "你好，我是{name}。这就是我的声音。",
+    "ja": "こんにちは、{name}です。これが私の声です。",
+    "ko": "안녕하세요, 저는 {name}입니다. 제 목소리는 이렇습니다.",
+    "fr": "Bonjour, je suis {name}. Voici ma voix.",
+    "de": "Hallo, ich bin {name}. So klingt meine Stimme.",
+    "es": "Hola, soy {name}. Así suena mi voz.",
+}
+
+
+def voice_sample(language: str, name: str) -> str:
+    """A short line in the voice's language for the ▶ Test button."""
+    text = VOICE_SAMPLES.get(language) or VOICE_SAMPLES.get(language.split("-")[0]) or \
+        "Hello, I'm {name}. This is how I sound."
+    return text.format(name=name)
 
 
 def _last_folder() -> Path:

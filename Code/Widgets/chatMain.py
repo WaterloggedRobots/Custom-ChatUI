@@ -20,7 +20,7 @@ MUTED = "#8a8a8a"
 CAP_ICONS = (("vision", "👁"), ("thinking", "💭"), ("tools", "🔧"))
 WEB_LABELS = {"auto": "Web: Auto", "on": "Web: Always", "off": "Web: Off"}
 TOOL_STATE_ICONS = {"ok": "✓", "error": "⚠", "declined": "✗ declined"}
-APP_VERSION = "0.11.0_Speech"
+APP_VERSION = "0.12.0_Speech"
 # Mic button languages: label, code sent to the server ("" = Whisper detects it)
 VOICE_LANGUAGES = (("Detect automatically", ""), ("English", "en"), ("中文 Chinese", "zh"),
                    ("粵語 Cantonese", "yue"), ("日本語 Japanese", "ja"))
@@ -189,7 +189,7 @@ class ChatMain(QMainWindow):
         """Status line in the bottom bar; quick model picker and the tools' folder buttons
         above the input, on the left.
 
-        Web search, Think and Tools are set per chat in the Chat Settings window."""
+        Web search, Think and the tools are set per chat in the Chat Settings window."""
         bottom = self.ui.horizontalLayout_4
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(f"color:{MUTED}")
@@ -211,7 +211,7 @@ class ChatMain(QMainWindow):
         self.model_combo.activated.connect(self.on_model_chosen)
         bar.insertWidget(0, self.model_combo)
 
-        # Tools on this PC: files, git and terminal (local_tools/). Changes and commands ask first.
+        # Tools on this PC: file browsing, git and run (local_tools/), each turned on per chat. Changes and commands ask first.
         # 📁 links another folder; ▾ drops down the linked folders, each with an x to remove it.
         self.folder_button = QPushButton("📁")
         self.folder_button.setStyleSheet("background:rgb(57,57,57);color:white")
@@ -326,8 +326,10 @@ class ChatMain(QMainWindow):
         can_call = not caps or "tools" in caps
         self.client.web_mode = s["Web Search"]
         self.client.think = s["Think"]
-        self.client.tools_enabled = s["Tools"] and can_call
-        if not s["Tools"]:
+        groups = chat_settings.tool_groups(s)
+        self.client.toolbox.set_groups(groups)
+        self.client.tools_enabled = bool(groups) and can_call
+        if not groups:
             tip = "Tools are off for this chat (Character > Settings)"
         elif not can_call:
             tip = f"{self.client.model_name} can't call tools; pick a model marked 🔧"

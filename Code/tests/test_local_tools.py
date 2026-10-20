@@ -237,3 +237,84 @@ def test_client_writes_when_allowed(tmp_path):
     assert (tmp_path / "x.txt").read_text() == "y"
     assert [t["state"] for t in out["tools"]] == ["ok", "ok"]
     assert "exit code 0" in out["tools"][1]["output"]
+
+
+# ---------------------------------------------------------------------------
+# Tool groups (File browsing, Git, Run) and the GitHub sign-in helper
+# ---------------------------------------------------------------------------
+
+def test_groups_limit_the_tools_the_model_gets(box):
+    names = lambda: {s["function"]["name"] for s in box.schemas()}
+    assert {"read_file", "git_status", "run_command", "change_directory"} <= names()
+    box.set_groups(["git"])
+    assert "git_status" in names() and "change_directory" in names()
+    assert not {"read_file", "write_file", "run_command"} & names()
+    assert "turned off" in box.run("run_command", {"command": "echo hi"})
+    assert "file browsing and running programs" in box.system_note()
+    box.set_groups([])
+    assert box.schemas() == []
+
+
+def test_old_tools_switch_turns_on_or_off_every_group():
+    import chat_settings
+    assert chat_settings.tool_groups(chat_settings.normalize({"Tools": False})) == set()
+    assert chat_settings.tool_groups(chat_settings.normalize({"Tools": True})) == {"files", "git", "run"}
+    s = chat_settings.normalize({"Tools": True, "Tool Run": False})
+    assert chat_settings.tool_groups(s) == {"files", "git"}
+    assert "Tools" not in s
+
+
+@pytest.fixture
+def git_home(tmp_path, monkeypatch):
+    """git with an empty global config in tmp_path, so the real one isn't touched."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / ".gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    from local_tools import github_login
+    monkeypatch.setattr(github_login, "has_credential_manager", lambda: False)
+    return home
+
+
+def test_token_login_stores_it_in_git_and_sign_out_forgets_it(git_home, monkeypatch):
+    from local_tools import github_login as gh
+    monkeypatch.setattr(gh, "check_token", lambda token: "octo" if token == "good" else
+                        (_ for _ in ()).throw(gh.LoginError("GitHub doesn't accept this token")))
+    assert gh.signed_in_user() is None
+    with pytest.raises(gh.LoginError, match="accept"):
+        gh.token_login("bad")
+    assert gh.token_login("  good \n") == "octo"
+    assert gh.helper() == "store"                          # none was set, and there's no GCM here
+    assert "octo:good@github.com" in (git_home / ".git-credentials").read_text()
+    assert gh.signed_in_user() == "octo"
+    gh.sign_out()
+    assert gh.signed_in_user() is None
+    with pytest.raises(gh.LoginError, match="Credential Manager"):
+        gh.browser_login()
+
+
+def test_commit_identity(git_home):
+    from local_tools import github_login as gh
+    assert gh.identity() == ("", "")
+    gh.set_identity(" Ada ", "ada@example.com")
+    assert gh.identity() == ("Ada", "ada@example.com")
+    gh.set_identity("", "new@example.com")                 # an empty field keeps what's there
+    assert gh.identity() == ("Ada", "new@example.com")
+
+
+def test_check_token_reads_the_user_from_github(monkeypatch):
+    from local_tools import github_login as gh
+    import io
+    import urllib.error
+
+    def fake_open(req, timeout):
+        if req.get_header("Authorization") == "Bearer ok":
+            return io.BytesIO(b'{"login": "octo"}')
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, None)
+
+    monkeypatch.setattr(gh.urllib.request, "urlopen", fake_open)
+    assert gh.check_token("ok") == "octo"
+    with pytest.raises(gh.LoginError, match="doesn't accept"):
+        gh.check_token("nope")

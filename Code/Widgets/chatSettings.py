@@ -28,6 +28,7 @@ class ChatSettings(QMainWindow):
         self._tts_engine = chat_settings.DEFAULTS["TTS Engine"]
         self.engine_info = {}          # engine id -> {"name", "available", "install", "speed"}
         self.voice_list = None         # from the server: {"engines": [...], "voices": [...]}
+        self._github = None            # the GitHub sign-in window, made when first opened
         self.preview = voice.Speaker(lambda: chat_main.client.base_url, paths.AUDIO_DIR, self)
         self.preview.changed.connect(self._show_preview_state)
         self.preview.failed.connect(lambda err: self.ui.ttsStatusLabel.setText(err))
@@ -79,6 +80,7 @@ class ChatSettings(QMainWindow):
         self.ui.ttsLanguageCombo.activated.connect(lambda _: self._fill_voices())
         self.ui.ttsVoiceCombo.activated.connect(self.on_voice_chosen)
         self.ui.ttsTestButton.clicked.connect(self.test_voice)
+        self.ui.githubButton.clicked.connect(self.github_login)
 
     @staticmethod
     def _quietly(widget, setter, value):
@@ -108,7 +110,8 @@ class ChatSettings(QMainWindow):
         self.ui.temperatureSlider.setValue(round(s["Temperature"] * 100))
         self.ui.webCombo.setCurrentIndex(max(0, self.ui.webCombo.findData(s["Web Search"])))
         self.ui.thinkCheck.setChecked(s["Think"])
-        self.ui.toolsCheck.setChecked(s["Tools"])
+        for check, key in self._tool_checks():
+            check.setChecked(s[key])
         self.model = s["Model"]
         self.refresh_models()
         self.tts_voice = s["TTS Voice"]
@@ -132,7 +135,7 @@ class ChatSettings(QMainWindow):
             "Temperature": self.ui.temperatureSpin.value(),
             "Think": self.ui.thinkCheck.isChecked(),
             "Web Search": self.ui.webCombo.currentData(),
-            "Tools": self.ui.toolsCheck.isChecked(),
+            **{key: check.isChecked() for check, key in self._tool_checks()},
             "TTS": self.ui.ttsCheck.isChecked(),
             "TTS Engine": self.tts_engine(),
             "TTS Voice": self.tts_voice,
@@ -177,8 +180,25 @@ class ChatSettings(QMainWindow):
         can_call = not caps or "tools" in caps
         self.ui.thinkCheck.setEnabled(can_think)
         self.ui.thinkCheck.setToolTip("" if can_think else f"{self.model} can't think; this setting is ignored")
-        self.ui.toolsCheck.setEnabled(can_call)
-        self.ui.toolsCheck.setToolTip("" if can_call else f"{self.model} can't call tools; pick a model marked 🔧")
+        for check, _ in self._tool_checks():
+            if not hasattr(check, "default_tip"):
+                check.default_tip = check.toolTip()
+            check.setEnabled(can_call)
+            check.setToolTip(check.default_tip if can_call else f"{self.model} can't call tools; pick a model marked 🔧")
+
+    def _tool_checks(self):
+        ui = self.ui
+        return [(ui.fileToolsCheck, chat_settings.TOOL_KEYS["files"]),
+                (ui.gitToolsCheck, chat_settings.TOOL_KEYS["git"]),
+                (ui.runToolsCheck, chat_settings.TOOL_KEYS["run"])]
+
+    def github_login(self):
+        from Widgets.githubLogin import GitHubLogin
+        if self._github is None:
+            self._github = GitHubLogin(self)
+        self._github.show()
+        self._github.raise_()
+        self._github.activateWindow()
 
     # ------------------------------------------------------------------
     # Voice (text to speech)

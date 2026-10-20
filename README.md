@@ -37,7 +37,7 @@ The Main interface of the client UI. With Top bar tools to create new chats, edi
 The main area is a window that shows all the interaction between the user and the bot.  The interactions are timestamped with response times recorded while the texts support markdown formats for enhanced readability.  The bottom bar allows multi row text input.  So code pasting is feasible for self sustained vibe coding development.  There are also 2 pop up side bars on the sides for chat selection list and image browser respectively, with edit and delete message functions, the UI functions really similar to modern chatbot applications on the market.
 
 ## 2.2. Chat Settings (v0.9)
-Every chat has its own settings, saved inside the chat file: the chat title, the **character** (a name and the pretext sent first as the system message), the **model** and temperature, **web search**, **Think** and **Tools**. Open them from *Character > Settings…* or *Chat > Chat Settings* (Ctrl+E); *Chat > New Chat* opens them for a new chat. The model picker above the message box (left, next to the 📁 folder buttons) is a quick shortcut to the same setting: changing it there changes it in the settings too.
+Every chat has its own settings, saved inside the chat file: the chat title, the **character** (a name and the pretext sent first as the system message), the **model** and temperature, **web search**, **Think** and the **tools** (File browsing, Git and Run). Open them from *Character > Settings…* or *Chat > Chat Settings* (Ctrl+E); *Chat > New Chat* opens them for a new chat. The model picker above the message box (left, next to the 📁 folder buttons) is a quick shortcut to the same setting: changing it there changes it in the settings too.
 
 *Export…* in the settings window saves a chat's settings to a small `.json` you can share. It opens a save dialog (File Explorer on Windows) with the file named after the chat, `{chat name}.json`; rename it or pick another folder there, and the next export or import opens in that folder; *Import…* loads one into the window to check before you press *Save*. Anything missing or invalid in an imported file takes its default, so partial files and the old `Bot Description.json` files import too. The defaults and checks live in `Code/chat_settings.py`.
 
@@ -58,11 +58,15 @@ The client now talks to the Ollama server in `Server/ollama` (see its README). E
 
 Long chats keep the newest messages word for word and fold older ones into a running summary that is only refreshed every few messages. The server address can include a port (`192.168.0.192:8100`); the default port is 8100.
 
-## 2.6. Tools on your PC: files, git and terminal
-With *Tools* on in the chat's settings (models marked 🔧 in the model list), the model can work on the Windows PC the client runs on, not only on files you attach:
-- **Files and folders:** list folders, find files by name, search inside files, read text files (PDF and Word through the server), create, edit, copy, move and delete (to the Recycle Bin).
+## 2.6. Tools on your PC: file browsing, git and run (v0.12)
+The model can work on the Windows PC the client runs on, not only on files you attach (models marked 🔧 in the model list). A chat's settings turn on each kind of tool separately:
+- **File browsing:** list folders, find files by name, search inside files, read text files (PDF and Word through the server), create, edit, copy, move and delete (to the Recycle Bin).
 - **Git:** status, diff, log, show and branches; add, commit, switch, pull, push and clone; any other git command.
-- **Terminal:** runs PowerShell (or cmd) commands and reads their output.
+- **Run:** runs scripts, programs and PowerShell (or cmd) commands and reads their output.
+
+The model only gets the tools that are on; it's told which kinds are off, and asking for one of them returns an error instead of running. Chats saved before 0.12 had a single *Tools* switch, which becomes all three.
+
+**GitHub sign-in.** The *GitHub…* button on the Git row opens a small window that signs git in to GitHub, so the model's pull, push and clone work on private repositories and pushes don't stop for a password. *Sign in with browser* uses Git Credential Manager (it comes with Git for Windows) to open GitHub's sign-in page. Or paste a personal access token (the link makes one with the `repo` and `workflow` scopes); it's checked with GitHub, then handed to git's credential helper, and the app keeps no copy. *Sign out* forgets it. The same window sets the name and email commits are made with (`git config --global user.name/user.email`). It's all git's own login, so it also works in a terminal, and a login made in a terminal shows up here. The code is in `Code/local_tools/github_login.py`.
 
 Reading never asks. Every change and every command opens an *Allow / Always allow / Deny* box first, showing exactly what will run ("Show Details" has the full arguments); *Always allow* lasts until the app is closed. The 📁 button links a folder for the model to work in, and you can link several. The ▾ next to it drops down the linked folders, shortened to drive, parent and folder (`C:/.../Projects/ChatUI`), each with an **x** to unlink it. The model is told which folders are linked and starts in the first one. Each chat remembers its own folders. The tools run in the client (`Code/local_tools/`), so the server never touches your files. Git must be installed (Git for Windows). Tests: `cd Code` then `python -m pytest -q tests`.
 

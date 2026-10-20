@@ -177,16 +177,58 @@ QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px}</string>
        </widget>
       </item>
       <item row="2" column="0">
-       <widget class="QLabel" name="label_tools">
+       <widget class="QLabel" name="label_fileTools">
         <property name="text">
-         <string>Tools: let the model use files, git and the terminal on this PC</string>
+         <string>File browsing: let the model browse, read and edit files on this PC</string>
         </property>
        </widget>
       </item>
       <item row="2" column="1" alignment="Qt::AlignmentFlag::AlignRight">
-       <widget class="QCheckBox" name="toolsCheck">
+       <widget class="QCheckBox" name="fileToolsCheck">
         <property name="toolTip">
-         <string>It asks you before any change or command</string>
+         <string>Reading is free; it asks you before any change</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_gitTools">
+        <property name="text">
+         <string>Git: let the model use git in your repositories</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1" alignment="Qt::AlignmentFlag::AlignRight">
+       <layout class="QHBoxLayout" name="gitToolsLayout">
+        <item>
+         <widget class="QPushButton" name="githubButton">
+          <property name="text">
+           <string>GitHub…</string>
+          </property>
+          <property name="toolTip">
+           <string>Sign in to GitHub so git can pull and push</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="gitToolsCheck">
+          <property name="toolTip">
+           <string>It asks you before commits, pushes and other changes</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_runTools">
+        <property name="text">
+         <string>Run: let the model run scripts, programs and terminal commands</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1" alignment="Qt::AlignmentFlag::AlignRight">
+       <widget class="QCheckBox" name="runToolsCheck">
+        <property name="toolTip">
+         <string>It asks you before every command</string>
         </property>
        </widget>
       </item>

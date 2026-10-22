@@ -236,6 +236,49 @@ QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px}</string>
     </widget>
    </item>
    <item>
+    <widget class="QGroupBox" name="groupPictures">
+     <property name="title">
+      <string>Pictures</string>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_pictures" columnstretch="0,1">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_imageWorkflow">
+        <property name="text">
+         <string>Workflow</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <layout class="QHBoxLayout" name="imageWorkflowLayout"/>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_imageMode">
+        <property name="text">
+         <string>When</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QComboBox" name="imageModeCombo">
+        <property name="toolTip">
+         <string>Auto: the model draws when a picture fits, like auto web search</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="QLabel" name="imageStatusLabel">
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color:#8a8a8a</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QGroupBox" name="groupVoice">
      <property name="title">
       <string>Voice</string>

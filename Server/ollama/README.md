@@ -93,6 +93,8 @@ keep tokens there. All addresses are summarised at the top of
 | POST | `/v1/audio/speech` (also `/tts`) | `{"input", "model": "edge"\|"kokoro"\|"chatterbox"\|"piper", "voice", "speed", "translate", "translate_model"}` → mp3 (Edge) or wav; with `translate`, the `X-Spoken-Language` and `X-Spoken-Text` (URL-encoded) headers carry the translation |
 | GET | `/v1/audio/voices` | the engines and their voices `{"engines", "voices": [{"id", "engine", "language", "name"}]}` |
 | POST | `/v1/audio/voices/download` | `{"voice": "en_US-lessac-medium"}` fetches a Piper voice |
+| POST | `/v1/images/generations` | `{"prompt", "negative_prompt", "workflow", "seed"}` → `{"data": [{"b64_json", "mime", "filename", ...}]}`, drawn by ComfyUI |
+| GET | `/v1/images/workflows` | the workflows in `workflows/` `{"data": [{"id", "name", "usable", "error"}], "comfyui": true\|false}` |
 | GET | `/health` | Ollama reachability and optional features |
 | | `/v1/tools/*` | unchanged extras; function calling is to be reworked later |
 
@@ -121,8 +123,8 @@ Standard fields (`model`, `messages`, `stream`, `temperature`, `top_p`,
 `think` can also be `"low"`, `"medium"` or `"high"` for gpt-oss; OpenAI's
 `reasoning_effort` is accepted as well. Streamed chunks carry
 `delta.reasoning_content`, `delta.content`, and two extra top-level keys:
-`status` (progress text such as `"Searching: …"`) and `sources`
-(`[{"n", "title", "url"}]`). The last chunk has `usage` with Ollama's real
+`status` (progress text such as `"Searching: …"`), `sources`
+(`[{"n", "title", "url"}]`) and `images` (see Pictures below). The last chunk has `usage` with Ollama's real
 token counts.
 
 `tools` (OpenAI function tools) are passed to Ollama, but the server never runs
@@ -227,6 +229,45 @@ curl -X POST localhost:8100/v1/audio/speech -H 'Content-Type: application/json' 
      -d '{"input": "Hello there", "model": "kokoro", "voice": "af_heart"}' -o hello.wav
 ```
 
+## Pictures (ComfyUI)
+
+ComfyUI runs on this same machine (default `http://127.0.0.1:8188`, set
+`COMFYUI_URL` in `.env` otherwise). Start it as usual, e.g.
+`python main.py --listen 127.0.0.1` in the ComfyUI folder; nothing extra is
+installed here, the server only uses ComfyUI's HTTP API.
+
+A chat picks a workflow in **Chat Settings > Pictures**. The workflows are the
+API-format `.json` files in `workflows/` (see `workflows/README.md`: in
+ComfyUI, *Workflow > Export (API)*, with `{{positive}}` and `{{negative}}` in
+the prompt boxes). New files show up without a restart.
+
+It works like auto web search: with `"image_workflow": "<id>"` in a chat
+request, a fixed system note tells the model it can put
+
+```
+<image>
+positive: a cosy café at night, warm light, watercolour
+negative: blurry, text
+</image>
+```
+
+anywhere in its reply when a picture fits (`"image_mode": "on"` asks for one
+with every reply). The block is cut out of the streamed text; when the answer
+is done the server queues the workflow, waits for it, and sends the picture in
+a chunk `{"images": [{"b64_json", "mime", "prompt", "negative_prompt",
+"workflow"}]}` (or `{"error", "prompt", ...}` if ComfyUI failed). At most
+`COMFYUI_MAX_IMAGES` pictures per reply.
+
+One GPU for both Ollama and ComfyUI: if a big chat model and the image model
+don't fit together, set `COMFYUI_UNLOAD_OLLAMA=1` (the chat model is unloaded
+before drawing and reloads on the next message) and/or `COMFYUI_FREE_AFTER=1`
+(ComfyUI frees its models after each picture).
+
+```bash
+curl -X POST localhost:8100/v1/images/generations -H 'Content-Type: application/json' \
+     -d '{"prompt": "a red fox in snow", "workflow": "sd15-basic"}' | head -c 200
+```
+
 ## Why Python and not C++
 
 The time per request is spent in model inference on the GPU and in waiting on
@@ -248,5 +289,5 @@ cd Server/ollama
 python -m pytest -q tests
 ```
 
-The tests run the server against a fake Ollama and a fake web, so they need
-neither Ollama nor network access.
+The tests run the server against a fake Ollama, a fake web and a fake ComfyUI,
+so they need none of them nor network access.

@@ -4,12 +4,14 @@ import paths
 import voice
 
 from PySide6.QtWidgets import (QMainWindow, QSizePolicy, QFileDialog, QComboBox, QLabel, QMenu,
-                               QMessageBox, QPushButton, QToolButton, QWidget, QHBoxLayout, QWidgetAction)
+                               QMessageBox, QPushButton, QToolButton, QWidget, QHBoxLayout, QWidgetAction,
+                               QGraphicsScene, QGraphicsPixmapItem)
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, Qt, QObject, QEvent, QUrl, QTimer, Signal, QSettings
-from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QDesktopServices, QKeySequence, QShortcut
+from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QDesktopServices, QKeySequence, QShortcut, QPixmap
 import html
 import json
+import threading
 from pathlib import Path, PurePath
 import os
 import markdown
@@ -17,10 +19,11 @@ import time
 from datetime import datetime
 
 MUTED = "#8a8a8a"
+IMAGE_HEIGHT = 240              # pictures in the chat; click one to open it full size
 CAP_ICONS = (("vision", "👁"), ("thinking", "💭"), ("tools", "🔧"))
 WEB_LABELS = {"auto": "Web: Auto", "on": "Web: Always", "off": "Web: Off"}
 TOOL_STATE_ICONS = {"ok": "✓", "error": "⚠", "declined": "✗ declined"}
-APP_VERSION = "0.12.0_Speech"
+APP_VERSION = "0.13.0_Pictures"
 # Mic button languages: label, code sent to the server ("" = Whisper detects it)
 VOICE_LANGUAGES = (("Detect automatically", ""), ("English", "en"), ("中文 Chinese", "zh"),
                    ("粵語 Cantonese", "yue"), ("日本語 Japanese", "ja"))
@@ -83,6 +86,65 @@ class ShiftEnterFilter(QObject):
         return False                    # let Qt process other events
 
 
+class ImagePanel(QObject):
+    """The picture panel on the right (the .ui's graphicsView): shows one picture,
+    scaled to fit, and keeps fitting it when the window is resized."""
+
+    def __init__(self, view, parent=None):
+        super().__init__(parent)
+        self.view = view
+        self.scene = QGraphicsScene(view)
+        self.item = QGraphicsPixmapItem()
+        self.item.setTransformationMode(Qt.SmoothTransformation)
+        self.scene.addItem(self.item)
+        view.setScene(self.scene)
+        view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        view.viewport().installEventFilter(self)
+        self.path = None
+        self.where = None            # (message index, picture index) of what is shown
+
+    def show(self, path, where=None) -> bool:
+        pix = QPixmap(str(path)) if path and Path(path).is_file() else QPixmap()
+        if pix.isNull():
+            self.clear()
+            return False
+        self.item.setPixmap(pix)
+        self.scene.setSceneRect(self.item.boundingRect())
+        self.path, self.where = str(path), where
+        self.fit()
+        return True
+
+    def clear(self):
+        self.item.setPixmap(QPixmap())
+        self.path, self.where = None, None
+
+    def fit(self):
+        if self.path:
+            self.view.fitInView(self.item, Qt.KeepAspectRatio)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Resize:
+            self.fit()
+        elif event.type() == QEvent.MouseButtonDblClick and self.path:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(self.path))
+            return True
+        return False
+
+
+class Redrawer(QObject):
+    """Runs LLMClient.draw on a thread for Reload Image and reports back on the GUI thread."""
+    finished = Signal(object, object, object)     # where, entry or None, error text or None
+
+    def start(self, client, where, prompt, negative, workflow):
+        def run():
+            try:
+                self.finished.emit(where, client.draw(prompt, negative, workflow), None)
+            except Exception as e:
+                self.finished.emit(where, None, str(e))
+        threading.Thread(target=run, daemon=True).start()
+
+
 def safe_file_name(name: str) -> str:
     """A chat title as a Windows-safe file name."""
     cleaned = "".join(c for c in name if c not in '<>:"/\\|?*' and ord(c) >= 32).strip().rstrip(".")
@@ -99,7 +161,8 @@ class ChatMain(QMainWindow):
       user:      role, content (plain text), ts, attachments [{name, path, kind}]
       assistant: role, content (markdown), ts, response_time,
                  thinking, thinking_time, sources [{n, title, url}], usage,
-                 tools [{name, summary, kind, state, output}]
+                 tools [{name, summary, kind, state, output}],
+                 images [{path, prompt, negative_prompt, workflow} or {error, prompt, ...}]
 
     `settings` are this chat's character, model and options (chat_settings.py),
     saved in the chat file and edited in the Chat Settings window.
@@ -126,6 +189,7 @@ class ChatMain(QMainWindow):
         self.thinking_started_at = None
         self.thinking_time = None
         self.stream_phase = None          # None | "thinking" | "answer"
+        self._streamed_images = []        # pictures of the reply being streamed
 
         self.client = llmClient.LLMClient()
         self.client.token.connect(self.on_token)
@@ -135,6 +199,10 @@ class ChatMain(QMainWindow):
         self.client.error.connect(self.on_error)
         self.client.tool_event.connect(self.on_tool_event)
         self.client.approval_needed.connect(self.on_approval_needed)
+        self.client.image.connect(self.on_image)
+        self.redrawer = Redrawer(self)
+        self.redrawer.finished.connect(self.on_redrawn)
+        self.redrawing = False
 
         # Voice input (voice.py): the mic button records, the server's Whisper writes it down
         self.recorder = voice.Recorder(self)
@@ -199,6 +267,10 @@ class ChatMain(QMainWindow):
         # reference, since the controls below are inserted in front of it.
         bar = self.ui.horizontalLayout_3
         self.img_spacer = bar.itemAt(3)
+        # Pictures ComfyUI drew for this chat: the newest is shown in the panel on the right.
+        self.image_panel = ImagePanel(self.ui.graphicsView, self)
+        self.ui.graphicsView.setToolTip("The newest picture of this chat. Double-click to open it full size.")
+        self.ui.pushButton_7.setToolTip("Draw this picture again with the same prompt (a new seed)")
 
         # Models come straight from Ollama through the server, refreshed whenever the list is opened.
         # The same choice is the Model in Chat Settings.
@@ -258,6 +330,7 @@ class ChatMain(QMainWindow):
         self.ui.actionChat_Settings.setShortcut("Ctrl+E")
 
         self.ui.pushButton_6.clicked.connect(self.regenerate_last_response) #regen
+        self.ui.pushButton_7.clicked.connect(self.redraw_image)
 
         self.ui.actionLoad_Chat.triggered.connect(self.selectChat)
 
@@ -325,6 +398,8 @@ class ChatMain(QMainWindow):
         caps = self.models.get(self.client.model_name, {}).get("capabilities")
         can_call = not caps or "tools" in caps
         self.client.web_mode = s["Web Search"]
+        self.client.image_workflow = s["Image Workflow"]
+        self.client.image_mode = s["Image Mode"]
         self.client.think = s["Think"]
         groups = chat_settings.tool_groups(s)
         self.client.toolbox.set_groups(groups)
@@ -599,6 +674,19 @@ class ChatMain(QMainWindow):
                          f"Used {len(tools)} tool{'s' if len(tools) != 1 else ''} {'▾' if open_ else '▸'}</a>"
                          f"<div style='color:{MUTED};font-size:12px;margin-left:12px'>{'<br/>'.join(lines)}</div>")
         parts.append(self.render_markdown(msg.get("content", "")))
+        pictures = []
+        for k, img in enumerate(msg.get("images") or []):
+            if img.get("path") and Path(img["path"]).is_file():
+                src = QUrl.fromLocalFile(img["path"]).toString()
+                tip = html.escape(img.get("prompt", ""), quote=True)
+                pictures.append(f"<a href='image:{index}:{k}' title='{tip}'><img src='{src}' height='{IMAGE_HEIGHT}'/></a>")
+            elif img.get("path"):
+                pictures.append(f"<span style='color:{MUTED}'>🖼 picture missing: {html.escape(img['path'])}</span>")
+            else:
+                pictures.append(f"<span style='color:#ff6b6b'>🖼 couldn't draw the picture: "
+                                f"{html.escape(img.get('error', ''))}</span>")
+        if pictures:
+            parts.append("<div>" + " ".join(pictures) + "</div>")
         sources = msg.get("sources") or []
         if sources:
             links = "<br/>".join(
@@ -667,6 +755,12 @@ class ChatMain(QMainWindow):
             self._rebuild_chat_ui(keep_scroll=True)
         elif target.startswith("speak:"):
             self.speak(int(target.split(":", 1)[1]))
+        elif target.startswith("image:"):
+            i, k = (int(x) for x in target.split(":")[1:3])
+            img = self._image_at(i, k)
+            if img:
+                self.image_panel.show(img["path"], (i, k))
+                QDesktopServices.openUrl(QUrl.fromLocalFile(img["path"]))
         elif target.startswith("spoken:"):
             if self.client.busy:
                 return
@@ -716,6 +810,7 @@ class ChatMain(QMainWindow):
         self.thinking_started_at = None
         self.thinking_time = None
         self.stream_phase = None
+        self._streamed_images = []
         self.ui.pushButton_5.setText("Stop")
         self.client.generate(self.chat_markdown)
 
@@ -789,6 +884,8 @@ class ChatMain(QMainWindow):
             msg["sources"] = result["sources"]
         if result.get("tools"):
             msg["tools"] = result["tools"]
+        if result.get("images"):
+            msg["images"] = result["images"]
         if result.get("usage"):
             msg["usage"] = result["usage"]
         if result.get("aborted"):
@@ -807,6 +904,77 @@ class ChatMain(QMainWindow):
         s = self.settings
         if s["TTS"] and s["TTS Auto Play"] and msg["content"].strip() and not result.get("aborted"):
             self.speak(len(self.chat_markdown) - 1)
+
+    # ------------------------------------------------------------------
+    # Pictures (ComfyUI, through the server)
+    # ------------------------------------------------------------------
+
+    def _image_at(self, i, k):
+        if 0 <= i < len(self.chat_markdown):
+            images = self.chat_markdown[i].get("images") or []
+            if 0 <= k < len(images) and images[k].get("path"):
+                return images[k]
+        return None
+
+    def show_latest_image(self):
+        for i in range(len(self.chat_markdown) - 1, -1, -1):
+            images = self.chat_markdown[i].get("images") or []
+            for k in range(len(images) - 1, -1, -1):
+                if images[k].get("path") and self.image_panel.show(images[k]["path"], (i, k)):
+                    return
+        self.image_panel.clear()
+
+    def on_image(self, entry):
+        """A picture arrived while the reply streams; it joins the reply when the reply is done."""
+        if entry.get("path"):
+            self.image_panel.show(entry["path"], (len(self.chat_markdown), len(self._streamed_images)))
+            self.status_label.setText("🖼 Picture ready")
+        else:
+            self.status_label.setText("🖼 " + entry.get("error", "couldn't draw the picture"))
+        self._streamed_images.append(entry)
+
+    def redraw_image(self):
+        """Reload Image: draw the picture in the panel again, same prompt, new seed."""
+        where = self.image_panel.where
+        img = self._image_at(*where) if where else None
+        if img is None:
+            self.status_label.setText("🖼 No picture to draw again yet")
+            return
+        workflow = self.settings["Image Workflow"] or img.get("workflow", "")
+        if self.redrawing or self.client.busy or not workflow:
+            return
+        self.redrawing = True
+        self.ui.pushButton_7.setEnabled(False)
+        self.status_label.setText("🖼 Drawing again…")
+        self.redrawer.start(self.client, where, img.get("prompt", ""), img.get("negative_prompt", ""), workflow)
+
+    def on_redrawn(self, where, entry, err):
+        self.redrawing = False
+        self.ui.pushButton_7.setEnabled(self.isShowImgWindow and not self.isShowImgWindowLock)
+        if err:
+            self.status_label.setText(f"🖼 {err}")
+            return
+        i, k = where
+        if self._image_at(i, k) is None:          # the chat changed meanwhile
+            return
+        self.chat_markdown[i]["images"][k] = entry    # the old file stays in the Images folder
+        self.save_chat()
+        self.on_status("")
+        if self.response_start_pos is None:
+            self._rebuild_chat_ui(keep_scroll=True)
+        self.image_panel.show(entry["path"], where)
+
+    def _show_image_panel(self):
+        """The panel and Reload Image are there when the chat has a workflow."""
+        on = bool(self.settings["Image Workflow"])
+        self.isShowImgWindowLock = not on
+        self.ui.pushButton.setEnabled(on and not self.isShowChatList)
+        if on and self.isShowImgWindow and not self.isShowChatList:
+            self.showImgWindow()
+        else:
+            self.hideImgWindow()
+        if on:
+            self.show_latest_image()
 
     def on_error(self, err: str):
         print(f"LLM error: {err}")
@@ -988,6 +1156,7 @@ class ChatMain(QMainWindow):
         self.expanded_spoken = set()
         self.clear_attachments()
         self._rebuild_chat_ui()
+        self.show_latest_image()
 
     def save_chat(self):
         if not self.chat_path:
@@ -1021,11 +1190,8 @@ class ChatMain(QMainWindow):
         if not s["Model"] and self.models:
             s["Model"] = next(iter(self.models))
         self.client.set_model(s["Model"] or None)
-        self._fill_model_combo()            # also applies Think, Web Search and Tools
-        # The image panel is for ComfyUI workflows, which chats can't set yet.
-        self.isShowImgWindowLock = True
-        self.hideImgWindow()
-        self.ui.pushButton.setEnabled(False)
+        self._fill_model_combo()            # also applies Think, Web Search, Tools and Pictures
+        self._show_image_panel()
 
     def apply_settings(self, title, settings):
         """Save from the Chat Settings window for the open chat; a new title renames its file."""

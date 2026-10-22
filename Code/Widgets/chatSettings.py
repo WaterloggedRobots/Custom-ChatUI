@@ -4,7 +4,8 @@ It edits a copy of the chat's settings (chat_settings.py) and hands them back
 to main.py on Save; ChatMain applies and saves them in the chat file. The
 model list is the same one the main window's quick model picker shows. The
 voice lists come from the server (GET /v1/audio/voices) the first time text
-to speech is switched on here.
+to speech is switched on here, and the ComfyUI workflows (GET
+/v1/images/workflows) each time their list is opened.
 """
 
 import chat_settings
@@ -17,6 +18,8 @@ from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, QSettings
 from pathlib import Path
 
+IMAGE_MODE_LABELS = {"auto": "Auto: when a picture fits", "on": "With every reply"}
+
 
 class ChatSettings(QMainWindow):
     def __init__(self, chat_main):
@@ -28,6 +31,8 @@ class ChatSettings(QMainWindow):
         self._tts_engine = chat_settings.DEFAULTS["TTS Engine"]
         self.engine_info = {}          # engine id -> {"name", "available", "install", "speed"}
         self.voice_list = None         # from the server: {"engines": [...], "voices": [...]}
+        self.image_workflow = ""       # the chosen workflow id; kept even if the server doesn't list it
+        self.workflow_list = None      # from the server: [{"id", "name", "usable", "error"}]
         self._github = None            # the GitHub sign-in window, made when first opened
         self.preview = voice.Speaker(lambda: chat_main.client.base_url, paths.AUDIO_DIR, self)
         self.preview.changed.connect(self._show_preview_state)
@@ -53,6 +58,13 @@ class ChatSettings(QMainWindow):
 
         for mode in chat_settings.WEB_MODES:
             self.ui.webCombo.addItem(WEB_LABELS[mode], mode)
+
+        self.workflow_combo = LiveComboBox(self.refresh_workflows)
+        self.workflow_combo.setToolTip("ComfyUI workflows on the server (Server/ollama/workflows). "
+                                       "Off: this chat doesn't draw.")
+        self.ui.imageWorkflowLayout.addWidget(self.workflow_combo, 1)
+        for mode in chat_settings.IMAGE_MODES:
+            self.ui.imageModeCombo.addItem(IMAGE_MODE_LABELS[mode], mode)
 
         lo, hi = chat_settings.TEMPERATURE_RANGE
         spin, slider = self.ui.temperatureSpin, self.ui.temperatureSlider
@@ -81,6 +93,7 @@ class ChatSettings(QMainWindow):
         self.ui.ttsVoiceCombo.activated.connect(self.on_voice_chosen)
         self.ui.ttsTestButton.clicked.connect(self.test_voice)
         self.ui.githubButton.clicked.connect(self.github_login)
+        self.workflow_combo.activated.connect(self.on_workflow_chosen)
 
     @staticmethod
     def _quietly(widget, setter, value):
@@ -114,6 +127,9 @@ class ChatSettings(QMainWindow):
             check.setChecked(s[key])
         self.model = s["Model"]
         self.refresh_models()
+        self.image_workflow = s["Image Workflow"]
+        self.ui.imageModeCombo.setCurrentIndex(max(0, self.ui.imageModeCombo.findData(s["Image Mode"])))
+        self._fill_workflows()
         self.tts_voice = s["TTS Voice"]
         self.ui.ttsSpeedSpin.setValue(s["TTS Speed"])
         self.ui.ttsAutoCheck.setChecked(s["TTS Auto Play"])
@@ -135,6 +151,8 @@ class ChatSettings(QMainWindow):
             "Temperature": self.ui.temperatureSpin.value(),
             "Think": self.ui.thinkCheck.isChecked(),
             "Web Search": self.ui.webCombo.currentData(),
+            "Image Workflow": self.image_workflow,
+            "Image Mode": self.ui.imageModeCombo.currentData(),
             **{key: check.isChecked() for check, key in self._tool_checks()},
             "TTS": self.ui.ttsCheck.isChecked(),
             "TTS Engine": self.tts_engine(),
@@ -199,6 +217,51 @@ class ChatSettings(QMainWindow):
         self._github.show()
         self._github.raise_()
         self._github.activateWindow()
+
+    # ------------------------------------------------------------------
+    # Pictures (ComfyUI workflows on the server)
+    # ------------------------------------------------------------------
+
+    def refresh_workflows(self):
+        """Ask the server for its workflows (each time the list is opened, so new files show up)."""
+        try:
+            info = self.chat_main.client.list_workflows()
+        except RuntimeError as e:
+            self.ui.imageStatusLabel.setText(f"{e}. The workflow you pick is kept and used once the server has it.")
+            self._fill_workflows()
+            return
+        self.workflow_list = info.get("data") or []
+        notes = []
+        if not info.get("comfyui", True):
+            notes.append(info.get("error") or "ComfyUI isn't running on the server")
+        if not self.workflow_list:
+            notes.append(f"The server has no workflows yet; put ComfyUI 'Export (API)' files in {info.get('folder', 'Server/ollama/workflows')}")
+        self.ui.imageStatusLabel.setText(". ".join(notes))
+        self._fill_workflows()
+
+    def _fill_workflows(self):
+        combo = self.workflow_combo
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("Off", "")
+        for w in self.workflow_list or []:
+            combo.addItem(w["name"] + ("" if w.get("usable", True) else "  (can't be used yet)"), w["id"])
+        if self.image_workflow and combo.findData(self.image_workflow) < 0:
+            suffix = "" if self.workflow_list is None else " (not on the server)"
+            combo.addItem(self.image_workflow + suffix, self.image_workflow)
+        combo.setCurrentIndex(max(0, combo.findData(self.image_workflow)))
+        combo.blockSignals(False)
+        self._show_workflow_state()
+
+    def on_workflow_chosen(self, index):
+        self.image_workflow = self.workflow_combo.itemData(index) or ""
+        self._show_workflow_state()
+
+    def _show_workflow_state(self):
+        self.ui.imageModeCombo.setEnabled(bool(self.image_workflow))
+        info = next((w for w in self.workflow_list or [] if w["id"] == self.image_workflow), None)
+        if info and not info.get("usable", True):
+            self.ui.imageStatusLabel.setText(f"{info['id']}: {info.get('error', '')}")
 
     # ------------------------------------------------------------------
     # Voice (text to speech)

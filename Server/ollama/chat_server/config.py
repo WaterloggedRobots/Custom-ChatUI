@@ -99,5 +99,16 @@ class Config:
     # Engines to load when the server starts (so the first Play doesn't wait for a download)
     TTS_PRELOAD = os.getenv("TTS_PRELOAD", "kokoro")
 
+    # Pictures from ComfyUI on this machine (comfy.py). Workflows are API-format .json files.
+    COMFYUI_URL = (os.getenv("COMFYUI_URL") or "http://127.0.0.1:8188").rstrip("/")
+    COMFYUI_WORKFLOW_DIR = os.getenv("COMFYUI_WORKFLOW_DIR") or str(SERVER_DIR / "workflows")
+    COMFYUI_TIMEOUT = float(os.getenv("COMFYUI_TIMEOUT", "300"))     # seconds one picture may take
+    COMFYUI_POLL = float(os.getenv("COMFYUI_POLL", "1.0"))
+    COMFYUI_MAX_IMAGES = _int("COMFYUI_MAX_IMAGES", 2)                # pictures one reply may ask for
+    # One GPU for both? 1 = unload the chat model from Ollama before drawing (the next message reloads it)
+    COMFYUI_UNLOAD_OLLAMA = os.getenv("COMFYUI_UNLOAD_OLLAMA", "0") not in ("0", "false", "no")
+    # 1 = ask ComfyUI to free its models and VRAM after each picture (slower next picture)
+    COMFYUI_FREE_AFTER = os.getenv("COMFYUI_FREE_AFTER", "0") not in ("0", "false", "no")
+
     # Optional extras (the experimental tool-calling endpoints)
     ENABLE_EXTRAS = os.getenv("ENABLE_EXTRAS", "1") not in ("0", "false", "no")

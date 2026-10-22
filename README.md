@@ -94,12 +94,22 @@ The server makes the audio, so each chat's choice goes to it with every request:
 
 Markdown, code blocks, links and source numbers like `[1]` are left out of what is read.
 
+## 2.9. Pictures with ComfyUI (v0.13)
+The chat can draw pictures with ComfyUI, which runs on the server machine next to Ollama. Pick a **Workflow** in a chat's settings (the *Pictures* box) and it works like auto web search: the model decides when a picture fits (you ask for one, want to see something, or a scene is worth showing) and writes the positive and negative prompts itself. The picture appears under the reply and in the panel on the right of the chat window. *When: With every reply* draws one for each reply instead. *Off* turns it off for the chat.
+
+- Click a picture in the chat to open it full size; double-click the panel for the same.
+- **Reload Image** draws the picture in the panel again with the same prompts and a new seed.
+- Pictures are kept on this PC in `Images/` in the client data folder; the chat file stores where they are.
+- The model is told what it drew before, so later pictures can keep a character's looks. Describe the character's appearance in the *Pretext*, since the image model only sees the prompt.
+
+The workflows are ComfyUI graphs saved with *Workflow > Export (API)* into `Server/ollama/workflows/` on the server, with `{{positive}}` and `{{negative}}` typed into the prompt boxes (see `Server/ollama/workflows/README.md`). The list in Chat Settings reloads each time you open it, so a newly added file shows up without restarting anything. Server settings (ComfyUI address, sharing one GPU with Ollama) are under *Pictures* in `Server/ollama/README.md`.
+
 ## Where things live
 | Name | Where | What |
 |---|---|---|
 | LLM server | `192.168.0.192:8100` (Ubuntu), code in `Server/ollama/` | Ollama wrapper the client talks to. Addresses: `Server/ollama/chat_server/config.py`, overrides in `Server/ollama/.env` |
 | Client git folder | `Code/` (`paths.CLIENT_REPO_DIR`) | app files: UI layouts, images, default addresses in `Code/UI/network.json` |
-| Client data | `%APPDATA%\Waterlogged\ChatUI` (`paths.CLIENT_DATA_DIR`) | chats (each with its settings) and your saved server address (`network.json`) |
+| Client data | `%APPDATA%\Waterlogged\ChatUI` (`paths.CLIENT_DATA_DIR`) | chats (each with its settings), your saved server address (`network.json`), reply audio (`Audio/`) and pictures (`Images/`) |
 | Client PC | `192.168.0.184` (Windows) | runs `Code/`; listed in `network.json` for reference |
 | NAS | `192.168.0.163` (Samba): `nas` in `Code/UI/network.json`, `NAS_IP` on the server | chat and bot saves move here next; nothing uses it yet |
 

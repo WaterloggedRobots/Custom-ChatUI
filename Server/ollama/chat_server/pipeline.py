@@ -15,6 +15,11 @@ One request goes through at most three steps:
 3. The answer is streamed. Reasoning comes from the model's native thinking
    channel (`think`), kept separate from the answer, instead of a prompted
    chain of thought mixed into the reply.
+4. Optional pictures, when the chat picked a ComfyUI workflow. Like auto web
+   search, the model decides: a fixed system note lets it put
+   `<image>positive: … negative: …</image>` anywhere in its answer. The block
+   is taken out of the streamed text, and once the answer is done ComfyUI
+   draws it (comfy.py) and the picture is streamed back as an `images` event.
 
 Tools (OpenAI `tools`) are passed through to Ollama. The server does not run
 them: when the model calls one, the calls are streamed back and the client
@@ -33,6 +38,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 
 import httpx
 
+from . import comfy
 from . import search as web
 from .config import Config
 from .documents import Attachment, AttachmentError, attachment_block, decode_data_url, load_attachment
@@ -63,6 +69,8 @@ class ChatJob:
     format: Optional[Union[str, Dict[str, Any]]] = None
     keep_alive: Optional[Union[int, str]] = None
     tools: Optional[List[Dict[str, Any]]] = None
+    image_workflow: Optional[str] = None             # a ComfyUI workflow id; None = no pictures
+    image_mode: str = "auto"                         # auto: the model decides | on: a picture with every reply
     prepared: Optional[List[Dict[str, Any]]] = None   # Ollama-shape messages, see prepare()
 
 
@@ -363,6 +371,128 @@ class SearchSniffer:
 
 
 # --------------------------------------------------------------------------
+# Picture step (ComfyUI)
+# --------------------------------------------------------------------------
+
+IMAGE_HINT = """You can draw pictures with an image generator. {when} put this block in your reply:
+<image>
+positive: the picture as an image prompt, comma-separated: subject, looks, clothing, pose, expression, setting, lighting, style
+negative: what to keep out, e.g. blurry, low quality, extra fingers, text
+</image>
+The generator can't see the chat or the character description, so describe in the positive line, in English,
+everything the picture must show, including how each character looks. At most {most} per reply.
+The picture is shown under your reply; don't talk about the block or its prompts."""
+
+IMAGE_WHEN = {
+    "auto": "When a picture would add something (the user asks for one, wants to see something, or a scene "
+            "or moment is worth showing), and only then,",
+    "on": "Every reply comes with one picture of the current moment or of what you describe:",
+}
+
+
+def add_image_hint(messages: List[Dict[str, Any]], mode: str) -> List[Dict[str, Any]]:
+    """After the system messages, like the search note; the same text every turn."""
+    most = Config.COMFYUI_MAX_IMAGES
+    hint = IMAGE_HINT.format(when=IMAGE_WHEN.get(mode, IMAGE_WHEN["auto"]),
+                             most=f"{most} picture{'s' if most != 1 else ''}")
+    n = 0
+    while n < len(messages) and messages[n]["role"] == "system":
+        n += 1
+    return messages[:n] + [{"role": "system", "content": hint}] + messages[n:]
+
+
+_LABEL_RE = re.compile(r"^\s*\**\s*(positive|prompt|negative)(?:\s+prompt)?\s*\**\s*[:：]\s*\**\s*(.*)$", re.I)
+
+
+def parse_image_request(body: str) -> Tuple[str, str]:
+    """(positive, negative) from the inside of an <image> block. Unlabelled text is the positive prompt."""
+    pos, neg = [], []
+    current = pos
+    for line in body.strip().splitlines():
+        m = _LABEL_RE.match(line)
+        if m:
+            current = neg if m.group(1).lower() == "negative" else pos
+            line = m.group(2)
+        if line.strip():
+            current.append(line.strip())
+    return " ".join(pos).strip(), " ".join(neg).strip()
+
+
+class ImageSniffer:
+    """Takes `<image>…</image>` blocks out of the streamed answer, wherever they are."""
+    OPEN, CLOSE = "<image>", "</image>"
+
+    def __init__(self):
+        self.buf = ""
+        self.inside = False
+        self.requests: List[Tuple[str, str]] = []
+
+    def _add(self, body: str):
+        pos, neg = parse_image_request(body)
+        if pos:
+            self.requests.append((pos, neg))
+
+    def feed(self, text: str) -> str:
+        """Returns the answer text that can be shown now."""
+        self.buf += text
+        out = ""
+        while self.buf:
+            if not self.inside:
+                i = self.buf.find(self.OPEN)
+                if i >= 0:
+                    out += self.buf[:i]
+                    self.buf = self.buf[i + len(self.OPEN):]
+                    self.inside = True
+                    continue
+                keep = next((k for k in range(min(len(self.OPEN) - 1, len(self.buf)), 0, -1)
+                             if self.OPEN.startswith(self.buf[-k:])), 0)
+                out += self.buf[:len(self.buf) - keep]
+                self.buf = self.buf[len(self.buf) - keep:]
+                break
+            j = self.buf.find(self.CLOSE)
+            if j >= 0:
+                self._add(self.buf[:j])
+                self.buf = self.buf[j + len(self.CLOSE):].lstrip("\n")
+                self.inside = False
+                continue
+            if len(self.buf) > 4000:          # never closed: show it as it is
+                out += self.OPEN + self.buf
+                self.buf, self.inside = "", False
+            break
+        return out
+
+    def flush(self) -> str:
+        text, self.buf = self.buf, ""
+        if self.inside:                      # the answer ended inside the block
+            self.inside = False
+            self._add(text)
+            return ""
+        return text
+
+
+async def _draw(job: ChatJob, ollama: Ollama, comfy_http: Optional[httpx.AsyncClient],
+                requests: List[Tuple[str, str]]) -> AsyncIterator[Event]:
+    if comfy_http is None:
+        return
+    if Config.COMFYUI_UNLOAD_OLLAMA:
+        try:
+            await ollama.unload(job.model)
+        except Exception as e:
+            log.info("could not unload %s before drawing: %s", job.model, e)
+    for n, (positive, negative) in enumerate(requests[:Config.COMFYUI_MAX_IMAGES], 1):
+        short = positive if len(positive) <= 70 else positive[:67] + "…"
+        yield Event("status", f"Drawing{f' {n}/{len(requests)}' if len(requests) > 1 else ''}: {short}")
+        try:
+            images = await comfy.generate(comfy_http, job.image_workflow, positive, negative)
+            yield Event("images", comfy.as_json(images, positive, negative, job.image_workflow))
+        except (comfy.ComfyError, httpx.HTTPError) as e:
+            log.warning("picture failed: %s", e)
+            yield Event("images", [{"error": str(e), "prompt": positive, "negative_prompt": negative,
+                                    "workflow": job.image_workflow}])
+    yield Event("status", "")
+
+
+# --------------------------------------------------------------------------
 # Streaming split of inline <think> tags (models that don't use the native
 # thinking channel)
 # --------------------------------------------------------------------------
@@ -462,7 +592,8 @@ async def _search_and_attach(http: httpx.AsyncClient, messages: List[Dict[str, A
         yield Event("status", "The search returned nothing; answering without it.")
 
 
-async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient) -> AsyncIterator[Event]:
+async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient,
+                   comfy_http: Optional[httpx.AsyncClient] = None) -> AsyncIterator[Event]:
     messages = prepare(job).prepared
 
     options = dict(job.options)
@@ -480,6 +611,9 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient) -> Asy
     model_decides = job.web_search == "auto" and job.format is None
     if model_decides:
         messages = add_search_hint(messages)
+    draws = bool(job.image_workflow) and job.format is None
+    if draws:
+        messages = add_image_hint(messages, job.image_mode)
 
     payload: Dict[str, Any] = {
         "model": job.model,
@@ -502,6 +636,7 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient) -> Asy
     for attempt in (1, 2):
         splitter = ThinkSplitter()
         sniffer = SearchSniffer() if model_decides and attempt == 1 else None
+        pictures = ImageSniffer() if draws else None
         stream = ollama.stream_chat(payload)
         try:
             async for chunk in stream:
@@ -516,6 +651,8 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient) -> Asy
                     for kind, text in splitter.feed(msg["content"]):
                         if kind == "content" and sniffer:
                             text = sniffer.feed(text)
+                        if kind == "content" and pictures and text:
+                            text = pictures.feed(text)
                         if text:
                             yield Event(kind, text)
                     if sniffer and sniffer.mode == "search":
@@ -531,8 +668,14 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient) -> Asy
         for kind, text in splitter.flush():
             if kind == "content" and sniffer:
                 text = sniffer.feed(text) + sniffer.flush()
+            if kind == "content" and pictures and text:
+                text = pictures.feed(text)
             if text:
                 yield Event(kind, text)
+        if pictures and not (sniffer and sniffer.mode == "search"):
+            rest = pictures.flush()
+            if rest:
+                yield Event("content", rest)
         if final:
             log_timing(final)
             used["prompt"] += final.get("prompt_eval_count", 0)
@@ -548,6 +691,11 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient) -> Asy
         yield Event("status", "")
         payload["messages"] = messages
         final = {}
+
+    if pictures and pictures.requests:
+        log.info("model asked for %d picture(s)", len(pictures.requests))
+        async for ev in _draw(job, ollama, comfy_http, pictures.requests):
+            yield ev
 
     prompt_tokens, completion_tokens = used["prompt"], used["completion"]
     yield Event("done", {

@@ -15,13 +15,18 @@ builds its message list from it here:
   (local_tools/). The server streams the model's tool calls back; they run
   here (changes and commands only after you allow them in the GUI), and the
   results go back to the model in the next request, for up to
-  MAX_TOOL_ROUNDS rounds per answer.
+  MAX_TOOL_ROUNDS rounds per answer;
+- with a ComfyUI workflow picked for the chat, the model can ask for
+  pictures in its reply; the server draws them and streams them back, and
+  they are saved in CLIENT_DATA_DIR/Images and kept with the reply.
 """
 
 import base64
 import json
 import mimetypes
 import threading
+import time
+import uuid
 from pathlib import Path
 
 import requests
@@ -41,6 +46,7 @@ MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 MAX_TOOL_ROUNDS = 12          # tool calls the model may make in a row before it must answer
 TOOL_LOG_CHARS = 3000         # how much of each tool result is kept in the saved chat
+IMAGE_EXT_FOR = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
 
 
 def attachment_kind(path) -> str:
@@ -57,11 +63,13 @@ class LLMClient(QObject):
     thinking = Signal(str)     # reasoning text, as it streams
     status = Signal(str)       # "Searching: …" and similar; "" clears it
     sources = Signal(list)     # [{"n", "title", "url"}]
-    done = Signal(dict)        # {"content", "thinking", "sources", "tools", "usage", "timings", "aborted"}
+    done = Signal(dict)        # {"content", "thinking", "sources", "tools", "images", "usage", "timings", "aborted"}
     error = Signal(str)
     tool_event = Signal(dict)  # {"name", "summary", "kind", "state": running|ok|error|declined, "output"}
     # A change or command wants to run: {"name", "summary", "kind", "details"}. Answer with answer_approval().
     approval_needed = Signal(dict)
+    # A picture is ready: {"path", "prompt", "negative_prompt", "workflow"}, or {"error", "prompt", ...}
+    image = Signal(dict)
 
     def __init__(self):
         super().__init__()
@@ -70,6 +78,8 @@ class LLMClient(QObject):
         self.preset = ""
         self.think = True
         self.web_mode = "auto"
+        self.image_workflow = ""       # ComfyUI workflow id on the server; "" = no pictures
+        self.image_mode = "auto"
         self.summary = None            # {"upto": n, "text": "..."} covering history[:n]
 
         # LLM server address: Code/UI/network.json, or your saved copy (see paths.py)
@@ -123,6 +133,33 @@ class LLMClient(QObject):
         except requests.RequestException as e:
             print(f"❌ Could not list models: {e}")
             return []
+
+    def list_workflows(self) -> dict:
+        """The server's ComfyUI workflows: {"data": [{"id", "name", "usable", "error"}], "comfyui", "error"}."""
+        try:
+            r = requests.get(f"{self.base_url}/v1/images/workflows", timeout=6)
+        except requests.RequestException as e:
+            raise RuntimeError(f"Can't reach the server at {self.base_url}: {e}") from e
+        if r.status_code == 404:
+            raise RuntimeError("The server is older than this app and can't draw pictures; update it")
+        if r.status_code != 200:
+            raise RuntimeError(f"Server error {r.status_code}: {r.text[:300]}")
+        return r.json()
+
+    def draw(self, prompt: str, negative: str, workflow: str) -> dict:
+        """Draw one picture now (blocking; call it from a thread). Returns the saved image entry."""
+        try:
+            r = requests.post(f"{self.base_url}/v1/images/generations", timeout=(10, 900),
+                              json={"prompt": prompt, "negative_prompt": negative, "workflow": workflow})
+        except requests.RequestException as e:
+            raise RuntimeError(f"Can't reach the server at {self.base_url}: {e}") from e
+        if r.status_code != 200:
+            try:
+                msg = r.json()["error"]["message"]
+            except Exception:
+                msg = r.text[:300]
+            raise RuntimeError(msg)
+        return keep_image(r.json()["data"][0])
 
     def _extract_text(self, path: Path) -> str:
         """PDF/Word text for read_file, from the server's extractor."""
@@ -187,6 +224,11 @@ class LLMClient(QObject):
                 # Earlier tool use, in one line each, so follow-up questions have the context.
                 used = "\n".join(f"- {t['summary'].splitlines()[0]} ({t['state']})" for t in m["tools"])
                 content = f"[Tools used for this answer:\n{used}]\n\n{content}"
+            drawn = [i["prompt"] for i in m.get("images") or [] if i.get("path") and i.get("prompt")]
+            if drawn and isinstance(content, str):
+                # So the model knows what it already showed, and can keep the looks the same.
+                lines = "\n".join(f"- {p}" for p in drawn)
+                content = f"{content}\n\n[Pictures you drew with this reply:\n{lines}]"
             messages.append({"role": m["role"], "content": content})
         return messages
 
@@ -326,6 +368,10 @@ class LLMClient(QObject):
                 if "sources" in chunk:
                     result["sources"] = chunk["sources"]
                     self.sources.emit(chunk["sources"])
+                for img in chunk.get("images") or []:
+                    entry = keep_image(img)
+                    result["images"].append(entry)
+                    self.image.emit(entry)
                 if chunk.get("usage"):
                     for k, v in chunk["usage"].items():
                         result["usage"][k] = result["usage"].get(k, 0) + v
@@ -350,8 +396,8 @@ class LLMClient(QObject):
         return text, [calls[k] for k in sorted(calls)]
 
     def _run(self, history):
-        result = {"content": "", "thinking": "", "sources": [], "tools": [], "usage": {}, "timings": {},
-                  "aborted": False}
+        result = {"content": "", "thinking": "", "sources": [], "tools": [], "images": [], "usage": {},
+                  "timings": {}, "aborted": False}
         try:
             older, _ = self._split_history(history)
             summary = self._summary_for(older)
@@ -366,6 +412,9 @@ class LLMClient(QObject):
                     "web_search": "off" if round_no and self.web_mode == "on" else self.web_mode,
                     "stream": True,
                 }
+                if self.image_workflow:
+                    payload["image_workflow"] = self.image_workflow
+                    payload["image_mode"] = self.image_mode
                 if self.tools_enabled and round_no < MAX_TOOL_ROUNDS:
                     payload["tools"] = self.toolbox.schemas()
                 text, calls = self._stream(payload, result)
@@ -393,3 +442,24 @@ class LLMClient(QObject):
             self._response = None
         self.status.emit("")
         self.done.emit(result)
+
+
+def keep_image(img: dict) -> dict:
+    """Save a picture from the server ({"b64_json", "mime", "prompt", ...}) in paths.IMAGE_DIR.
+    Returns what the chat keeps: {"path", "prompt", "negative_prompt", "workflow"} or, if
+    it failed, {"error", "prompt", ...}."""
+    entry = {k: img.get(k, "") for k in ("prompt", "negative_prompt", "workflow")}
+    if img.get("error") or not img.get("b64_json"):
+        entry["error"] = img.get("error") or "the server sent no picture"
+        return entry
+    try:
+        data = base64.b64decode(img["b64_json"])
+        paths.IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+        ext = IMAGE_EXT_FOR.get(img.get("mime", ""), Path(img.get("filename", "")).suffix or ".png")
+        path = paths.IMAGE_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}{ext}"
+        path.write_bytes(data)
+    except (OSError, ValueError) as e:
+        entry["error"] = f"couldn't save the picture: {e}"
+        return entry
+    entry["path"] = str(path)
+    return entry

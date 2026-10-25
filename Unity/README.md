@@ -8,7 +8,7 @@ same controller will be driven by the ChatUI server (expressions, lip sync).
 
 1. The avatar model and its animations are third-party, so they aren't committed.
    Copy them in **before** opening the project:
-   - `miomio10251800.fbx` into `ChatUIAvatar/Assets/Models/` (its committed `.meta` keeps the scene reference working).
+   - `miomio10252100.fbx` into `ChatUIAvatar/Assets/Models/` (its committed `.meta` keeps the scene reference working).
    - `miorine tx.png` into `Assets/Models/` as well. Newer exports embed it, but the importer falls back to this copy.
    - Mixamo animation FBXs (`Happy Idle.fbx`, `Angry.fbx`, `Excited.fbx`, `Joyful Jump.fbx`,
      `Female Sitting Pose.fbx`, `Female Laying Pose.fbx`) into `Assets/Resources/Animations/`.
@@ -63,11 +63,5 @@ Body (animations), on `AvatarController` > Avatar Animation Player:
 - Rebind keys, shape names or animations in the lists on `AvatarController`. New
   Mixamo clips just need to go in `Assets/Resources/Animations/` and get an entry.
 
-Face mesh shape keys in `miomio10251800` (63): blink L, blink R, blink 2 L, blink 2 R,
-jaw open, jaw open A, mouth wide.001, mouth narrow, eye size, eye wide, brows
-angry, brows sad, brows surprised, あ, い, う, え, お, まばたき, 笑い, ウィンク,
-ウィンク右, ウィンク２, ｳｨﾝｸ２右, びっくり, 怒り, 困る, 上, aa, ih, ou, ee, oh,
-blink, blinkLeft, blinkRight, happy, angry, sad, surprised, mouth smile, mouth
-frown, 口角上げ, 口角下げ, にやり, じと目, なごみ, joy, smile soft, smiling, grin,
-smug, sad face, cry, angry face, mad, furious, annoyed, shocked, scared, sleepy,
-embarrassed, pout.
+Face mesh shape keys: `miomio10252100` has 79, including the tsundere (`tsun ...`) and
+kuudere (`kuu ...`) sets. The in-game panel always shows the current list.

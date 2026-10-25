@@ -137,6 +137,9 @@ public class BlendShapeKeyController : MonoBehaviour
     /// <summary>True while a text field in the UI has focus, so shortcuts should ignore keys.</summary>
     public static bool TypingInUI => GUIUtility.keyboardControl != 0;
 
+    /// <summary>Shared show/hide switch for the on-screen panels (Tab in desktop companion mode).</summary>
+    public static bool PanelsVisible = true;
+
     void Update()
     {
         if (TypingInUI)
@@ -280,7 +283,7 @@ public class BlendShapeKeyController : MonoBehaviour
 
     void OnGUI()
     {
-        if (!showOverlay || target == null || shapeNames == null)
+        if (!showOverlay || !PanelsVisible || target == null || shapeNames == null)
             return;
 
         if (rowStyle == null)

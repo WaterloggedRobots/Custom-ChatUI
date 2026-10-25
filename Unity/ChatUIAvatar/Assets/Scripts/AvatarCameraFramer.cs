@@ -67,6 +67,14 @@ public class AvatarCameraFramer : MonoBehaviour
         }
     }
 
+    /// <summary>Frames the avatar again on the next frame with the given settings.</summary>
+    public void Reframe(bool wholeBody, float fillAmount)
+    {
+        fullBody = wholeBody;
+        fill = fillAmount;
+        snap = true;
+    }
+
     // After animation, so the bounds match this frame's pose.
     void LateUpdate()
     {

@@ -65,3 +65,18 @@ Body (animations), on `AvatarController` > Avatar Animation Player:
 
 Face mesh shape keys: `miomio10252100` has 79, including the tsundere (`tsun ...`) and
 kuudere (`kuu ...`) sets. The in-game panel always shows the current list.
+
+## Desktop companion (Windows)
+
+`ChatUI > Build Desktop Companion` sets the player settings transparency needs
+(DirectX 11, DXGI flip model off, windowed, run in background) and builds to
+`ChatUIAvatar/Builds/DesktopCompanion/`. Run the .exe there: she appears on
+your desktop with no window around her, always on top, and clicks go through
+to whatever is behind except on her and the panels.
+
+- Right-drag her to move her, scroll over her to resize.
+- `Tab` hides or shows the panels, `Ctrl+Q` (or Alt+F4) quits.
+- Everything else (shape keys, animations, head tracking) works as in the editor.
+
+This only happens in a Windows build. In the editor the scene keeps its normal
+background so you can keep working on it.

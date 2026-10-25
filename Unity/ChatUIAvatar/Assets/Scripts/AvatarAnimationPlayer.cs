@@ -216,7 +216,7 @@ public class AvatarAnimationPlayer : MonoBehaviour
 
     void OnGUI()
     {
-        if (!showOverlay || animator == null)
+        if (!showOverlay || !BlendShapeKeyController.PanelsVisible || animator == null)
             return;
 
         if (rowStyle == null)

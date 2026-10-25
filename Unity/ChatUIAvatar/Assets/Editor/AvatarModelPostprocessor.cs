@@ -7,15 +7,18 @@ using UnityEngine;
 ///
 /// The Blender material drives its color through an emission texture (a small
 /// color palette), which Unity's Standard shader turns into a gray, lit
-/// material. This swaps it for an unlit textured one, matching the flat look
-/// in Blender, and keeps the palette sharp with point filtering.
+/// material. This swaps it for an unlit, double-sided textured one, matching
+/// the flat look in Blender (which also draws back faces, so single-sided
+/// hair cards stay visible), and keeps the palette sharp with point filtering.
 /// </summary>
 public class AvatarModelPostprocessor : AssetPostprocessor
 {
     const string ModelsFolder = "Assets/Models/";
     const string PaletteTexture = "miorine tx.png";
 
-    public override uint GetVersion() => 1;
+    const string TexturedShader = "ChatUI/Unlit Texture Double Sided";
+
+    public override uint GetVersion() => 2;
 
     void OnPreprocessTexture()
     {
@@ -42,7 +45,7 @@ public class AvatarModelPostprocessor : AssetPostprocessor
 
         if (texture != null)
         {
-            material.shader = Shader.Find("Unlit/Texture");
+            material.shader = Shader.Find(TexturedShader) ?? Shader.Find("Unlit/Texture");
             material.mainTexture = texture;
             return;
         }

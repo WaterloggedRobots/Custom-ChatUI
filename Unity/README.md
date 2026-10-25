@@ -126,7 +126,8 @@ The mouth closes on its own if no lip sync update arrives for half a second.
 ## Desktop companion (Windows)
 
 `ChatUI > Build Desktop Companion` sets the player settings transparency needs
-(DirectX 11, DXGI flip model off, windowed, run in background) and builds to
+(DirectX 11, DXGI flip model off, windowed, run in background) and builds the
+scene that's open in the editor to
 `ChatUIAvatar/Builds/DesktopCompanion/`. Run the .exe there: she appears on
 your desktop with no window around her, always on top, and clicks go through
 to whatever is behind except on her and the panels.

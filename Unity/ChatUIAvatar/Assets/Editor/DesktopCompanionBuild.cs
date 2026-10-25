@@ -1,6 +1,7 @@
 using System.IO;
 using UnityEditor;
 using UnityEditor.Build.Reporting;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -8,6 +9,8 @@ using UnityEngine.Rendering;
 /// Player settings and a one-click build for the transparent desktop
 /// companion (see DesktopCompanionWindow). Transparency needs DirectX 11 with
 /// the DXGI flip model swapchain turned off, and a windowed player.
+/// Builds the scene that's open in the editor, so the companion matches
+/// what Play mode shows.
 /// </summary>
 public static class DesktopCompanionBuild
 {
@@ -32,12 +35,22 @@ public static class DesktopCompanionBuild
     [MenuItem("ChatUI/Build Desktop Companion")]
     public static void Build()
     {
+        // Unsaved changes wouldn't be in the build, so offer to save first.
+        if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+            return;
+        string scene = EditorSceneManager.GetActiveScene().path;
+        if (string.IsNullOrEmpty(scene))
+        {
+            EditorUtility.DisplayDialog("ChatUI", "Save the scene first, then build again.", "OK");
+            return;
+        }
+
         ApplyPlayerSettings();
 
         string exe = Path.Combine(OutputFolder, PlayerSettings.productName + ".exe");
         var options = new BuildPlayerOptions
         {
-            scenes = new[] { "Assets/Scenes/Main.unity" },
+            scenes = new[] { scene },
             locationPathName = exe,
             target = BuildTarget.StandaloneWindows64,
             options = BuildOptions.None,
@@ -46,7 +59,7 @@ public static class DesktopCompanionBuild
         BuildReport report = BuildPipeline.BuildPlayer(options);
         if (report.summary.result == BuildResult.Succeeded)
         {
-            Debug.Log($"Desktop companion built: {Path.GetFullPath(exe)}");
+            Debug.Log($"Desktop companion built from {scene}: {Path.GetFullPath(exe)}");
             EditorUtility.RevealInFinder(exe);
         }
         else

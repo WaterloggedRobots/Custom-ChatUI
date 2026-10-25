@@ -58,6 +58,17 @@ public class DesktopCompanionWindow : MonoBehaviour
     Vector3 lastMouse;
     HeadLookAtCamera look;
 
+#if UNITY_STANDALONE_WIN && !UNITY_EDITOR
+    // A scene without this component on its camera still becomes a desktop
+    // companion when built.
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+    static void AddToMainCamera()
+    {
+        if (FindObjectOfType<DesktopCompanionWindow>() == null && Camera.main != null)
+            Camera.main.gameObject.AddComponent<DesktopCompanionWindow>();
+    }
+#endif
+
     void Start()
     {
         cam = GetComponent<Camera>();

@@ -9,9 +9,10 @@ using UnityEngine.Playables;
 /// from the keyboard (F1-F6 by default).
 ///
 /// Clips are loaded from FBX files under Assets/Resources/Animations, so new
-/// Mixamo downloads only need to be dropped in that folder and bound here;
-/// no Animator Controller is needed. The animation FBXs must share the
-/// avatar's skeleton (same bone names), since the rig is Generic.
+/// Mixamo downloads only need to be dropped in that folder; with Auto Add
+/// Clips on they are listed by file name without any setup, and no Animator
+/// Controller is needed. The avatar and the animation FBXs use the Humanoid
+/// rig, so clips made for other skeletons (e.g. mixamorig) retarget onto her.
 ///
 /// Looping entries play until another one is chosen. One-shot entries play
 /// once, then fade back to the default (first looping) entry. Each entry has
@@ -49,6 +50,10 @@ public class AvatarAnimationPlayer : MonoBehaviour
 
     [Tooltip("Avatar Animator. If empty, the Animator on the face mesh's root is used (added if missing).")]
     public Animator animator;
+
+    [Tooltip("Also list every clip under Resources/<Auto Add Folder> that has no entry below (looping if its name has idle, pose or loop).")]
+    public bool autoAddClips = true;
+    public string autoAddFolder = "Animations";
 
     [Tooltip("Seconds to crossfade between animations.")]
     public float fadeTime = 0.3f;
@@ -97,6 +102,8 @@ public class AvatarAnimationPlayer : MonoBehaviour
             else if (defaultEntry == null && e.loop)
                 defaultEntry = e;
         }
+        if (autoAddClips)
+            AddUnlistedClips();
 
         graph = PlayableGraph.Create("AvatarAnimation");
         graph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
@@ -185,6 +192,30 @@ public class AvatarAnimationPlayer : MonoBehaviour
         return true;
     }
 
+    // Adds every clip in Resources/Animations that has no entry yet, so new
+    // FBXs dropped into that folder show up in the panel without setup. The
+    // import postprocessor names each clip after its file.
+    void AddUnlistedClips()
+    {
+        var added = new List<Entry>();
+        foreach (AnimationClip clip in Resources.LoadAll<AnimationClip>(autoAddFolder))
+        {
+            if (clip.name.StartsWith("__preview__", StringComparison.Ordinal))
+                continue;
+            if (entries.Exists(e => e.clip == clip || e.Label == clip.name))
+                continue;
+
+            string lower = clip.name.ToLowerInvariant();
+            bool loop = lower.Contains("idle") || lower.Contains("pose") || lower.Contains("loop");
+            added.Add(new Entry(KeyCode.None, autoAddFolder + "/" + clip.name, loop) { clip = clip });
+        }
+
+        added.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
+        entries.AddRange(added);
+        if (defaultEntry == null)
+            defaultEntry = added.Find(e => e.loop);
+    }
+
     static AnimationClip LoadClip(Entry e)
     {
         AnimationClip fallback = null;
@@ -245,7 +276,8 @@ public class AvatarAnimationPlayer : MonoBehaviour
                     label += " (once)";
                 if (!Mathf.Approximately(e.speed, 1f))
                     label += $" x{e.speed:0.##}";
-                label += $"   [{e.key}]";
+                if (e.key != KeyCode.None)
+                    label += $"   [{e.key}]";
 
                 GUI.enabled = e.clip != null;
                 if (GUILayout.Button(label, e == current ? activeRowStyle : rowStyle))

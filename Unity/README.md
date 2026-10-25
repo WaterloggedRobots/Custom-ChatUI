@@ -17,8 +17,12 @@ same controller will be driven by the ChatUI server (expressions, lip sync).
 If the model shows as "Missing Prefab" (the FBX was added after first open),
 delete that object and use the menu **ChatUI > Add Avatar To Scene**.
 
-The animation FBXs must use the same skeleton as the model (Mixamo files made
-by uploading this model do). The rig is Generic, so bones are matched by name.
+The model and every FBX in `Assets/Resources/Animations/` are imported with the
+Humanoid rig (an editor postprocessor sets this up), so Mixamo clips on the
+standard `mixamorig` skeleton retarget onto her. Root motion is baked into the
+pose, so she stays in place. If she doesn't animate, check the model's
+**Rig** tab > **Configure** for the bone mapping (use **Enforce T-Pose** if the
+arms look wrong).
 
 ## Controls
 
@@ -61,7 +65,9 @@ Body (animations), on `AvatarController` > Avatar Animation Player:
 - `V` reframes between face close-up and full body, `F` swaps the camera to the other side. Tick **Follow Avatar** on the camera to have it track her instead.
 - Each animation entry has a **Speed** (1 = normal, 0.5 = half, 2 = double). You can change it during Play and see it immediately, but Play-mode edits are reset when you stop, so set the final values outside Play.
 - Rebind keys, shape names or animations in the lists on `AvatarController`. New
-  Mixamo clips just need to go in `Assets/Resources/Animations/` and get an entry.
+  Mixamo clips just need to go in `Assets/Resources/Animations/`: with **Auto Add
+  Clips** on they show up in the panel by file name (looping if the name has
+  idle, pose or loop). Add an entry only to give one a key, speed or loop setting.
 
 Face mesh shape keys: `miomio10252100` has 79, including the tsundere (`tsun ...`) and
 kuudere (`kuu ...`) sets. The in-game panel always shows the current list.

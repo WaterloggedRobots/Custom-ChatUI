@@ -13,6 +13,9 @@ public class AvatarDoubleSided : MonoBehaviour
     [Tooltip("Double-sided shader to switch textured materials to.")]
     public Shader doubleSidedShader;
 
+    [Tooltip("Texture for materials that came through the import without one (the color palette).")]
+    public Texture fallbackTexture;
+
     [Tooltip("Avatar root. If empty, the root of the face mesh found by the BlendShapeKeyController is used.")]
     public Transform avatarRoot;
 
@@ -43,7 +46,9 @@ public class AvatarDoubleSided : MonoBehaviour
                 Texture texture = m.HasProperty("_MainTex") ? m.mainTexture : null;
                 if (texture == null && m.HasProperty("_EmissionMap"))
                     texture = m.GetTexture("_EmissionMap");
-                if (texture == null || m.shader == doubleSidedShader)
+                if (texture == null && !m.name.StartsWith("outline"))
+                    texture = fallbackTexture;
+                if (texture == null || (m.shader == doubleSidedShader && m.mainTexture == texture))
                     continue;
 
                 m.shader = doubleSidedShader;

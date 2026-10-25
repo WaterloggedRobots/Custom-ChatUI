@@ -1,4 +1,3 @@
-using System.IO;
 using UnityEditor;
 using UnityEngine;
 
@@ -14,11 +13,9 @@ using UnityEngine;
 public class AvatarModelPostprocessor : AssetPostprocessor
 {
     const string ModelsFolder = "Assets/Models/";
-    const string PaletteTexture = "miorine tx.png";
-
     const string TexturedShader = "ChatUI/Unlit Texture Double Sided";
 
-    public override uint GetVersion() => 3;
+    public override uint GetVersion() => 4;
 
     void OnPreprocessTexture()
     {
@@ -36,25 +33,22 @@ public class AvatarModelPostprocessor : AssetPostprocessor
         if (!assetPath.StartsWith(ModelsFolder))
             return;
 
-        Texture texture = GetTexture(material, "_MainTex") ?? GetTexture(material, "_EmissionMap");
-        if (texture == null && material.name.StartsWith("colors"))
-        {
-            string palettePath = Path.Combine(Path.GetDirectoryName(assetPath), PaletteTexture).Replace('\\', '/');
-            texture = AssetDatabase.LoadAssetAtPath<Texture2D>(palettePath);
-        }
-
-        if (texture != null)
-        {
-            material.shader = Shader.Find(TexturedShader) ?? Shader.Find("Unlit/Texture");
-            material.mainTexture = texture;
+        // Only touch materials whose texture is already resolved. During some
+        // reimports it isn't yet, and the FBX's base color is black, so any
+        // fallback here turns her black; AvatarDoubleSided covers that at runtime.
+        Texture texture = GetTexture(material, "_MainTex");
+        if (texture == null)
+            texture = GetTexture(material, "_EmissionMap");
+        if (texture == null)
             return;
-        }
 
-        // Untextured materials (the inverted-hull outline) keep their flat color.
-        Color emission = material.HasProperty("_EmissionColor") ? material.GetColor("_EmissionColor") : Color.black;
-        Color color = material.HasProperty("_Color") ? material.color : Color.black;
-        material.shader = Shader.Find("Unlit/Color");
-        material.color = emission.maxColorComponent > 0f ? emission : color;
+        Shader shader = Shader.Find(TexturedShader);
+        if (shader == null)
+            return;
+
+        material.shader = shader;
+        material.mainTexture = texture;
+        material.color = Color.white;
     }
 
     static Texture GetTexture(Material material, string property)

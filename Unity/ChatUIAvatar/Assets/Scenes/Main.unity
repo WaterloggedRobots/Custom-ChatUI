@@ -385,6 +385,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   doubleSidedShader: {fileID: 4800000, guid: f697210c0cab44c891da9ba1850e799f, type: 3}
+  fallbackTexture: {fileID: 2800000, guid: f5f512b310472294daad42e1c251b46c, type: 3}
   avatarRoot: {fileID: 0}
 --- !u!1001 &400
 PrefabInstance:

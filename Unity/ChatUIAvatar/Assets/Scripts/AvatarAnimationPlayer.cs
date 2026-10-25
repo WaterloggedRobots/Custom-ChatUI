@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Animations;
@@ -128,8 +129,6 @@ public class AvatarAnimationPlayer : MonoBehaviour
         }
         if (autoAddClips)
             AddUnlistedClips();
-        if (hips != null)
-            MeasureStartOffsets();
 
         graph = PlayableGraph.Create("AvatarAnimation");
         graph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
@@ -139,6 +138,17 @@ public class AvatarAnimationPlayer : MonoBehaviour
 
         if (defaultEntry != null)
             Play(defaultEntry);
+
+        if (hips != null)
+            StartCoroutine(MeasureStartOffsetsWhenReady());
+    }
+
+    // In a build the Animator isn't ready to be posed yet during Start, so
+    // measuring there reads the rest pose for every clip. Wait one frame.
+    IEnumerator MeasureStartOffsetsWhenReady()
+    {
+        yield return null;
+        MeasureStartOffsets();
     }
 
     void OnDestroy()
@@ -208,7 +218,8 @@ public class AvatarAnimationPlayer : MonoBehaviour
 
     // Poses her on each clip's first frame to see where it puts her hips,
     // then puts the skeleton back as it was. Only the ground plane offset is
-    // kept, so sitting and lying clips keep their height.
+    // kept, so sitting and lying clips keep their height. Runs after Update,
+    // so the regular graph poses her again before anything is drawn.
     void MeasureStartOffsets()
     {
         Transform root = animator.transform;
@@ -221,6 +232,7 @@ public class AvatarAnimationPlayer : MonoBehaviour
             rotations[i] = bones[i].localRotation;
         }
 
+        int measured = 0, failed = 0;
         foreach (Entry e in entries)
         {
             if (e.clip == null)
@@ -230,13 +242,30 @@ public class AvatarAnimationPlayer : MonoBehaviour
             var playable = AnimationClipPlayable.Create(sampler, e.clip);
             playable.SetApplyFootIK(false);
             AnimationPlayableOutput.Create(sampler, "Sample", animator).SetSourcePlayable(playable);
+            hips.position = root.TransformPoint(restHipsLocal);
             sampler.Evaluate(0f);
+            Vector3 sampled = root.InverseTransformPoint(hips.position);
+            sampler.Destroy();
 
-            Vector3 offset = root.InverseTransformPoint(hips.position) - restHipsLocal;
+            // If the graph didn't pose her, try sampling the clip directly.
+            if (sampled == restHipsLocal)
+            {
+                e.clip.SampleAnimation(animator.gameObject, 0f);
+                sampled = root.InverseTransformPoint(hips.position);
+            }
+            if (sampled == restHipsLocal)
+            {
+                failed++;
+                continue;
+            }
+
+            Vector3 offset = sampled - restHipsLocal;
             offset.y = 0f;
             e.startOffset = offset;
-            sampler.Destroy();
+            measured++;
         }
+        Debug.Log($"AvatarAnimationPlayer: aligned the start of {measured} clips" +
+                  (failed > 0 ? $", could not measure {failed}." : "."));
 
         for (int i = 0; i < bones.Length; i++)
         {

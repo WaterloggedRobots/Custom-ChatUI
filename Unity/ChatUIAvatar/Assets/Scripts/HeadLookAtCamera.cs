@@ -9,6 +9,9 @@ using UnityEngine;
 /// Facing is taken from the avatar root's forward axis in the starting pose,
 /// so it doesn't depend on how the bones' own axes were exported.
 /// L toggles it on and off.
+///
+/// Body Turn also rotates the whole avatar a little toward the camera, so she
+/// keeps roughly facing it when moved around the screen.
 /// </summary>
 public class HeadLookAtCamera : MonoBehaviour
 {
@@ -37,12 +40,20 @@ public class HeadLookAtCamera : MonoBehaviour
 
     public KeyCode toggleKey = KeyCode.L;
 
+    [Header("Body")]
+    [Tooltip("How far the whole body turns toward the camera: 0 keeps her original facing, 1 faces it fully.")]
+    [Range(0f, 1f)] public float bodyTurn = 0.3f;
+
+    [Tooltip("How quickly the body turn catches up. 0 snaps.")]
+    public float bodyTurnSmoothing = 3f;
+
     Transform neck;
     Transform head;
     Vector3 headForwardLocal;
     Quaternion smoothedTurn = Quaternion.identity;
     float activeWeight;
     bool active = true;
+    Quaternion startRotation;
 
     void Start()
     {
@@ -70,6 +81,8 @@ public class HeadLookAtCamera : MonoBehaviour
             return;
         }
 
+        startRotation = avatarRoot.rotation;
+
         // Start runs before the first animation frame, so this is the rest pose.
         Vector3 forward = characterFacesNegativeZ ? -avatarRoot.forward : avatarRoot.forward;
         headForwardLocal = Quaternion.Inverse(head.rotation) * forward;
@@ -78,11 +91,28 @@ public class HeadLookAtCamera : MonoBehaviour
 
     void Update()
     {
-        if (BlendShapeKeyController.TypingInUI)
+        if (!BlendShapeKeyController.TypingInUI && Input.GetKeyDown(toggleKey))
+            active = !active;
+
+        TurnBody();
+    }
+
+    // In Update, before the Animator runs, so this frame's pose already
+    // includes the turn. Only yaw, so she stays upright.
+    void TurnBody()
+    {
+        if (lookTarget == null)
             return;
 
-        if (Input.GetKeyDown(toggleKey))
-            active = !active;
+        Vector3 toTarget = lookTarget.position - avatarRoot.position;
+        toTarget.y = 0f;
+        if (toTarget.sqrMagnitude < 1e-6f)
+            return;
+
+        Quaternion facing = Quaternion.LookRotation(characterFacesNegativeZ ? -toTarget : toTarget, Vector3.up);
+        Quaternion target = Quaternion.Slerp(startRotation, facing, bodyTurn);
+        float t = bodyTurnSmoothing <= 0f ? 1f : 1f - Mathf.Exp(-bodyTurnSmoothing * Time.deltaTime);
+        avatarRoot.rotation = Quaternion.Slerp(avatarRoot.rotation, target, t);
     }
 
     void LateUpdate()

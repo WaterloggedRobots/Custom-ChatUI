@@ -5,6 +5,9 @@
 // - a soft two-tone cel shadow from the scene's directional light, tinted
 //   (cool purple by default) rather than just darker
 // - a rim light along the silhouette
+// Faces can blend their normals toward a sphere around the head (set from
+// script), the usual anime trick that keeps the cel shadow from cutting
+// across the chin and nose.
 // Unlit-style otherwise: no shadows cast or received, so it stays clean.
 Shader "ChatUI/Toon Double Sided"
 {
@@ -21,6 +24,9 @@ Shader "ChatUI/Toon Double Sided"
         _RimColor ("Rim Color", Color) = (1, 0.95, 0.9, 1)
         _RimStrength ("Rim Strength", Range(0, 1)) = 0.25
         _RimPower ("Rim Width", Range(0.5, 8)) = 3
+        _ShadowStrength ("Shadow Strength", Range(0, 1)) = 1
+        _SphereNormal ("Sphere Normals", Range(0, 1)) = 0
+        _SphereCenter ("Sphere Center (world)", Vector) = (0, 0, 0, 0)
     }
     SubShader
     {
@@ -63,6 +69,8 @@ Shader "ChatUI/Toon Double Sided"
             half _ShadowThreshold, _ShadowSoftness;
             fixed4 _RimColor;
             half _RimStrength, _RimPower;
+            half _ShadowStrength, _SphereNormal;
+            float4 _SphereCenter;
 
             v2f vert (appdata v)
             {
@@ -88,6 +96,8 @@ Shader "ChatUI/Toon Double Sided"
 
                 // Back faces of the hair cards need the flipped normal.
                 float3 n = normalize(i.worldNormal) * (facing > 0 ? 1 : -1);
+                if (_SphereNormal > 0)
+                    n = normalize(lerp(n, normalize(i.worldPos - _SphereCenter.xyz), _SphereNormal));
                 float3 viewDir = normalize(_WorldSpaceCameraPos - i.worldPos);
                 float3 lightDir = _WorldSpaceLightPos0.w > 0
                     ? normalize(_WorldSpaceLightPos0.xyz - i.worldPos)
@@ -98,7 +108,8 @@ Shader "ChatUI/Toon Double Sided"
 
                 half ndl = dot(n, lightDir);
                 half lit = smoothstep(_ShadowThreshold - _ShadowSoftness, _ShadowThreshold + _ShadowSoftness, ndl);
-                col *= lerp(_ShadowColor.rgb, half3(1, 1, 1), lit);
+                half3 shadow = lerp(half3(1, 1, 1), _ShadowColor.rgb, _ShadowStrength);
+                col *= lerp(shadow, half3(1, 1, 1), lit);
 
                 half rim = pow(1 - saturate(dot(n, viewDir)), _RimPower) * _RimStrength;
                 col += _RimColor.rgb * rim;

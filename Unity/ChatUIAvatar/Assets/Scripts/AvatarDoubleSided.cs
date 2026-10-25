@@ -33,7 +33,18 @@ public class AvatarDoubleSided : MonoBehaviour
     [Range(0f, 1f)] public float rimStrength = 0.25f;
     [Range(0.5f, 8f)] public float rimWidth = 3f;
 
+    [Header("Face")]
+    [Tooltip("Shade the face as if it were a sphere around the head, so shadows don't cut across the chin and nose.")]
+    [Range(0f, 1f)] public float faceSphereNormals = 1f;
+    [Tooltip("How dark the face shadow gets compared to the body (0 = no shadow on the face).")]
+    [Range(0f, 1f)] public float faceShadowStrength = 0.5f;
+    [Tooltip("Sphere centre relative to the head bone (which sits at the base of the head), in face heights. More negative Z flattens the face shading.")]
+    public Vector3 faceSphereOffset = new Vector3(0f, 0.45f, -0.2f);
+
     readonly List<Material> materials = new List<Material>();
+    readonly List<Material> faceMaterials = new List<Material>();
+    Transform head;
+    float headSize = 0.2f;
 
     void Start()
     {
@@ -47,14 +58,20 @@ public class AvatarDoubleSided : MonoBehaviour
             return;
         }
 
-        if (avatarRoot == null)
-        {
-            var face = FindObjectOfType<BlendShapeKeyController>();
-            if (face != null && face.target != null)
-                avatarRoot = face.target.transform.root;
-        }
+        var faceController = FindObjectOfType<BlendShapeKeyController>();
+        Renderer faceRenderer = faceController != null ? faceController.target : null;
+        if (avatarRoot == null && faceRenderer != null)
+            avatarRoot = faceRenderer.transform.root;
         if (avatarRoot == null)
             return;
+
+        foreach (Transform t in avatarRoot.GetComponentsInChildren<Transform>())
+        {
+            if (t.name == "Head")
+                head = t;
+        }
+        if (faceRenderer != null)
+            headSize = Mathf.Max(0.01f, faceRenderer.bounds.size.y) / Mathf.Max(0.001f, avatarRoot.lossyScale.y);
 
         foreach (Renderer r in avatarRoot.GetComponentsInChildren<Renderer>())
         {
@@ -73,6 +90,8 @@ public class AvatarDoubleSided : MonoBehaviour
                 m.mainTexture = texture;
                 m.color = Color.white;
                 materials.Add(m);
+                if (r == faceRenderer)
+                    faceMaterials.Add(m);
             }
         }
         ApplyLook();
@@ -96,6 +115,20 @@ public class AvatarDoubleSided : MonoBehaviour
             m.SetColor("_RimColor", rimColor);
             m.SetFloat("_RimStrength", rimStrength);
             m.SetFloat("_RimPower", rimWidth);
+
+            bool isFace = faceMaterials.Contains(m);
+            m.SetFloat("_ShadowStrength", isFace ? faceShadowStrength : 1f);
+            m.SetFloat("_SphereNormal", isFace && head != null ? faceSphereNormals : 0f);
+        }
+
+        if (head != null && faceMaterials.Count > 0)
+        {
+            // Offset in the avatar's own frame and scale, sized by the face, so
+            // it keeps working when she's moved or resized.
+            Vector3 offset = avatarRoot.TransformVector(faceSphereOffset * headSize);
+            Vector4 center = head.position + offset;
+            foreach (Material m in faceMaterials)
+                m.SetVector("_SphereCenter", center);
         }
     }
 }

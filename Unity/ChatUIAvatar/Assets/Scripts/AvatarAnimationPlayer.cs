@@ -90,6 +90,7 @@ public class AvatarAnimationPlayer : MonoBehaviour
     GUIStyle rowStyle;
     GUIStyle activeRowStyle;
     Transform hips;
+    HeadLookAtCamera look;
     Vector3 restHipsLocal;
 
     void Start()
@@ -104,6 +105,7 @@ public class AvatarAnimationPlayer : MonoBehaviour
         }
         animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
         animator.applyRootMotion = false;
+        look = FindObjectOfType<HeadLookAtCamera>();
 
         // Start runs before the first animation frame, so this is the rest pose.
         hips = animator.isHuman ? animator.GetBoneTransform(HumanBodyBones.Hips) : null;
@@ -289,7 +291,7 @@ public class AvatarAnimationPlayer : MonoBehaviour
         }
 
         float width = 260f;
-        float height = panelExpanded ? Mathf.Min(Screen.height - 20f, 50f + entries.Count * 24f) : 34f;
+        float height = panelExpanded ? Mathf.Min(Screen.height - 20f, 76f + entries.Count * 24f) : 34f;
         var panel = new Rect(Screen.width - width - 10, 10, width, height);
         BlendShapeKeyController.DrawPanelBackground(panel);
         GUILayout.BeginArea(panel, GUI.skin.box);
@@ -299,6 +301,9 @@ public class AvatarAnimationPlayer : MonoBehaviour
 
         if (panelExpanded)
         {
+            if (look != null && GUILayout.Button("Reset rotation"))
+                look.ResetRotation();
+
             scroll = GUILayout.BeginScrollView(scroll);
             foreach (Entry e in entries)
             {

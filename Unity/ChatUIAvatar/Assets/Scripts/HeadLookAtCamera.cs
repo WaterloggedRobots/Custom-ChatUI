@@ -129,6 +129,7 @@ public class HeadLookAtCamera : MonoBehaviour
         userRotation = rotation * userRotation;
     }
 
+    /// <summary>Undoes manual rotation, back to just the turn toward the camera.</summary>
     public void ResetRotation()
     {
         userRotation = Quaternion.identity;

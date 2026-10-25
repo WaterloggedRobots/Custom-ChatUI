@@ -20,7 +20,7 @@ delete that object and use the menu **ChatUI > Add Avatar To Scene**.
 The model and every FBX in `Assets/Resources/Animations/` are imported with the
 Humanoid rig (an editor postprocessor sets this up), so Mixamo clips on the
 standard `mixamorig` skeleton retarget onto her. Root motion is baked into the
-pose, so she stays in place. If she doesn't animate, check the model's
+pose, so she stays in place, and every clip's start is centred on her and faces the same way. If she doesn't animate, check the model's
 **Rig** tab > **Configure** for the bone mapping (use **Enforce T-Pose** if the
 arms look wrong).
 
@@ -81,7 +81,7 @@ kuudere (`kuu ...`) sets. The in-game panel always shows the current list.
 your desktop with no window around her, always on top, and clicks go through
 to whatever is behind except on her and the panels.
 
-- Right-drag her to move her, Ctrl + right-drag to rotate her (Ctrl+R resets), scroll over her to resize.
+- Right-drag her to move her, Ctrl + right-drag to rotate her (Ctrl+R or the **Reset rotation** button in the Animations panel resets it), scroll over her to resize.
 - `Tab` hides or shows the panels, `Ctrl+Q` (or Alt+F4) quits.
 - Everything else (shape keys, animations, head tracking) works as in the editor.
 

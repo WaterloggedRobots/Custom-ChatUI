@@ -64,7 +64,7 @@ Body (animations), on `AvatarController` > Avatar Animation Player:
 - The camera frames her once and stays put; her neck and head turn to look at it on top of any animation. `L` toggles the head tracking. Tune it in **Head Look At Camera** (weight, neck share, max angle, smoothing); tick **Character Faces Negative Z** if she looks away instead. **Body Turn** (0–1) on the same component also turns her whole body toward the camera, including after you move her.
 - `V` reframes between face close-up and full body, `F` swaps the camera to the other side. Tick **Follow Avatar** on the camera to have it track her instead.
 - Under **Keep In Place** on Avatar Animation Player, **Align Start** shifts each clip so it starts where she stands (she can still walk around during it). **Lock Forward Back** (on), **Lock Sideways** and **Lock Up Down** pin her hips on that axis for the whole clip.
-- Each animation entry has a **Speed** (1 = normal, 0.5 = half, 2 = double). You can change it during Play and see it immediately, but Play-mode edits are reset when you stop, so set the final values outside Play.
+- Clicking an animation in the panel plays it at normal speed. Speeds are set per motion set (below), so the same clip can be fast in one set and slow in another.
 - Rebind keys, shape names or animations in the lists on `AvatarController`. New
   Mixamo clips just need to go in `Assets/Resources/Animations/`: with **Auto Add
   Clips** on they show up in the panel by file name (looping if the name has
@@ -72,6 +72,56 @@ Body (animations), on `AvatarController` > Avatar Animation Player:
 
 Face mesh shape keys: `miomio10252100` has 79, including the tsundere (`tsun ...`) and
 kuudere (`kuu ...`) sets. The in-game panel always shows the current list.
+
+## Motion sets
+
+A motion set fuses a body animation, its speed and a group of shape keys under
+one name (e.g. `happy` = Excited animation + `happy` shape key). Edit them in
+**Motion Set Library** on `AvatarController`:
+
+- **Name**: what the panel and the API call it. **Description**: when to use it; this is what the LLM will see.
+- **Animation**: dropdown of the clips in `Assets/Resources/Animations` (empty keeps the current animation).
+- **Speed**: 1 = normal, 0.5 = half, 2 = double, for this set only.
+- **Loop**: the clip's own setting, or force loop / play once.
+- **Duration**: seconds before going back to the default set. 0 stays until another set plays, or until a play-once animation finishes.
+- **Shape Keys**: dropdown of the face mesh's shape keys, each with a weight.
+
+**Default Motion Set** plays at start and whenever a set ends. Sets are listed
+in the top-right panel; click one to play it. Inspector edits made during Play
+are lost when you stop, so edit outside Play.
+
+## Lip sync
+
+**Lip Sync Controller** on `AvatarController` lists the shape keys used for
+each mouth shape while talking (A, I, U, E, O by default, mapped to aa, ih,
+ou, ee, oh). Nothing drives it yet; once text to speech is linked, ChatUI will
+send mouth shapes through the API below. Lip sync is added on top of the
+motion set's shape keys, so she can talk while smiling.
+
+## API (for ChatUI later)
+
+**Avatar Api Server** on `AvatarController` listens on
+`http://localhost:7870` (change **Port**; tick **Allow Remote** if ChatUI
+runs on another PC). It works in Play mode and in the desktop companion.
+
+| Request | Does |
+|---|---|
+| `GET /api/motionsets` | Lists set names and descriptions (to put in the LLM prompt) |
+| `POST /api/motionset` `{"name":"happy"}` | Plays a set (also `GET /api/motionset?name=happy`) |
+| `GET /api/status` | Current set, animation, speed, whether she's speaking |
+| `GET /api/visemes` | Lip sync mouth shape names |
+| `POST /api/lipsync` `{"viseme":"A","amount":0.8}` | Opens one mouth shape (0-1); `{"visemes":[...]}` for several |
+| `POST /api/lipsync/clear` | Closes the mouth |
+| `GET /api/animations`, `GET /api/shapekeys` | What's available |
+
+Quick test from PowerShell while she's running:
+
+```powershell
+Invoke-RestMethod http://localhost:7870/api/motionsets
+Invoke-RestMethod http://localhost:7870/api/motionset -Method Post -Body '{"name":"happy"}' -ContentType application/json
+```
+
+The mouth closes on its own if no lip sync update arrives for half a second.
 
 ## Desktop companion (Windows)
 

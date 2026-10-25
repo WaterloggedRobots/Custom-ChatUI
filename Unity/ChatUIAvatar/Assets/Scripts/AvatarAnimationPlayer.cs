@@ -17,8 +17,9 @@ using UnityEngine.Serialization;
 /// rig, so clips made for other skeletons (e.g. mixamorig) retarget onto her.
 ///
 /// Looping entries play until another one is chosen. One-shot entries play
-/// once, then fade back to the default (first looping) entry. Each entry has
-/// its own playback speed.
+/// once, then fade back to the default (first looping) entry. Playback speed
+/// is set per motion set (MotionSetLibrary), so the same clip can play at
+/// different speeds in different sets; clicking a clip here plays it at 1x.
 /// </summary>
 public class AvatarAnimationPlayer : MonoBehaviour
 {
@@ -31,8 +32,6 @@ public class AvatarAnimationPlayer : MonoBehaviour
         [Tooltip("Take to use from the FBX. Empty picks 'mixamo.com', else the first clip.")]
         public string clipName;
         public bool loop;
-        [Tooltip("Playback speed: 1 is normal, 0.5 half speed, 2 double. Can be changed during Play.")]
-        [Min(0.01f)] public float speed = 1f;
 
         [NonSerialized] public AnimationClip clip;
         // How far the clip's first frame puts her hips from where she stands.
@@ -41,12 +40,11 @@ public class AvatarAnimationPlayer : MonoBehaviour
         // Unity uses this when deserializing, so new fields get their defaults.
         public Entry() { }
 
-        public Entry(KeyCode key, string resourcePath, bool loop, float speed = 1f)
+        public Entry(KeyCode key, string resourcePath, bool loop)
         {
             this.key = key;
             this.resourcePath = resourcePath;
             this.loop = loop;
-            this.speed = speed;
         }
 
         public string Label => resourcePath.Substring(resourcePath.LastIndexOf('/') + 1);
@@ -91,6 +89,9 @@ public class AvatarAnimationPlayer : MonoBehaviour
     int activeSlot;
     float fade = 1f;
     Entry current;
+    float currentSpeed = 1f;
+    bool currentLoop;
+    bool finishedRaised;
     Entry defaultEntry;
     bool panelExpanded = true;
     Vector2 scroll;
@@ -172,15 +173,21 @@ public class AvatarAnimationPlayer : MonoBehaviour
             return;
 
         AnimationClipPlayable active = slots[activeSlot];
-        active.SetSpeed(current.speed);
         double time = active.GetTime();
         double length = current.clip.length;
         if (length > 0 && time >= length)
         {
-            if (current.loop)
+            if (currentLoop)
                 active.SetTime(time % length);
-            else if (defaultEntry != null && current != defaultEntry)
-                Play(defaultEntry);
+            else if (!finishedRaised)
+            {
+                finishedRaised = true;
+                Entry finished = current;
+                Finished?.Invoke(finished);
+                // Whoever handled Finished may already have started something else.
+                if (current == finished && defaultEntry != null && current != defaultEntry)
+                    Play(defaultEntry);
+            }
         }
 
         if (fade < 1f)
@@ -274,10 +281,33 @@ public class AvatarAnimationPlayer : MonoBehaviour
         }
     }
 
-    /// <summary>Crossfades to an entry. Also usable from other scripts.</summary>
+    /// <summary>Raised when a one-shot clip reaches its end, before falling back to the default clip.</summary>
+    public event Action<Entry> Finished;
+
+    /// <summary>Raised whenever a clip starts, from any source (panel, keys, motion sets).</summary>
+    public event Action<Entry> Started;
+
+    /// <summary>The clip playing now, or null.</summary>
+    public Entry Current => current;
+
+    public float CurrentSpeed => currentSpeed;
+
+    /// <summary>Finds an entry by label (the FBX file name), ignoring case.</summary>
+    public Entry Find(string label)
+    {
+        return entries.Find(e => string.Equals(e.Label, label, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Crossfades to an entry at normal speed with its own loop setting.</summary>
     public void Play(Entry entry)
     {
-        if (entry?.clip == null)
+        Play(entry, 1f, entry != null && entry.loop);
+    }
+
+    /// <summary>Crossfades to an entry at the given speed, looping or not.</summary>
+    public void Play(Entry entry, float speed, bool loop)
+    {
+        if (entry?.clip == null || !graph.IsValid())
             return;
 
         int next = 1 - activeSlot;
@@ -289,7 +319,7 @@ public class AvatarAnimationPlayer : MonoBehaviour
 
         slots[next] = AnimationClipPlayable.Create(graph, entry.clip);
         slots[next].SetApplyFootIK(false);
-        slots[next].SetSpeed(entry.speed);
+        slots[next].SetSpeed(Mathf.Max(0.01f, speed));
         graph.Connect(slots[next], 0, mixer, next);
         slotEntries[next] = entry;
 
@@ -297,15 +327,19 @@ public class AvatarAnimationPlayer : MonoBehaviour
         bool first = current == null;
         activeSlot = next;
         current = entry;
+        currentSpeed = Mathf.Max(0.01f, speed);
+        currentLoop = loop;
+        finishedRaised = false;
         fade = first ? 1f : 0f;
         mixer.SetInputWeight(activeSlot, fade);
         mixer.SetInputWeight(1 - activeSlot, 1f - fade);
+        Started?.Invoke(entry);
     }
 
     /// <summary>Plays an entry by its label (the FBX file name). Returns false if not found.</summary>
     public bool Play(string label)
     {
-        Entry entry = entries.Find(e => e.Label == label);
+        Entry entry = Find(label);
         if (entry == null)
             return false;
         Play(entry);
@@ -379,7 +413,10 @@ public class AvatarAnimationPlayer : MonoBehaviour
 
         float width = 260f;
         float height = panelExpanded ? Mathf.Min(Screen.height - 20f, 76f + entries.Count * 24f) : 34f;
-        var panel = new Rect(Screen.width - width - 10, 10, width, height);
+        // Sits under the motion set panel when there is one.
+        float top = MotionSetLibrary.RightPanelBottom + 10f;
+        height = Mathf.Min(height, Screen.height - top - 10f);
+        var panel = new Rect(Screen.width - width - 10, top, width, height);
         BlendShapeKeyController.DrawPanelBackground(panel);
         GUILayout.BeginArea(panel, GUI.skin.box);
 
@@ -397,8 +434,6 @@ public class AvatarAnimationPlayer : MonoBehaviour
                 string label = e.clip == null ? $"{e.Label} (missing)" : e.Label;
                 if (!e.loop)
                     label += " (once)";
-                if (!Mathf.Approximately(e.speed, 1f))
-                    label += $" x{e.speed:0.##}";
                 if (e.key != KeyCode.None)
                     label += $"   [{e.key}]";
 

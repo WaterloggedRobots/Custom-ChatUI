@@ -8,7 +8,7 @@ using UnityEngine;
 /// Fallback for when the model in Main.unity shows up as missing (for example
 /// the FBX was added after the project was first opened and got a new GUID).
 /// ChatUI > Add Avatar To Scene drops the newest model in Assets/Models into
-/// the open scene and hooks up the face, animation and camera components.
+/// the open scene and hooks up the face, animation, motion set, lip sync, API and camera components.
 /// </summary>
 public static class AvatarSceneBuilder
 {
@@ -49,6 +49,13 @@ public static class AvatarSceneBuilder
 
         if (controller.GetComponent<HeadLookAtCamera>() == null)
             Undo.AddComponent<HeadLookAtCamera>(controller.gameObject);
+
+        if (controller.GetComponent<MotionSetLibrary>() == null)
+            Undo.AddComponent<MotionSetLibrary>(controller.gameObject);
+        if (controller.GetComponent<LipSyncController>() == null)
+            Undo.AddComponent<LipSyncController>(controller.gameObject);
+        if (controller.GetComponent<AvatarApiServer>() == null)
+            Undo.AddComponent<AvatarApiServer>(controller.gameObject);
 
         Camera cam = Camera.main;
         if (cam != null && cam.GetComponent<AvatarCameraFramer>() == null)

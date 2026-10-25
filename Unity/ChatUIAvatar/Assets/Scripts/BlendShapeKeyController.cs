@@ -12,11 +12,16 @@ using UnityEngine;
 /// Minus / Equals step through every blend shape on the mesh one at a time,
 /// which is handy for finding names to bind. Backspace clears everything.
 ///
-/// Later the same SetExpression / SetWeight calls can be driven by the
-/// ChatUI server instead of the keyboard.
+/// Other components add their own shapes on top through layers: motion sets
+/// (MotionSetLibrary) and lip sync (LipSyncController). The keyboard / panel
+/// shapes and the motion set shapes combine by taking the larger weight, and
+/// lip sync is added over both.
 /// </summary>
 public class BlendShapeKeyController : MonoBehaviour
 {
+    /// <summary>Shape weights set by other components, on top of the keyboard and panel.</summary>
+    public enum Layer { MotionSet, LipSync }
+
     [Serializable]
     public class Binding
     {
@@ -84,6 +89,8 @@ public class BlendShapeKeyController : MonoBehaviour
 
     float[] targetWeights;
     float[] currentWeights;
+    float[] motionSetTargets;
+    float[] lipSyncWeights;
     int browseIndex = -1;
     string[] shapeNames;
     readonly Dictionary<int, string> keyLabels = new Dictionary<int, string>();
@@ -93,16 +100,31 @@ public class BlendShapeKeyController : MonoBehaviour
     GUIStyle rowStyle;
     GUIStyle activeRowStyle;
 
-    // Resolve the target in Awake so other components can read it in Start.
+    // Resolve the target and shape list in Awake so other components can use
+    // them in Start.
     void Awake()
     {
         if (target == null)
             target = FindFaceRenderer();
+        if (target == null || target.sharedMesh == null)
+            return;
+
+        Mesh mesh = target.sharedMesh;
+        targetWeights = new float[mesh.blendShapeCount];
+        currentWeights = new float[mesh.blendShapeCount];
+        motionSetTargets = new float[mesh.blendShapeCount];
+        lipSyncWeights = new float[mesh.blendShapeCount];
+
+        // Read the list from the mesh, so a re-exported model with more shape
+        // keys shows them all without any changes here.
+        shapeNames = new string[mesh.blendShapeCount];
+        for (int i = 0; i < shapeNames.Length; i++)
+            shapeNames[i] = mesh.GetBlendShapeName(i);
     }
 
     void Start()
     {
-        if (target == null || target.sharedMesh == null)
+        if (shapeNames == null)
         {
             Debug.LogWarning("BlendShapeKeyController: no SkinnedMeshRenderer with blend shapes found.");
             enabled = false;
@@ -110,14 +132,6 @@ public class BlendShapeKeyController : MonoBehaviour
         }
 
         Mesh mesh = target.sharedMesh;
-        targetWeights = new float[mesh.blendShapeCount];
-        currentWeights = new float[mesh.blendShapeCount];
-
-        // Read the list from the mesh, so a re-exported model with more shape
-        // keys shows them all without any changes here.
-        shapeNames = new string[mesh.blendShapeCount];
-        for (int i = 0; i < shapeNames.Length; i++)
-            shapeNames[i] = mesh.GetBlendShapeName(i);
         Debug.Log($"BlendShapeKeyController: {target.name} has {shapeNames.Length} blend shapes: {string.Join(", ", shapeNames)}");
 
         foreach (Binding b in bindings)
@@ -197,8 +211,10 @@ public class BlendShapeKeyController : MonoBehaviour
         float step = transitionSpeed * Time.deltaTime;
         for (int i = 0; i < targetWeights.Length; i++)
         {
-            currentWeights[i] = Mathf.MoveTowards(currentWeights[i], targetWeights[i], step);
-            target.SetBlendShapeWeight(i, currentWeights[i]);
+            float wanted = Mathf.Max(targetWeights[i], motionSetTargets[i]);
+            currentWeights[i] = Mathf.MoveTowards(currentWeights[i], wanted, step);
+            // Lip sync is driven every frame by its caller, so it isn't smoothed here.
+            target.SetBlendShapeWeight(i, Mathf.Min(100f, currentWeights[i] + lipSyncWeights[i]));
         }
     }
 
@@ -225,6 +241,32 @@ public class BlendShapeKeyController : MonoBehaviour
     {
         targetWeights[index] = Mathf.Clamp(weight, 0f, 100f);
     }
+
+    /// <summary>All shape key names on the face mesh, or null if there is none.</summary>
+    public string[] ShapeNames => shapeNames;
+
+    /// <summary>Index of a shape key by name (exact, then "Mesh.name" suffix), or -1.</summary>
+    public int FindShape(string blendShapeName)
+    {
+        return target != null && target.sharedMesh != null ? FindBlendShape(target.sharedMesh, blendShapeName) : -1;
+    }
+
+    /// <summary>Sets one shape's weight (0-100) on a layer. Motion set weights fade in and out; lip sync is applied as is.</summary>
+    public void SetLayerWeight(Layer layer, int index, float weight)
+    {
+        float[] weights = LayerWeights(layer);
+        if (weights != null && index >= 0 && index < weights.Length)
+            weights[index] = Mathf.Clamp(weight, 0f, 100f);
+    }
+
+    public void ClearLayer(Layer layer)
+    {
+        float[] weights = LayerWeights(layer);
+        if (weights != null)
+            Array.Clear(weights, 0, weights.Length);
+    }
+
+    float[] LayerWeights(Layer layer) => layer == Layer.MotionSet ? motionSetTargets : lipSyncWeights;
 
     public void ResetAll()
     {
@@ -340,8 +382,11 @@ public class BlendShapeKeyController : MonoBehaviour
                     continue;
 
                 bool on = targetWeights[i] > 0f;
+                // Shapes held by the current motion set show as on too, but
+                // clicking them only changes the panel's own toggle.
+                bool shown = on || motionSetTargets[i] > 0f;
                 string label = keyLabels.TryGetValue(i, out string keys) ? $"{shapeNames[i]}   [{keys}]" : shapeNames[i];
-                if (GUILayout.Button(label, on ? activeRowStyle : rowStyle))
+                if (GUILayout.Button(label, shown ? activeRowStyle : rowStyle))
                     SetExpression(i, !on);
             }
             GUILayout.EndScrollView();

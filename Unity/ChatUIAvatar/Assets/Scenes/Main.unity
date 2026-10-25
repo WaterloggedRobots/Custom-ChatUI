@@ -340,6 +340,9 @@ GameObject:
   - component: {fileID: 303}
   - component: {fileID: 304}
   - component: {fileID: 305}
+  - component: {fileID: 306}
+  - component: {fileID: 307}
+  - component: {fileID: 308}
   m_Layer: 0
   m_Name: AvatarController
   m_TagString: Untagged
@@ -411,6 +414,42 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b2191dfa508b489da30beb2e34fbac68, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &306
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 300}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 86a91511273f4e84b2f02f8125ed0096, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &307
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 300}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aa79bd1e5c9049af9966efeb9106b576, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &308
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 300}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cbd4c6f4441144d895ff7a001a406ca3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
 --- !u!1001 &400

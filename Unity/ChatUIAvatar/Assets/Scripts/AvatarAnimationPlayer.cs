@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Animations;
 using UnityEngine.Playables;
+using UnityEngine.Serialization;
 
 /// <summary>
 /// Plays body animations on the avatar from a clickable on-screen list, or
@@ -62,11 +63,11 @@ public class AvatarAnimationPlayer : MonoBehaviour
 
     [Header("Keep In Place")]
     [Tooltip("Stop animations moving her forward and back (along her own Z axis).")]
-    public bool lockZ = true;
-    [Tooltip("Stop animations moving her sideways (along her own X axis).")]
-    public bool lockX;
+    [FormerlySerializedAs("lockZ")] public bool lockForwardBack = true;
+    [Tooltip("Stop animations moving her sideways (along her own X axis). Some Mixamo clips start shifted to one side; this keeps them in line.")]
+    public bool lockSideways = true;
     [Tooltip("Stop animations moving her up and down. Off by default, since sitting or getting up needs it.")]
-    public bool lockY;
+    [FormerlySerializedAs("lockY")] public bool lockUpDown;
 
     public List<Entry> entries = new List<Entry>
     {
@@ -177,14 +178,14 @@ public class AvatarAnimationPlayer : MonoBehaviour
     // position on the locked axes, so clips that walk or step play in place.
     void LateUpdate()
     {
-        if (hips == null || !(lockX || lockY || lockZ))
+        if (hips == null || !(lockSideways || lockUpDown || lockForwardBack))
             return;
 
         Transform root = animator.transform;
         Vector3 local = root.InverseTransformPoint(hips.position);
-        if (lockX) local.x = restHipsLocal.x;
-        if (lockY) local.y = restHipsLocal.y;
-        if (lockZ) local.z = restHipsLocal.z;
+        if (lockSideways) local.x = restHipsLocal.x;
+        if (lockUpDown) local.y = restHipsLocal.y;
+        if (lockForwardBack) local.z = restHipsLocal.z;
         hips.position = root.TransformPoint(local);
     }
 

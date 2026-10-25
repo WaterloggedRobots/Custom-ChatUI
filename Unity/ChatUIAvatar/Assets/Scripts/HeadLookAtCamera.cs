@@ -78,6 +78,9 @@ public class HeadLookAtCamera : MonoBehaviour
 
     void Update()
     {
+        if (BlendShapeKeyController.TypingInUI)
+            return;
+
         if (Input.GetKeyDown(toggleKey))
             active = !active;
     }

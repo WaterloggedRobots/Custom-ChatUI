@@ -52,6 +52,9 @@ public class AvatarCameraFramer : MonoBehaviour
 
     void Update()
     {
+        if (BlendShapeKeyController.TypingInUI)
+            return;
+
         if (Input.GetKeyDown(flipKey))
         {
             viewFromPositiveZ = !viewFromPositiveZ;

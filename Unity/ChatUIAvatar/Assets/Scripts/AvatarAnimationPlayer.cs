@@ -5,7 +5,8 @@ using UnityEngine.Animations;
 using UnityEngine.Playables;
 
 /// <summary>
-/// Plays body animations on the avatar from the keyboard (F1-F6 by default).
+/// Plays body animations on the avatar from a clickable on-screen list, or
+/// from the keyboard (F1-F6 by default).
 ///
 /// Clips are loaded from FBX files under Assets/Resources/Animations, so new
 /// Mixamo downloads only need to be dropped in that folder and bound here;
@@ -71,7 +72,10 @@ public class AvatarAnimationPlayer : MonoBehaviour
     float fade = 1f;
     Entry current;
     Entry defaultEntry;
-    GUIStyle overlayStyle;
+    bool panelExpanded = true;
+    Vector2 scroll;
+    GUIStyle rowStyle;
+    GUIStyle activeRowStyle;
 
     void Start()
     {
@@ -112,10 +116,13 @@ public class AvatarAnimationPlayer : MonoBehaviour
 
     void Update()
     {
-        foreach (Entry e in entries)
+        if (!BlendShapeKeyController.TypingInUI)
         {
-            if (e.clip != null && Input.GetKeyDown(e.key))
-                Play(e);
+            foreach (Entry e in entries)
+            {
+                if (e.clip != null && Input.GetKeyDown(e.key))
+                    Play(e);
+            }
         }
 
         if (current == null)
@@ -212,23 +219,40 @@ public class AvatarAnimationPlayer : MonoBehaviour
         if (!showOverlay || animator == null)
             return;
 
-        if (overlayStyle == null)
-            overlayStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, richText = true };
-
-        var lines = new System.Text.StringBuilder();
-        foreach (Entry e in entries)
+        if (rowStyle == null)
         {
-            string text = e.clip == null ? $"<color=#ff8080>{e.Label} (missing)</color>" : e.Label;
-            if (!e.loop)
-                text += " (once)";
-            if (!Mathf.Approximately(e.speed, 1f))
-                text += $" x{e.speed:0.##}";
-            lines.AppendLine(e == current ? $"<b>[{e.key}] {text}</b>" : $"[{e.key}] {text}");
+            rowStyle = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft, fontSize = 13 };
+            activeRowStyle = new GUIStyle(rowStyle) { fontStyle = FontStyle.Bold };
+            activeRowStyle.normal.textColor = activeRowStyle.hover.textColor = new Color(1f, 0.85f, 0.3f);
         }
 
-        float height = 19 * (entries.Count + 1);
-        var box = new Rect(Screen.width - 290, 10, 280, height);
-        GUI.Box(box, GUIContent.none);
-        GUI.Label(new Rect(box.x + 10, box.y + 5, box.width - 10, height), lines.ToString(), overlayStyle);
+        float width = 260f;
+        float height = panelExpanded ? Mathf.Min(Screen.height - 20f, 50f + entries.Count * 24f) : 34f;
+        GUILayout.BeginArea(new Rect(Screen.width - width - 10, 10, width, height), GUI.skin.box);
+
+        if (GUILayout.Button($"{(panelExpanded ? "\u25BC" : "\u25BA")} Animations ({entries.Count})"))
+            panelExpanded = !panelExpanded;
+
+        if (panelExpanded)
+        {
+            scroll = GUILayout.BeginScrollView(scroll);
+            foreach (Entry e in entries)
+            {
+                string label = e.clip == null ? $"{e.Label} (missing)" : e.Label;
+                if (!e.loop)
+                    label += " (once)";
+                if (!Mathf.Approximately(e.speed, 1f))
+                    label += $" x{e.speed:0.##}";
+                label += $"   [{e.key}]";
+
+                GUI.enabled = e.clip != null;
+                if (GUILayout.Button(label, e == current ? activeRowStyle : rowStyle))
+                    Play(e);
+                GUI.enabled = true;
+            }
+            GUILayout.EndScrollView();
+        }
+
+        GUILayout.EndArea();
     }
 }

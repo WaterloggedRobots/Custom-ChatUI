@@ -5,8 +5,10 @@ using UnityEngine;
 /// <summary>
 /// Drives blend shapes (shape keys) on the avatar's face from the keyboard.
 ///
-/// Number keys 1-0 (top row or numpad) toggle the shape bound to them,
-/// and Shift + number keys toggle a second bank.
+/// The on-screen panel lists every shape key on the face mesh; click one to
+/// toggle it. The panel collapses, scrolls and can be filtered by name.
+/// Number keys 1-0 (top row or numpad) are shortcuts for the shapes bound to
+/// them, and Shift + number keys a second bank.
 /// Minus / Equals step through every blend shape on the mesh one at a time,
 /// which is handy for finding names to bind. Backspace clears everything.
 ///
@@ -83,7 +85,13 @@ public class BlendShapeKeyController : MonoBehaviour
     float[] targetWeights;
     float[] currentWeights;
     int browseIndex = -1;
-    GUIStyle overlayStyle;
+    string[] shapeNames;
+    readonly Dictionary<int, string> keyLabels = new Dictionary<int, string>();
+    bool panelExpanded = true;
+    Vector2 scroll;
+    string filter = "";
+    GUIStyle rowStyle;
+    GUIStyle activeRowStyle;
 
     // Resolve the target in Awake so other components can read it in Start.
     void Awake()
@@ -105,21 +113,35 @@ public class BlendShapeKeyController : MonoBehaviour
         targetWeights = new float[mesh.blendShapeCount];
         currentWeights = new float[mesh.blendShapeCount];
 
-        var names = new List<string>();
-        for (int i = 0; i < mesh.blendShapeCount; i++)
-            names.Add(mesh.GetBlendShapeName(i));
-        Debug.Log($"BlendShapeKeyController: {target.name} has {names.Count} blend shapes: {string.Join(", ", names)}");
+        // Read the list from the mesh, so a re-exported model with more shape
+        // keys shows them all without any changes here.
+        shapeNames = new string[mesh.blendShapeCount];
+        for (int i = 0; i < shapeNames.Length; i++)
+            shapeNames[i] = mesh.GetBlendShapeName(i);
+        Debug.Log($"BlendShapeKeyController: {target.name} has {shapeNames.Length} blend shapes: {string.Join(", ", shapeNames)}");
 
         foreach (Binding b in bindings)
         {
             b.index = FindBlendShape(mesh, b.blendShapeName);
             if (b.index < 0)
+            {
                 Debug.LogWarning($"BlendShapeKeyController: blend shape '{b.blendShapeName}' not found on {target.name}.");
+                continue;
+            }
+
+            string key = (b.shift ? "Shift+" : "") + b.key.ToString().Replace("Alpha", "");
+            keyLabels[b.index] = keyLabels.TryGetValue(b.index, out string existing) ? existing + ", " + key : key;
         }
     }
 
+    /// <summary>True while a text field in the UI has focus, so shortcuts should ignore keys.</summary>
+    public static bool TypingInUI => GUIUtility.keyboardControl != 0;
+
     void Update()
     {
+        if (TypingInUI)
+            return;
+
         bool shiftHeld = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
 
         foreach (Binding b in bindings)
@@ -258,31 +280,56 @@ public class BlendShapeKeyController : MonoBehaviour
 
     void OnGUI()
     {
-        if (!showOverlay || target == null)
+        if (!showOverlay || target == null || shapeNames == null)
             return;
 
-        if (overlayStyle == null)
+        if (rowStyle == null)
         {
-            overlayStyle = new GUIStyle(GUI.skin.label) { fontSize = 14, richText = true };
+            rowStyle = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft, fontSize = 13 };
+            activeRowStyle = new GUIStyle(rowStyle) { fontStyle = FontStyle.Bold };
+            activeRowStyle.normal.textColor = activeRowStyle.hover.textColor = new Color(1f, 0.85f, 0.3f);
         }
 
-        var lines = new System.Text.StringBuilder();
-        foreach (Binding b in bindings)
-        {
-            string keyLabel = (b.shift ? "Shift+" : "") + b.key.ToString().Replace("Alpha", "");
-            bool active = b.index >= 0 && targetWeights[b.index] > 0f;
-            string text = b.index < 0 ? $"<color=#ff8080>{b.blendShapeName} (missing)</color>" : b.blendShapeName;
-            lines.AppendLine(active ? $"<b>[{keyLabel}] {text}</b>" : $"[{keyLabel}] {text}");
-        }
-        lines.AppendLine();
-        string browsing = browseIndex >= 0
-            ? $"{browseIndex + 1}/{targetWeights.Length} {target.sharedMesh.GetBlendShapeName(browseIndex)}"
-            : "off";
-        lines.AppendLine($"[-/=] browse all: {browsing}");
-        lines.AppendLine($"[{resetKey}] reset    mode: {(toggleMode ? "toggle" : "hold")}");
+        float width = 280f;
+        float height = panelExpanded ? Mathf.Min(Screen.height - 20f, 120f + shapeNames.Length * 24f) : 34f;
+        var panel = new Rect(10, 10, width, height);
 
-        float height = 19 * (bindings.Count + 4);
-        GUI.Box(new Rect(10, 10, 300, height), GUIContent.none);
-        GUI.Label(new Rect(20, 15, 290, height), lines.ToString(), overlayStyle);
+        // Clicking anywhere outside the panel leaves the filter field, so
+        // keyboard shortcuts work again.
+        if (Event.current.type == EventType.MouseDown && !panel.Contains(Event.current.mousePosition))
+            GUIUtility.keyboardControl = 0;
+
+        GUILayout.BeginArea(panel, GUI.skin.box);
+
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button($"{(panelExpanded ? "\u25BC" : "\u25BA")} Shape keys ({shapeNames.Length})", GUILayout.ExpandWidth(true)))
+            panelExpanded = !panelExpanded;
+        if (GUILayout.Button("Reset", GUILayout.Width(55)))
+            ResetAll();
+        GUILayout.EndHorizontal();
+
+        if (panelExpanded)
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Filter", GUILayout.Width(36));
+            filter = GUILayout.TextField(filter ?? "");
+            GUILayout.EndHorizontal();
+            exclusive = GUILayout.Toggle(exclusive, " One at a time");
+
+            scroll = GUILayout.BeginScrollView(scroll);
+            for (int i = 0; i < shapeNames.Length; i++)
+            {
+                if (!string.IsNullOrEmpty(filter) && shapeNames[i].IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+
+                bool on = targetWeights[i] > 0f;
+                string label = keyLabels.TryGetValue(i, out string keys) ? $"{shapeNames[i]}   [{keys}]" : shapeNames[i];
+                if (GUILayout.Button(label, on ? activeRowStyle : rowStyle))
+                    SetExpression(i, !on);
+            }
+            GUILayout.EndScrollView();
+        }
+
+        GUILayout.EndArea();
     }
 }

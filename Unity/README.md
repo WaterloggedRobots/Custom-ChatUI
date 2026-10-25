@@ -22,7 +22,13 @@ by uploading this model do). The rig is Generic, so bones are matched by name.
 
 ## Controls
 
-Face (shape keys), on `AvatarController` > Blend Shape Key Controller:
+In Play mode the left panel lists every shape key on the face mesh, read from
+the model itself, so a re-exported FBX with more shape keys shows them all
+automatically. Click a row to toggle it, use the filter box to search, the
+header to collapse the panel, and "One at a time" to allow mixing. The right
+panel does the same for animations.
+
+Keyboard shortcuts for the face, on `AvatarController` > Blend Shape Key Controller:
 
 | Key | Shape key | Shift + key | Shape key |
 | --- | --- | --- | --- |

@@ -63,7 +63,7 @@ Body (animations), on `AvatarController` > Avatar Animation Player:
 - `Backspace` clears all shapes.
 - The camera frames her once and stays put; her neck and head turn to look at it on top of any animation. `L` toggles the head tracking. Tune it in **Head Look At Camera** (weight, neck share, max angle, smoothing); tick **Character Faces Negative Z** if she looks away instead. **Body Turn** (0–1) on the same component also turns her whole body toward the camera, including after you move her.
 - `V` reframes between face close-up and full body, `F` swaps the camera to the other side. Tick **Follow Avatar** on the camera to have it track her instead.
-- Animations play in place: her hips are pinned forward/back and sideways, so clips can't drift her or start her off to one side. Toggle **Lock Forward Back**, **Lock Sideways** and **Lock Up Down** under **Keep In Place** on Avatar Animation Player (up/down is off so sitting and getting up still work).
+- Under **Keep In Place** on Avatar Animation Player, **Align Start** shifts each clip so it starts where she stands (she can still walk around during it). **Lock Forward Back** (on), **Lock Sideways** and **Lock Up Down** pin her hips on that axis for the whole clip.
 - Each animation entry has a **Speed** (1 = normal, 0.5 = half, 2 = double). You can change it during Play and see it immediately, but Play-mode edits are reset when you stop, so set the final values outside Play.
 - Rebind keys, shape names or animations in the lists on `AvatarController`. New
   Mixamo clips just need to go in `Assets/Resources/Animations/`: with **Auto Add

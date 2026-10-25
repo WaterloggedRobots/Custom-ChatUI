@@ -34,6 +34,8 @@ public class AvatarAnimationPlayer : MonoBehaviour
         [Min(0.01f)] public float speed = 1f;
 
         [NonSerialized] public AnimationClip clip;
+        // How far the clip's first frame puts her hips from where she stands.
+        [NonSerialized] public Vector3 startOffset;
 
         // Unity uses this when deserializing, so new fields get their defaults.
         public Entry() { }
@@ -62,10 +64,12 @@ public class AvatarAnimationPlayer : MonoBehaviour
     public bool showOverlay = true;
 
     [Header("Keep In Place")]
+    [Tooltip("Shift each clip so its first frame lines up with where she stands. She can still move around during the clip; it just doesn't start off to one side.")]
+    public bool alignStart = true;
     [Tooltip("Stop animations moving her forward and back (along her own Z axis).")]
     [FormerlySerializedAs("lockZ")] public bool lockForwardBack = true;
-    [Tooltip("Stop animations moving her sideways (along her own X axis). Some Mixamo clips start shifted to one side; this keeps them in line.")]
-    public bool lockSideways = true;
+    [Tooltip("Stop animations moving her sideways (along her own X axis), e.g. walking to the side.")]
+    public bool lockSideways;
     [Tooltip("Stop animations moving her up and down. Off by default, since sitting or getting up needs it.")]
     [FormerlySerializedAs("lockY")] public bool lockUpDown;
 
@@ -82,6 +86,7 @@ public class AvatarAnimationPlayer : MonoBehaviour
     PlayableGraph graph;
     AnimationMixerPlayable mixer;
     readonly AnimationClipPlayable[] slots = new AnimationClipPlayable[2];
+    readonly Entry[] slotEntries = new Entry[2];
     int activeSlot;
     float fade = 1f;
     Entry current;
@@ -123,6 +128,8 @@ public class AvatarAnimationPlayer : MonoBehaviour
         }
         if (autoAddClips)
             AddUnlistedClips();
+        if (hips != null)
+            MeasureStartOffsets();
 
         graph = PlayableGraph.Create("AvatarAnimation");
         graph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
@@ -174,19 +181,68 @@ public class AvatarAnimationPlayer : MonoBehaviour
         }
     }
 
-    // After the Animator has posed her, pull the hips back to their rest
-    // position on the locked axes, so clips that walk or step play in place.
+    // After the Animator has posed her, shift the hips so each clip starts
+    // where she stands, and pin them on the locked axes.
     void LateUpdate()
     {
-        if (hips == null || !(lockSideways || lockUpDown || lockForwardBack))
+        if (hips == null)
             return;
 
         Transform root = animator.transform;
         Vector3 local = root.InverseTransformPoint(hips.position);
+        if (alignStart)
+        {
+            // Blend the two clips' offsets during a crossfade, so the
+            // correction fades along with the clips.
+            for (int i = 0; i < 2; i++)
+            {
+                if (slotEntries[i] != null && slots[i].IsValid())
+                    local -= slotEntries[i].startOffset * mixer.GetInputWeight(i);
+            }
+        }
         if (lockSideways) local.x = restHipsLocal.x;
         if (lockUpDown) local.y = restHipsLocal.y;
         if (lockForwardBack) local.z = restHipsLocal.z;
         hips.position = root.TransformPoint(local);
+    }
+
+    // Poses her on each clip's first frame to see where it puts her hips,
+    // then puts the skeleton back as it was. Only the ground plane offset is
+    // kept, so sitting and lying clips keep their height.
+    void MeasureStartOffsets()
+    {
+        Transform root = animator.transform;
+        Transform[] bones = root.GetComponentsInChildren<Transform>();
+        var positions = new Vector3[bones.Length];
+        var rotations = new Quaternion[bones.Length];
+        for (int i = 0; i < bones.Length; i++)
+        {
+            positions[i] = bones[i].localPosition;
+            rotations[i] = bones[i].localRotation;
+        }
+
+        foreach (Entry e in entries)
+        {
+            if (e.clip == null)
+                continue;
+
+            PlayableGraph sampler = PlayableGraph.Create("AvatarAnimationSampler");
+            var playable = AnimationClipPlayable.Create(sampler, e.clip);
+            playable.SetApplyFootIK(false);
+            AnimationPlayableOutput.Create(sampler, "Sample", animator).SetSourcePlayable(playable);
+            sampler.Evaluate(0f);
+
+            Vector3 offset = root.InverseTransformPoint(hips.position) - restHipsLocal;
+            offset.y = 0f;
+            e.startOffset = offset;
+            sampler.Destroy();
+        }
+
+        for (int i = 0; i < bones.Length; i++)
+        {
+            bones[i].localPosition = positions[i];
+            bones[i].localRotation = rotations[i];
+        }
     }
 
     /// <summary>Crossfades to an entry. Also usable from other scripts.</summary>
@@ -206,6 +262,7 @@ public class AvatarAnimationPlayer : MonoBehaviour
         slots[next].SetApplyFootIK(false);
         slots[next].SetSpeed(entry.speed);
         graph.Connect(slots[next], 0, mixer, next);
+        slotEntries[next] = entry;
 
         // With nothing playing yet there is nothing to fade from.
         bool first = current == null;

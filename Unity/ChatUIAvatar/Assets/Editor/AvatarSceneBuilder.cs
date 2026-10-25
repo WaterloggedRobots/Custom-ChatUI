@@ -47,6 +47,9 @@ public static class AvatarSceneBuilder
             doubleSided.doubleSidedShader = Shader.Find("ChatUI/Unlit Texture Double Sided");
         }
 
+        if (controller.GetComponent<HeadLookAtCamera>() == null)
+            Undo.AddComponent<HeadLookAtCamera>(controller.gameObject);
+
         Camera cam = Camera.main;
         if (cam != null && cam.GetComponent<AvatarCameraFramer>() == null)
             Undo.AddComponent<AvatarCameraFramer>(cam.gameObject);

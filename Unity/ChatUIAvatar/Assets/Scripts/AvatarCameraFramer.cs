@@ -1,11 +1,12 @@
 using UnityEngine;
 
 /// <summary>
-/// Keeps the camera pointed at the avatar, so the scene works without
+/// Points the camera at the avatar on start, so the scene works without
 /// knowing the model's scale or facing direction in advance.
 /// V switches between a face close-up and the whole body, and F swaps to the
-/// other side if the camera ends up behind the head. The camera follows
-/// smoothly, so body animations stay in frame.
+/// other side if the camera ends up behind the head. By default the camera
+/// then stays put (HeadLookAtCamera turns her head toward it instead); tick
+/// Follow Avatar to have it track her smoothly.
 /// </summary>
 [RequireComponent(typeof(Camera))]
 public class AvatarCameraFramer : MonoBehaviour
@@ -20,6 +21,9 @@ public class AvatarCameraFramer : MonoBehaviour
     public bool viewFromPositiveZ = true;
 
     public bool fullBody;
+
+    [Tooltip("Keep re-framing every frame. Off: frame once, then only when V or F is pressed.")]
+    public bool followAvatar;
 
     [Tooltip("How quickly the camera catches up with the avatar. 0 snaps.")]
     public float followSmoothing = 4f;
@@ -63,7 +67,7 @@ public class AvatarCameraFramer : MonoBehaviour
     // After animation, so the bounds match this frame's pose.
     void LateUpdate()
     {
-        if (focus == null)
+        if (focus == null || (!followAvatar && !snap))
             return;
 
         Bounds bounds = TargetBounds();

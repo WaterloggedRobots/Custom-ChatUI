@@ -51,7 +51,8 @@ Body (animations), on `AvatarController` > Avatar Animation Player:
 - Number keys toggle (numpad works too). Untick **Toggle Mode** to make them hold-to-show instead.
 - `-` / `=` step through every shape key on the face mesh one by one.
 - `Backspace` clears all shapes.
-- `V` switches the camera between face close-up and full body, `F` swaps it to the other side.
+- The camera frames her once and stays put; her neck and head turn to look at it on top of any animation. `L` toggles the head tracking. Tune it in **Head Look At Camera** (weight, neck share, max angle, smoothing); tick **Character Faces Negative Z** if she looks away instead.
+- `V` reframes between face close-up and full body, `F` swaps the camera to the other side. Tick **Follow Avatar** on the camera to have it track her instead.
 - Each animation entry has a **Speed** (1 = normal, 0.5 = half, 2 = double). You can change it during Play and see it immediately, but Play-mode edits are reset when you stop, so set the final values outside Play.
 - Rebind keys, shape names or animations in the lists on `AvatarController`. New
   Mixamo clips just need to go in `Assets/Resources/Animations/` and get an entry.

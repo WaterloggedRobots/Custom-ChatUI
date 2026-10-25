@@ -326,6 +326,7 @@ GameObject:
   - component: {fileID: 302}
   - component: {fileID: 303}
   - component: {fileID: 304}
+  - component: {fileID: 305}
   m_Layer: 0
   m_Name: AvatarController
   m_TagString: Untagged
@@ -387,6 +388,18 @@ MonoBehaviour:
   doubleSidedShader: {fileID: 4800000, guid: f697210c0cab44c891da9ba1850e799f, type: 3}
   fallbackTexture: {fileID: 2800000, guid: f5f512b310472294daad42e1c251b46c, type: 3}
   avatarRoot: {fileID: 0}
+--- !u!114 &305
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 300}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b2191dfa508b489da30beb2e34fbac68, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1001 &400
 PrefabInstance:
   m_ObjectHideFlags: 0

@@ -52,6 +52,7 @@ Body (animations), on `AvatarController` > Avatar Animation Player:
 - `-` / `=` step through every shape key on the face mesh one by one.
 - `Backspace` clears all shapes.
 - `V` switches the camera between face close-up and full body, `F` swaps it to the other side.
+- Each animation entry has a **Speed** (1 = normal, 0.5 = half, 2 = double). You can change it during Play and see it immediately, but Play-mode edits are reset when you stop, so set the final values outside Play.
 - Rebind keys, shape names or animations in the lists on `AvatarController`. New
   Mixamo clips just need to go in `Assets/Resources/Animations/` and get an entry.
 

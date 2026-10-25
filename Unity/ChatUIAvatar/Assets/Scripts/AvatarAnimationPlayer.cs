@@ -13,7 +13,8 @@ using UnityEngine.Playables;
 /// avatar's skeleton (same bone names), since the rig is Generic.
 ///
 /// Looping entries play until another one is chosen. One-shot entries play
-/// once, then fade back to the default (first looping) entry.
+/// once, then fade back to the default (first looping) entry. Each entry has
+/// its own playback speed.
 /// </summary>
 public class AvatarAnimationPlayer : MonoBehaviour
 {
@@ -26,14 +27,20 @@ public class AvatarAnimationPlayer : MonoBehaviour
         [Tooltip("Take to use from the FBX. Empty picks 'mixamo.com', else the first clip.")]
         public string clipName;
         public bool loop;
+        [Tooltip("Playback speed: 1 is normal, 0.5 half speed, 2 double. Can be changed during Play.")]
+        [Min(0.01f)] public float speed = 1f;
 
         [NonSerialized] public AnimationClip clip;
 
-        public Entry(KeyCode key, string resourcePath, bool loop)
+        // Unity uses this when deserializing, so new fields get their defaults.
+        public Entry() { }
+
+        public Entry(KeyCode key, string resourcePath, bool loop, float speed = 1f)
         {
             this.key = key;
             this.resourcePath = resourcePath;
             this.loop = loop;
+            this.speed = speed;
         }
 
         public string Label => resourcePath.Substring(resourcePath.LastIndexOf('/') + 1);
@@ -115,6 +122,7 @@ public class AvatarAnimationPlayer : MonoBehaviour
             return;
 
         AnimationClipPlayable active = slots[activeSlot];
+        active.SetSpeed(current.speed);
         double time = active.GetTime();
         double length = current.clip.length;
         if (length > 0 && time >= length)
@@ -148,6 +156,7 @@ public class AvatarAnimationPlayer : MonoBehaviour
 
         slots[next] = AnimationClipPlayable.Create(graph, entry.clip);
         slots[next].SetApplyFootIK(false);
+        slots[next].SetSpeed(entry.speed);
         graph.Connect(slots[next], 0, mixer, next);
 
         // With nothing playing yet there is nothing to fade from.
@@ -212,6 +221,8 @@ public class AvatarAnimationPlayer : MonoBehaviour
             string text = e.clip == null ? $"<color=#ff8080>{e.Label} (missing)</color>" : e.Label;
             if (!e.loop)
                 text += " (once)";
+            if (!Mathf.Approximately(e.speed, 1f))
+                text += $" x{e.speed:0.##}";
             lines.AppendLine(e == current ? $"<b>[{e.key}] {text}</b>" : $"[{e.key}] {text}");
         }
 

@@ -18,7 +18,7 @@ public class AvatarModelPostprocessor : AssetPostprocessor
 
     const string TexturedShader = "ChatUI/Unlit Texture Double Sided";
 
-    public override uint GetVersion() => 2;
+    public override uint GetVersion() => 3;
 
     void OnPreprocessTexture()
     {

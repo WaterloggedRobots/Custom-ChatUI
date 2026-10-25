@@ -11,7 +11,8 @@ using UnityEngine;
 /// L toggles it on and off.
 ///
 /// Body Turn also rotates the whole avatar a little toward the camera, so she
-/// keeps roughly facing it when moved around the screen.
+/// keeps roughly facing it when moved around the screen. Rotate() adds a
+/// manual rotation on top (the desktop companion's Ctrl + right-drag).
 /// </summary>
 public class HeadLookAtCamera : MonoBehaviour
 {
@@ -54,6 +55,8 @@ public class HeadLookAtCamera : MonoBehaviour
     float activeWeight;
     bool active = true;
     Quaternion startRotation;
+    Quaternion bodyYaw;
+    Quaternion userRotation = Quaternion.identity;
 
     void Start()
     {
@@ -82,6 +85,7 @@ public class HeadLookAtCamera : MonoBehaviour
         }
 
         startRotation = avatarRoot.rotation;
+        bodyYaw = startRotation;
 
         // Start runs before the first animation frame, so this is the rest pose.
         Vector3 forward = characterFacesNegativeZ ? -avatarRoot.forward : avatarRoot.forward;
@@ -98,21 +102,36 @@ public class HeadLookAtCamera : MonoBehaviour
     }
 
     // In Update, before the Animator runs, so this frame's pose already
-    // includes the turn. Only yaw, so she stays upright.
+    // includes the turn. Only yaw, so she stays upright unless rotated by hand.
     void TurnBody()
     {
-        if (lookTarget == null)
-            return;
-
-        Vector3 toTarget = lookTarget.position - avatarRoot.position;
+        Vector3 toTarget = lookTarget != null ? lookTarget.position - avatarRoot.position : Vector3.zero;
         toTarget.y = 0f;
         if (toTarget.sqrMagnitude < 1e-6f)
+        {
+            avatarRoot.rotation = userRotation * bodyYaw;
             return;
+        }
 
         Quaternion facing = Quaternion.LookRotation(characterFacesNegativeZ ? -toTarget : toTarget, Vector3.up);
         Quaternion target = Quaternion.Slerp(startRotation, facing, bodyTurn);
         float t = bodyTurnSmoothing <= 0f ? 1f : 1f - Mathf.Exp(-bodyTurnSmoothing * Time.deltaTime);
-        avatarRoot.rotation = Quaternion.Slerp(avatarRoot.rotation, target, t);
+        bodyYaw = Quaternion.Slerp(bodyYaw, target, t);
+        avatarRoot.rotation = userRotation * bodyYaw;
+    }
+
+    /// <summary>
+    /// Adds a world-space rotation on top of the body turn, e.g. from the
+    /// desktop companion's Ctrl + right-drag.
+    /// </summary>
+    public void Rotate(Quaternion rotation)
+    {
+        userRotation = rotation * userRotation;
+    }
+
+    public void ResetRotation()
+    {
+        userRotation = Quaternion.identity;
     }
 
     void LateUpdate()

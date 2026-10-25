@@ -60,6 +60,14 @@ public class AvatarAnimationPlayer : MonoBehaviour
 
     public bool showOverlay = true;
 
+    [Header("Keep In Place")]
+    [Tooltip("Stop animations moving her forward and back (along her own Z axis).")]
+    public bool lockZ = true;
+    [Tooltip("Stop animations moving her sideways (along her own X axis).")]
+    public bool lockX;
+    [Tooltip("Stop animations moving her up and down. Off by default, since sitting or getting up needs it.")]
+    public bool lockY;
+
     public List<Entry> entries = new List<Entry>
     {
         new Entry(KeyCode.F1, "Animations/Happy Idle", true),
@@ -81,6 +89,8 @@ public class AvatarAnimationPlayer : MonoBehaviour
     Vector2 scroll;
     GUIStyle rowStyle;
     GUIStyle activeRowStyle;
+    Transform hips;
+    Vector3 restHipsLocal;
 
     void Start()
     {
@@ -93,6 +103,12 @@ public class AvatarAnimationPlayer : MonoBehaviour
             return;
         }
         animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+        animator.applyRootMotion = false;
+
+        // Start runs before the first animation frame, so this is the rest pose.
+        hips = animator.isHuman ? animator.GetBoneTransform(HumanBodyBones.Hips) : null;
+        if (hips != null)
+            restHipsLocal = animator.transform.InverseTransformPoint(hips.position);
 
         foreach (Entry e in entries)
         {
@@ -153,6 +169,21 @@ public class AvatarAnimationPlayer : MonoBehaviour
             mixer.SetInputWeight(activeSlot, fade);
             mixer.SetInputWeight(1 - activeSlot, 1f - fade);
         }
+    }
+
+    // After the Animator has posed her, pull the hips back to their rest
+    // position on the locked axes, so clips that walk or step play in place.
+    void LateUpdate()
+    {
+        if (hips == null || !(lockX || lockY || lockZ))
+            return;
+
+        Transform root = animator.transform;
+        Vector3 local = root.InverseTransformPoint(hips.position);
+        if (lockX) local.x = restHipsLocal.x;
+        if (lockY) local.y = restHipsLocal.y;
+        if (lockZ) local.z = restHipsLocal.z;
+        hips.position = root.TransformPoint(local);
     }
 
     /// <summary>Crossfades to an entry. Also usable from other scripts.</summary>

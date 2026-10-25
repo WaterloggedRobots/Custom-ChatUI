@@ -21,8 +21,9 @@ using UnityEngine;
 /// ChatUI > Build Desktop Companion, which also sets the player settings
 /// this needs (DXGI flip model off, windowed, run in background).
 ///
-/// In the companion: right-drag her to move her, scroll over her to resize,
-/// Tab hides or shows the panels, Ctrl+Q quits.
+/// In the companion: right-drag her to move her, Ctrl + right-drag to rotate
+/// her, scroll over her to resize, Ctrl+R resets the rotation, Tab hides or
+/// shows the panels, Ctrl+Q quits.
 /// </summary>
 [RequireComponent(typeof(Camera))]
 public class DesktopCompanionWindow : MonoBehaviour
@@ -40,6 +41,9 @@ public class DesktopCompanionWindow : MonoBehaviour
 
     public Vector2 scaleRange = new Vector2(0.3f, 3f);
 
+    [Tooltip("Degrees she rotates per pixel of Ctrl + right-drag.")]
+    public float rotateSpeed = 0.4f;
+
     public KeyCode togglePanelsKey = KeyCode.Tab;
 
     static readonly Color KeyColor = new Color(1f, 0f, 1f, 1f);
@@ -49,7 +53,10 @@ public class DesktopCompanionWindow : MonoBehaviour
     Texture2D pixel;
     bool overAvatar;
     bool dragging;
+    bool rotating;
     Vector3 lastDragWorld;
+    Vector3 lastMouse;
+    HeadLookAtCamera look;
 
     void Start()
     {
@@ -57,6 +64,7 @@ public class DesktopCompanionWindow : MonoBehaviour
         var face = FindObjectOfType<BlendShapeKeyController>();
         if (face != null && face.target != null)
             avatarRoot = face.target.transform.root;
+        look = FindObjectOfType<HeadLookAtCamera>();
 
 #if UNITY_STANDALONE_WIN && !UNITY_EDITOR
         cam.clearFlags = CameraClearFlags.SolidColor;
@@ -101,20 +109,40 @@ public class DesktopCompanionWindow : MonoBehaviour
         if (avatarRoot == null)
             return;
 
+        bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+
         if (Input.GetMouseButtonDown(1) && overAvatar)
         {
             dragging = true;
+            rotating = ctrl;
             lastDragWorld = MouseOnAvatarPlane();
+            lastMouse = Input.mousePosition;
         }
         if (Input.GetMouseButtonUp(1))
             dragging = false;
 
-        if (dragging)
+        if (dragging && rotating)
+        {
+            // Sideways turns her around the vertical axis, up and down tilts
+            // her toward or away from the camera.
+            Vector3 delta = Input.mousePosition - lastMouse;
+            lastMouse = Input.mousePosition;
+            Quaternion turn = Quaternion.AngleAxis(-delta.x * rotateSpeed, Vector3.up)
+                            * Quaternion.AngleAxis(delta.y * rotateSpeed, cam.transform.right);
+            if (look != null && look.isActiveAndEnabled)
+                look.Rotate(turn);
+            else
+                avatarRoot.rotation = turn * avatarRoot.rotation;
+        }
+        else if (dragging)
         {
             Vector3 now = MouseOnAvatarPlane();
             avatarRoot.position += now - lastDragWorld;
             lastDragWorld = now;
         }
+
+        if (ctrl && Input.GetKeyDown(KeyCode.R) && look != null)
+            look.ResetRotation();
 
         float wheel = Input.mouseScrollDelta.y;
         if (overAvatar && Mathf.Abs(wheel) > 0.01f)

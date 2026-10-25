@@ -398,7 +398,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2069b8381f6a4b5aaddf8a597d6e0777, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  doubleSidedShader: {fileID: 4800000, guid: f697210c0cab44c891da9ba1850e799f, type: 3}
+  doubleSidedShader: {fileID: 4800000, guid: 88d7d799669748909f7b95f0c2c8b7da, type: 3}
   fallbackTexture: {fileID: 2800000, guid: f5f512b310472294daad42e1c251b46c, type: 3}
   avatarRoot: {fileID: 0}
 --- !u!114 &305

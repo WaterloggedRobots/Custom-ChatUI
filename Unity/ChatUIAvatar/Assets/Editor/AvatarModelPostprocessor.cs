@@ -13,9 +13,9 @@ using UnityEngine;
 public class AvatarModelPostprocessor : AssetPostprocessor
 {
     const string ModelsFolder = "Assets/Models/";
-    const string TexturedShader = "ChatUI/Unlit Texture Double Sided";
+    const string TexturedShader = "ChatUI/Toon Double Sided";
 
-    public override uint GetVersion() => 4;
+    public override uint GetVersion() => 5;
 
     void OnPreprocessTexture()
     {

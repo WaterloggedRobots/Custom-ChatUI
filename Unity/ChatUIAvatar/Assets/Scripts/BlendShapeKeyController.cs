@@ -140,6 +140,19 @@ public class BlendShapeKeyController : MonoBehaviour
     /// <summary>Shared show/hide switch for the on-screen panels (Tab in desktop companion mode).</summary>
     public static bool PanelsVisible = true;
 
+    /// <summary>Draw panels on a solid background (needed when the window uses a color key).</summary>
+    public static bool OpaquePanels;
+
+    public static void DrawPanelBackground(Rect rect)
+    {
+        if (!OpaquePanels)
+            return;
+        Color previous = GUI.color;
+        GUI.color = new Color(0.16f, 0.16f, 0.19f, 1f);
+        GUI.DrawTexture(rect, Texture2D.whiteTexture);
+        GUI.color = previous;
+    }
+
     void Update()
     {
         if (TypingInUI)
@@ -302,6 +315,7 @@ public class BlendShapeKeyController : MonoBehaviour
         if (Event.current.type == EventType.MouseDown && !panel.Contains(Event.current.mousePosition))
             GUIUtility.keyboardControl = 0;
 
+        DrawPanelBackground(panel);
         GUILayout.BeginArea(panel, GUI.skin.box);
 
         GUILayout.BeginHorizontal();

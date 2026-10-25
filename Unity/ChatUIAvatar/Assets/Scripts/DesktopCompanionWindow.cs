@@ -9,6 +9,13 @@ using UnityEngine;
 /// mouse clicks pass through to the desktop everywhere except on the avatar
 /// and the on-screen panels.
 ///
+/// Two ways to make the background see-through:
+/// - ColorKey (default): the background is cleared to magenta and Windows
+///   hides that exact color and lets clicks through it. Works on any GPU and
+///   driver; anti-aliasing is turned off so edges don't pick up a pink fringe.
+/// - Alpha: Windows composites the window using the rendered alpha. Smoother
+///   edges, but some systems show a black or white background instead.
+///
 /// Only takes effect in a Windows standalone build; in the editor it does
 /// nothing, so the scene keeps its normal background. Build with
 /// ChatUI > Build Desktop Companion, which also sets the player settings
@@ -20,6 +27,11 @@ using UnityEngine;
 [RequireComponent(typeof(Camera))]
 public class DesktopCompanionWindow : MonoBehaviour
 {
+    public enum Transparency { ColorKey, Alpha }
+
+    [Tooltip("ColorKey works everywhere; try Alpha for smoother edges if it shows the desktop correctly on your PC.")]
+    public Transparency transparency = Transparency.ColorKey;
+
     [Tooltip("How much of the screen height she fills at start.")]
     [Range(0.1f, 1f)] public float startFill = 0.45f;
 
@@ -29,6 +41,8 @@ public class DesktopCompanionWindow : MonoBehaviour
     public Vector2 scaleRange = new Vector2(0.3f, 3f);
 
     public KeyCode togglePanelsKey = KeyCode.Tab;
+
+    static readonly Color KeyColor = new Color(1f, 0f, 1f, 1f);
 
     Camera cam;
     Transform avatarRoot;
@@ -46,8 +60,16 @@ public class DesktopCompanionWindow : MonoBehaviour
 
 #if UNITY_STANDALONE_WIN && !UNITY_EDITOR
         cam.clearFlags = CameraClearFlags.SolidColor;
-        cam.backgroundColor = new Color(0f, 0f, 0f, 0f);
+        cam.backgroundColor = transparency == Transparency.ColorKey ? KeyColor : new Color(0f, 0f, 0f, 0f);
         cam.allowHDR = false;
+        if (transparency == Transparency.ColorKey)
+        {
+            // Blended edge pixels wouldn't match the key exactly and would show pink.
+            QualitySettings.antiAliasing = 0;
+            cam.allowMSAA = false;
+            // Semi-transparent panel backgrounds would blend with the key too.
+            BlendShapeKeyController.OpaquePanels = true;
+        }
 
         var framer = GetComponent<AvatarCameraFramer>();
         if (framer != null)
@@ -129,7 +151,10 @@ public class DesktopCompanionWindow : MonoBehaviour
                 if (x >= 0 && y >= 0 && x < Screen.width && y < Screen.height)
                 {
                     pixel.ReadPixels(new Rect(x, y, 1, 1), 0, 0, false);
-                    hit = pixel.GetPixel(0, 0).a >= hitAlpha;
+                    Color32 c = pixel.GetPixel(0, 0);
+                    hit = transparency == Transparency.ColorKey
+                        ? !(c.r == 255 && c.g == 0 && c.b == 255)
+                        : c.a >= hitAlpha * 255f;
                 }
             }
 
@@ -138,7 +163,10 @@ public class DesktopCompanionWindow : MonoBehaviour
             if (hit != overAvatar)
             {
                 overAvatar = hit;
-                SetWindowLong(window, GWL_EXSTYLE, hit ? WS_EX_LAYERED : WS_EX_LAYERED | WS_EX_TRANSPARENT);
+                // With a color key Windows already lets clicks through the
+                // keyed pixels, so only alpha mode toggles click-through.
+                if (transparency == Transparency.Alpha)
+                    SetWindowLong(window, GWL_EXSTYLE, hit ? WS_EX_LAYERED : WS_EX_LAYERED | WS_EX_TRANSPARENT);
             }
         }
     }
@@ -147,18 +175,28 @@ public class DesktopCompanionWindow : MonoBehaviour
 
     void MakeOverlayWindow()
     {
+        // One pixel short of the screen, so Windows doesn't treat it as a
+        // fullscreen game and bypass the desktop compositor.
         int width = Display.main.systemWidth;
-        int height = Display.main.systemHeight;
+        int height = Display.main.systemHeight - 1;
         Screen.SetResolution(width, height, FullScreenMode.Windowed);
 
         window = GetActiveWindow();
         SetWindowLong(window, GWL_STYLE, WS_POPUP | WS_VISIBLE);
-        SetWindowLong(window, GWL_EXSTYLE, WS_EX_LAYERED | WS_EX_TRANSPARENT);
 
-        // A negative margin extends the glass frame over the whole window, so
-        // DWM composites it using the alpha Unity renders.
-        var margins = new MARGINS { cxLeftWidth = -1 };
-        DwmExtendFrameIntoClientArea(window, ref margins);
+        if (transparency == Transparency.ColorKey)
+        {
+            SetWindowLong(window, GWL_EXSTYLE, WS_EX_LAYERED);
+            SetLayeredWindowAttributes(window, 0x00FF00FF, 0, LWA_COLORKEY);
+        }
+        else
+        {
+            SetWindowLong(window, GWL_EXSTYLE, WS_EX_LAYERED | WS_EX_TRANSPARENT);
+            // A negative margin extends the glass frame over the whole window,
+            // so DWM composites it using the alpha Unity renders.
+            var margins = new MARGINS { cxLeftWidth = -1, cxRightWidth = -1, cyTopHeight = -1, cyBottomHeight = -1 };
+            DwmExtendFrameIntoClientArea(window, ref margins);
+        }
 
         SetWindowPos(window, HWND_TOPMOST, 0, 0, width, height, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
     }
@@ -177,6 +215,7 @@ public class DesktopCompanionWindow : MonoBehaviour
     const uint WS_EX_TRANSPARENT = 0x00000020;
     const uint SWP_FRAMECHANGED = 0x0020;
     const uint SWP_SHOWWINDOW = 0x0040;
+    const uint LWA_COLORKEY = 0x00000001;
     static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
 
     [DllImport("user32.dll")] static extern IntPtr GetActiveWindow();
@@ -184,6 +223,7 @@ public class DesktopCompanionWindow : MonoBehaviour
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
     [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT point);
     [DllImport("user32.dll")] static extern bool ScreenToClient(IntPtr hWnd, ref POINT point);
+    [DllImport("user32.dll")] static extern bool SetLayeredWindowAttributes(IntPtr hWnd, uint crKey, byte bAlpha, uint dwFlags);
     [DllImport("dwmapi.dll")] static extern int DwmExtendFrameIntoClientArea(IntPtr hWnd, ref MARGINS margins);
 #endif
 }

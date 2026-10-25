@@ -228,7 +228,9 @@ public class AvatarAnimationPlayer : MonoBehaviour
 
         float width = 260f;
         float height = panelExpanded ? Mathf.Min(Screen.height - 20f, 50f + entries.Count * 24f) : 34f;
-        GUILayout.BeginArea(new Rect(Screen.width - width - 10, 10, width, height), GUI.skin.box);
+        var panel = new Rect(Screen.width - width - 10, 10, width, height);
+        BlendShapeKeyController.DrawPanelBackground(panel);
+        GUILayout.BeginArea(panel, GUI.skin.box);
 
         if (GUILayout.Button($"{(panelExpanded ? "\u25BC" : "\u25BA")} Animations ({entries.Count})"))
             panelExpanded = !panelExpanded;

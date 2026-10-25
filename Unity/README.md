@@ -78,5 +78,19 @@ to whatever is behind except on her and the panels.
 - `Tab` hides or shows the panels, `Ctrl+Q` (or Alt+F4) quits.
 - Everything else (shape keys, animations, head tracking) works as in the editor.
 
+Transparency defaults to **ColorKey** (the background is magenta and Windows
+hides that color), which works on any GPU. If you want smoother edges, set
+**Transparency** to **Alpha** on the camera's Desktop Companion Window
+component and rebuild; some PCs show a black or white background with it.
+
 This only happens in a Windows build. In the editor the scene keeps its normal
 background so you can keep working on it.
+
+## Look
+
+Her materials use `ChatUI/Toon Double Sided`: the flat palette colors plus a
+saturation/brightness/contrast boost, a soft tinted cel shadow from the
+Directional Light, and a rim light. Tune it live in Play mode under **Look**
+on `AvatarController` > Avatar Double Sided (Play-mode changes reset on stop,
+so copy the values you like afterwards). Rotate the Directional Light to move
+the shadow side.

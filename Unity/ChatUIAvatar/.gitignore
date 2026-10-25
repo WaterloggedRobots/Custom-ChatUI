@@ -22,3 +22,4 @@
 
 # Third-party avatar model: copy it in locally, don't publish it
 /Assets/Models/*.fbx
+/Assets/Resources/Animations/*.fbx

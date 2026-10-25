@@ -5,7 +5,8 @@ using UnityEngine;
 /// <summary>
 /// Drives blend shapes (shape keys) on the avatar's face from the keyboard.
 ///
-/// Number keys 1-0 (top row or numpad) toggle the shape bound to them.
+/// Number keys 1-0 (top row or numpad) toggle the shape bound to them,
+/// and Shift + number keys toggle a second bank.
 /// Minus / Equals step through every blend shape on the mesh one at a time,
 /// which is handy for finding names to bind. Backspace clears everything.
 ///
@@ -19,16 +20,19 @@ public class BlendShapeKeyController : MonoBehaviour
     {
         public KeyCode key;
         public KeyCode altKey;
+        [Tooltip("Only fires while Shift is held (and the plain key only fires without Shift).")]
+        public bool shift;
         [Tooltip("Blend shape name as it appears on the SkinnedMeshRenderer.")]
         public string blendShapeName;
 
         [NonSerialized] public int index = -1;
 
-        public Binding(KeyCode key, KeyCode altKey, string blendShapeName)
+        public Binding(KeyCode key, KeyCode altKey, string blendShapeName, bool shift = false)
         {
             this.key = key;
             this.altKey = altKey;
             this.blendShapeName = blendShapeName;
+            this.shift = shift;
         }
     }
 
@@ -64,9 +68,20 @@ public class BlendShapeKeyController : MonoBehaviour
         new Binding(KeyCode.Alpha8, KeyCode.Keypad8, "ou"),
         new Binding(KeyCode.Alpha9, KeyCode.Keypad9, "ee"),
         new Binding(KeyCode.Alpha0, KeyCode.Keypad0, "oh"),
+        new Binding(KeyCode.Alpha1, KeyCode.Keypad1, "joy", true),
+        new Binding(KeyCode.Alpha2, KeyCode.Keypad2, "smug", true),
+        new Binding(KeyCode.Alpha3, KeyCode.Keypad3, "pout", true),
+        new Binding(KeyCode.Alpha4, KeyCode.Keypad4, "cry", true),
+        new Binding(KeyCode.Alpha5, KeyCode.Keypad5, "sleepy", true),
+        new Binding(KeyCode.Alpha6, KeyCode.Keypad6, "embarrassed", true),
+        new Binding(KeyCode.Alpha7, KeyCode.Keypad7, "shocked", true),
+        new Binding(KeyCode.Alpha8, KeyCode.Keypad8, "annoyed", true),
+        new Binding(KeyCode.Alpha9, KeyCode.Keypad9, "grin", true),
+        new Binding(KeyCode.Alpha0, KeyCode.Keypad0, "furious", true),
     };
 
     float[] targetWeights;
+    float[] currentWeights;
     int browseIndex = -1;
     GUIStyle overlayStyle;
 
@@ -88,6 +103,7 @@ public class BlendShapeKeyController : MonoBehaviour
 
         Mesh mesh = target.sharedMesh;
         targetWeights = new float[mesh.blendShapeCount];
+        currentWeights = new float[mesh.blendShapeCount];
 
         var names = new List<string>();
         for (int i = 0; i < mesh.blendShapeCount; i++)
@@ -104,20 +120,23 @@ public class BlendShapeKeyController : MonoBehaviour
 
     void Update()
     {
+        bool shiftHeld = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+
         foreach (Binding b in bindings)
         {
             if (b.index < 0)
                 continue;
 
+            bool bankActive = b.shift == shiftHeld;
             if (toggleMode)
             {
-                if (Pressed(b))
+                if (bankActive && Pressed(b))
                     SetExpression(b.index, targetWeights[b.index] <= 0f);
             }
             else
             {
                 // Held keys combine, so exclusive mode doesn't apply here.
-                bool held = Input.GetKey(b.key) || (b.altKey != KeyCode.None && Input.GetKey(b.altKey));
+                bool held = bankActive && (Input.GetKey(b.key) || (b.altKey != KeyCode.None && Input.GetKey(b.altKey)));
                 if (held)
                     targetWeights[b.index] = onWeight;
                 else if (b.index != browseIndex)
@@ -131,13 +150,17 @@ public class BlendShapeKeyController : MonoBehaviour
             Browse(-1);
         if (Input.GetKeyDown(resetKey))
             ResetAll();
+    }
 
+    // Weights are written in LateUpdate so they win over any blend shape
+    // curves in the body animation, which the Animator applies after Update.
+    void LateUpdate()
+    {
         float step = transitionSpeed * Time.deltaTime;
         for (int i = 0; i < targetWeights.Length; i++)
         {
-            float current = target.GetBlendShapeWeight(i);
-            if (!Mathf.Approximately(current, targetWeights[i]))
-                target.SetBlendShapeWeight(i, Mathf.MoveTowards(current, targetWeights[i], step));
+            currentWeights[i] = Mathf.MoveTowards(currentWeights[i], targetWeights[i], step);
+            target.SetBlendShapeWeight(i, currentWeights[i]);
         }
     }
 
@@ -246,7 +269,7 @@ public class BlendShapeKeyController : MonoBehaviour
         var lines = new System.Text.StringBuilder();
         foreach (Binding b in bindings)
         {
-            string keyLabel = b.key.ToString().Replace("Alpha", "");
+            string keyLabel = (b.shift ? "Shift+" : "") + b.key.ToString().Replace("Alpha", "");
             bool active = b.index >= 0 && targetWeights[b.index] > 0f;
             string text = b.index < 0 ? $"<color=#ff8080>{b.blendShapeName} (missing)</color>" : b.blendShapeName;
             lines.AppendLine(active ? $"<b>[{keyLabel}] {text}</b>" : $"[{keyLabel}] {text}");
@@ -258,7 +281,8 @@ public class BlendShapeKeyController : MonoBehaviour
         lines.AppendLine($"[-/=] browse all: {browsing}");
         lines.AppendLine($"[{resetKey}] reset    mode: {(toggleMode ? "toggle" : "hold")}");
 
-        GUI.Box(new Rect(10, 10, 300, 22 * (bindings.Count + 4)), GUIContent.none);
-        GUI.Label(new Rect(20, 15, 290, 22 * (bindings.Count + 4)), lines.ToString(), overlayStyle);
+        float height = 19 * (bindings.Count + 4);
+        GUI.Box(new Rect(10, 10, 300, height), GUIContent.none);
+        GUI.Label(new Rect(20, 15, 290, height), lines.ToString(), overlayStyle);
     }
 }

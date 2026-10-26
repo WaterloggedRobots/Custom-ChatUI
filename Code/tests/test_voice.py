@@ -363,6 +363,25 @@ def test_settings_window_engine_hints(gui, monkeypatch):
     assert win.ui.ttsStatusLabel.text() == ""
 
 
+def test_switching_engines_drops_the_old_engines_voice(gui, monkeypatch):
+    import chat_settings
+    main, win, _ = gui
+    voices = {**VOICES, "voices": VOICES["voices"] + [
+        {"id": "default|en", "engine": "chatterbox", "language": "en", "name": "Default voice (en)"},
+        {"id": "Mio|en", "engine": "chatterbox", "language": "en", "name": "Mio (en)"}]}
+    monkeypatch.setattr(voice, "list_voices", lambda base_url, engine="": voices)
+    edge_voice = VOICES["voices"][0]["id"]
+    win.open_for("Talk", {**chat_settings.DEFAULTS, "TTS": True, "TTS Voice": edge_voice}, is_new=False)
+    combo = win.ui.ttsEngineCombo
+    combo.setCurrentIndex(combo.findData("chatterbox"))
+    combo.activated.emit(combo.currentIndex())
+    assert win.settings()["TTS Voice"] in ("", "default|en")
+    # A chat saved with that mix (before this fix) gets fixed when its settings open.
+    win.open_for("Talk", {**chat_settings.DEFAULTS, "TTS": True, "TTS Engine": "chatterbox",
+                          "TTS Voice": edge_voice}, is_new=False)
+    assert win.settings()["TTS Voice"] in ("", "default|en")
+
+
 def test_speaker_translation_is_sent_and_remembered(monkeypatch, tmp_path):
     import urllib.parse
     posts = []

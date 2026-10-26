@@ -88,7 +88,7 @@ class ChatSettings(QMainWindow):
         self.ui.importButton.clicked.connect(self.import_settings)
         self.ui.exportButton.clicked.connect(self.export_settings)
         self.ui.ttsCheck.toggled.connect(self.on_tts_toggled)
-        self.ui.ttsEngineCombo.activated.connect(lambda _: self._fill_languages())
+        self.ui.ttsEngineCombo.activated.connect(self.on_engine_chosen)
         self.ui.ttsLanguageCombo.activated.connect(lambda _: self._fill_voices())
         self.ui.ttsVoiceCombo.activated.connect(self.on_voice_chosen)
         self.ui.ttsTestButton.clicked.connect(self.test_voice)
@@ -354,6 +354,8 @@ class ChatSettings(QMainWindow):
         for v in voices:
             combo.addItem(v["name"], v["id"])
         known = any(v["id"] == self.tts_voice for v in self._voices())
+        if self.tts_voice and not known and self._other_engine(self.tts_voice):
+            self.tts_voice = ""          # left over from another engine: this one can't use it
         if self.tts_voice and not known:
             combo.addItem(f"{self.tts_voice} (not on the server)", self.tts_voice)
         index = combo.findData(self.tts_voice)
@@ -361,6 +363,18 @@ class ChatSettings(QMainWindow):
             index = 0
             self.tts_voice = combo.itemData(0) or ""
         combo.setCurrentIndex(index)
+
+    def _other_engine(self, voice_id) -> bool:
+        """True if the server lists `voice_id` under a different engine than the chosen one."""
+        engine = self.tts_engine()
+        return any(v["id"] == voice_id and v.get("engine") != engine
+                   for v in (self.voice_list or {}).get("voices", []))
+
+    def on_engine_chosen(self, _index):
+        """A voice belongs to one engine, so switching engines drops it unless the new one has it."""
+        if not any(v["id"] == self.tts_voice for v in self._voices()):
+            self.tts_voice = ""
+        self._fill_languages()
 
     def on_voice_chosen(self, index):
         self.tts_voice = self.ui.ttsVoiceCombo.itemData(index) or ""

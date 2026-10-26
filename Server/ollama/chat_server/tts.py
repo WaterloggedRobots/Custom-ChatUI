@@ -410,7 +410,10 @@ class _Chatterbox:
 
     def speak(self, text: str, voice: str) -> bytes:
         import numpy as np
-        name, _, lang = (voice or "default|en").partition("|")
+        if "|" not in (voice or ""):
+            # Not a Chatterbox voice (e.g. an Edge voice kept after switching engines): use the default.
+            voice = "default|en"
+        name, _, lang = voice.partition("|")
         lang = lang or "en"
         clip = None
         if name and name != "default":

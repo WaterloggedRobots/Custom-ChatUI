@@ -267,6 +267,9 @@ def test_chatterbox_voices_and_speech(client, fakes):
     assert multi.calls == [("你好。", {"language_id": "zh"})]
     r = client.post("/v1/audio/speech", json={"input": "Hi", "model": "chatterbox", "voice": "Nobody|en"})
     assert r.status_code == 404
+    # A voice from another engine (kept after switching) speaks with the default voice.
+    r = client.post("/v1/audio/speech", json={"input": "Hi", "model": "chatterbox", "voice": "en-US-AndrewNeural"})
+    assert r.status_code == 200 and en.calls[-1] == ("Hi", {})
 
 
 def test_split_sentences():

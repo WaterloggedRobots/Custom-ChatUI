@@ -393,7 +393,18 @@ class _Chatterbox:
         if Config.TTS_CHATTERBOX_DEVICE != "auto":
             return Config.TTS_CHATTERBOX_DEVICE
         import torch
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        if not torch.cuda.is_available():
+            return "cpu"
+        # A torch wheel only runs on the GPU generations it was built for (a new card
+        # needs a newer CUDA build): "no kernel image is available" otherwise.
+        major, minor = torch.cuda.get_device_capability()
+        built = torch.cuda.get_arch_list()
+        if built and f"sm_{major}{minor}" not in built:
+            log.warning("Chatterbox on CPU: this torch (%s) has no kernels for %s (sm_%d%d; built for %s). "
+                        "See 'Chatterbox on a new GPU' in the README.", torch.__version__,
+                        torch.cuda.get_device_name(), major, minor, " ".join(built))
+            return "cpu"
+        return "cuda"
 
     def model(self, multilingual: bool):
         key = "multi" if multilingual else "en"
@@ -404,7 +415,14 @@ class _Chatterbox:
                 from chatterbox.mtl_tts import ChatterboxMultilingualTTS as Model
             else:
                 from chatterbox.tts import ChatterboxTTS as Model
-            self.models[key] = Model.from_pretrained(device=device)
+            try:
+                self.models[key] = Model.from_pretrained(device=device)
+            except RuntimeError as e:
+                if device != "cuda" or Config.TTS_CHATTERBOX_DEVICE == "cuda":
+                    raise
+                log.warning("Chatterbox can't use the GPU (%s); loading it on the CPU", str(e).splitlines()[0])
+                device = "cpu"
+                self.models[key] = Model.from_pretrained(device=device)
             log.info("Chatterbox %s loaded on %s in %.0fs", key, device, time.time() - started)
         return self.models[key]
 

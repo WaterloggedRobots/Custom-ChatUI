@@ -202,6 +202,20 @@ GPU. Speed can't be changed for it.
 # TTS_PRELOAD=kokoro,chatterbox in .env loads it at start-up instead of on the first Play
 ```
 
+*Chatterbox on a new GPU.* `chatterbox-tts` installs a PyTorch built for
+CUDA 12.4, which has no code for the newest cards (RTX 50xx, `sm_120`):
+loading fails with "no kernel image is available for execution on the
+device". The server then logs a warning and runs Chatterbox on the CPU
+(slow). To use the GPU, check what torch was built for, then install a build
+for CUDA 12.8 (pip warns that chatterbox asked for an older torch; that's fine):
+
+```bash
+.venv/bin/python -c "import torch; print(torch.__version__, torch.cuda.get_device_name(), torch.cuda.get_device_capability(), torch.cuda.get_arch_list())"
+.venv/bin/pip install --upgrade torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+```
+
+`TTS_CHATTERBOX_DEVICE=cpu` in `.env` skips the GPU on purpose.
+
 **Piper**: light and offline, plainer voices; each voice is a file to fetch
 once into `voices/` (names at https://huggingface.co/rhasspy/piper-voices):
 

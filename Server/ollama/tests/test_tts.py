@@ -335,3 +335,37 @@ def test_voice_language():
     assert run(tts.voice_language("chatterbox", "Grandpa|ja")) == "ja"
     assert tts.language_name("zh-HK").startswith("spoken Cantonese")
     assert tts.language_name("fr-CA") == "French"
+
+
+def test_chatterbox_falls_back_to_the_cpu(monkeypatch):
+    import sys
+    import types
+
+    class Cuda:
+        arch = ["sm_80", "sm_90"]
+        is_available = staticmethod(lambda: True)
+        get_device_capability = staticmethod(lambda: (12, 0))
+        get_device_name = staticmethod(lambda: "RTX 5090")
+        get_arch_list = staticmethod(lambda: Cuda.arch)
+
+    torch = types.SimpleNamespace(cuda=Cuda, __version__="2.6.0+cu124")
+    loads = []
+
+    class Model:
+        @classmethod
+        def from_pretrained(cls, device):
+            loads.append(device)
+            if device == "cuda":
+                raise RuntimeError("CUDA error: no kernel image is available for execution on the device")
+            return cls()
+
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setitem(sys.modules, "chatterbox", types.ModuleType("chatterbox"))
+    monkeypatch.setitem(sys.modules, "chatterbox.tts", types.SimpleNamespace(ChatterboxTTS=Model))
+    monkeypatch.setattr(tts.Config, "TTS_CHATTERBOX_DEVICE", "auto")
+    box = tts._Chatterbox()
+    assert box.device() == "cpu"                       # torch has no sm_120 kernels
+    Cuda.arch = ["sm_90", "sm_120"]
+    assert box.device() == "cuda"
+    box.model(multilingual=False)                      # ...but loading still fails: retry on the CPU
+    assert loads == ["cuda", "cpu"]

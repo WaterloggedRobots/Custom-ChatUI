@@ -41,6 +41,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from . import sovits
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -77,20 +78,25 @@ HAVE_CHATTERBOX = importlib.util.find_spec("chatterbox") is not None
 ENGINE_NAMES = {"edge": "Microsoft Edge voices (online)",
                 "kokoro": "Kokoro (on the server, offline, natural)",
                 "chatterbox": "Chatterbox (on the server, most human, clones voices; GPU)",
-                "piper": "Piper (on the server, offline, light)"}
+                "piper": "Piper (on the server, offline, light)",
+                "gpt-sovits": "GPT-SoVITS (on the server, voices you train yourself; GPU)"}
 ENGINE_INSTALL = {"edge": "pip install edge-tts", "kokoro": "pip install kokoro-onnx",
-                  "chatterbox": "pip install chatterbox-tts", "piper": "pip install piper-tts"}
-ENGINE_SPEED = {"edge": True, "kokoro": True, "chatterbox": False, "piper": True}
+                  "chatterbox": "pip install chatterbox-tts", "piper": "pip install piper-tts",
+                  "gpt-sovits": "start GPT-SoVITS's api_v2.py on port 9880 (see the server README)"}
+ENGINE_SPEED = {"edge": True, "kokoro": True, "chatterbox": False, "piper": True, "gpt-sovits": True}
 SPEED_RANGE = (0.5, 2.0)
 
 
 def available() -> dict:
     return {"edge": edge_tts is not None, "kokoro": kokoro_onnx is not None,
-            "chatterbox": HAVE_CHATTERBOX, "piper": piper is not None}
+            "chatterbox": HAVE_CHATTERBOX, "piper": piper is not None, "gpt-sovits": sovits.up()}
 
 
 def not_available(engine: str) -> str:
     """Why `engine` can't speak, and what to do about it."""
+    if engine == "gpt-sovits":
+        return (f"GPT-SoVITS isn't running at {Config.TTS_SOVITS_URL}: on the server, "
+                f"{ENGINE_INSTALL[engine]}.")
     err = IMPORT_ERRORS.get(engine)
     pip = f"{sys.executable} -m pip install {ENGINE_INSTALL[engine].split()[-1]}"
     if err is None or (isinstance(err, ModuleNotFoundError)
@@ -515,6 +521,8 @@ async def voice_language(engine: str, voice: str) -> str:
         return KOKORO_LANGUAGES[voice[0]][0]
     if engine == "chatterbox":
         return (voice or "default|en").partition("|")[2] or "en"
+    if engine == "gpt-sovits":
+        return sovits.voice_language(voice)
     if engine == "piper":
         for v in piper_voices():
             if v["id"] == voice or not voice:
@@ -563,6 +571,7 @@ class DownloadRequest(BaseModel):
 @router.get("/v1/audio/voices")
 async def list_voices(engine: str = ""):
     """The engines and their voices, for the voice pickers in Chat Settings."""
+    await sovits.check(force=True)
     have = available()
     engines = [{"id": e, "name": ENGINE_NAMES[e], "available": ok, "install": ENGINE_INSTALL[e],
                 "speed": ENGINE_SPEED[e]} for e, ok in have.items()]
@@ -579,6 +588,8 @@ async def list_voices(engine: str = ""):
         voices += chatterbox_voices()
     if engine in ("", "piper"):
         voices += piper_voices()
+    if engine in ("", "gpt-sovits"):
+        voices += sovits.voice_list()
     return {"engines": engines, "default_engine": default_engine(),
             "default_voice": {"edge": Config.TTS_VOICE}, "voices": voices, "errors": errors}
 
@@ -589,6 +600,8 @@ async def text_to_speech(req: SpeechRequest, request: Request):
     engine = (req.model or req.engine or default_engine() or "").lower()
     if engine not in ENGINE_NAMES:
         raise HTTPException(400, f"Unknown speech engine {engine!r}; use one of {', '.join(ENGINE_NAMES)}")
+    if engine == "gpt-sovits":
+        await sovits.check()
     if not available()[engine]:
         raise HTTPException(503, not_available(engine))
     text = clean_for_speech(req.input or req.text)[:Config.TTS_MAX_CHARS]
@@ -612,7 +625,9 @@ async def text_to_speech(req: SpeechRequest, request: Request):
             log.info("TTS translated into %s with %s in %.1fs", language, model, time.time() - started)
             headers["X-Spoken-Language"] = language
             headers["X-Spoken-Text"] = urllib.parse.quote(text[:3000])
-    if engine == "edge":
+    if engine == "gpt-sovits":
+        audio, media = await sovits.speak(text, req.voice, speed), "audio/wav"
+    elif engine == "edge":
         try:
             audio, media = await edge_speak(text, req.voice, speed), "audio/mpeg"
         except HTTPException:

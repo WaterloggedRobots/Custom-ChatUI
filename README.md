@@ -86,6 +86,7 @@ The server makes the audio, so each chat's choice goes to it with every request:
   - *Kokoro*: runs on the server with no internet, natural voices (★ marks the best ones), English, Mandarin, Japanese and more. One `pip install` on the server; its model downloads by itself.
   - *Chatterbox*: runs on the server, the most human-sounding, and can copy anyone's voice from a short recording you drop into `Server/ollama/voices/chatterbox/`. Best with an NVIDIA GPU; speed is fixed.
   - *Piper*: runs on the server, very light, plainer voices that are downloaded one by one.
+  - *GPT-SoVITS*: runs on the server's GPU as its own program, with voices you **train** from a few minutes of someone's recordings; the closest to a real person, and strong in Japanese, Chinese and Cantonese. See *GPT-SoVITS* in `Server/ollama/README.md`.
 
   Engines the server doesn't have yet say so, with the command to install them (see *Text to speech* in `Server/ollama/README.md`).
 - **Language** narrows the voice list; **Voice** picks the speaker, and **▶ Test** plays a short line in that voice.

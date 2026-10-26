@@ -173,7 +173,7 @@ def client():
 def test_voice_list(client, fakes):
     body = client.get("/v1/audio/voices").json()
     engines = {e["id"]: e for e in body["engines"]}
-    assert list(engines) == ["edge", "kokoro", "chatterbox", "piper"]
+    assert list(engines) == ["edge", "kokoro", "chatterbox", "piper", "gpt-sovits"]
     assert engines["edge"]["available"] and engines["piper"]["available"]
     assert engines["chatterbox"]["install"] == "pip install chatterbox-tts" and engines["chatterbox"]["speed"] is False
     ids = [(v["engine"], v["id"], v["language"]) for v in body["voices"]]

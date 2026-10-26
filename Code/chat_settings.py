@@ -18,7 +18,7 @@ from pathlib import Path
 
 WEB_MODES = ("auto", "on", "off")
 TEMPERATURE_RANGE = (0.0, 2.0)
-TTS_ENGINES = ("edge", "kokoro", "chatterbox", "piper")   # the server's; it may add more
+TTS_ENGINES = ("edge", "kokoro", "chatterbox", "piper", "gpt-sovits")   # the server's; it may add more
 TTS_SPEED_RANGE = (0.5, 2.0)
 IMAGE_MODES = ("auto", "on")           # auto: the model decides when to draw; on: a picture with every reply
 TOOL_KEYS = {"files": "Tool Files", "git": "Tool Git", "run": "Tool Run"}   # local_tools group -> setting

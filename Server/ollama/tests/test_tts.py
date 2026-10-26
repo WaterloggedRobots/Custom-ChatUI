@@ -214,6 +214,12 @@ def test_errors(client, fakes, monkeypatch):
     monkeypatch.setattr(tts, "edge_tts", None)
     r = client.post("/v1/audio/speech", json={"input": "hi", "model": "edge"})
     assert r.status_code == 503 and "edge-tts" in r.json()["error"]["message"]
+    assert "isn't installed" in r.json()["error"]["message"]
+    # Installed but broken (e.g. onnxruntime missing): the 503 says why.
+    monkeypatch.setattr(tts, "kokoro_onnx", None)
+    monkeypatch.setitem(tts.IMPORT_ERRORS, "kokoro", ImportError("libonnxruntime.so: cannot open"))
+    msg = client.post("/v1/audio/speech", json={"input": "hi", "model": "kokoro"}).json()["error"]["message"]
+    assert "fails to load" in msg and "libonnxruntime" in msg
 
 
 def test_download_rejects_odd_names(client, fakes):

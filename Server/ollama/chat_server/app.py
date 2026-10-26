@@ -66,7 +66,9 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
             "message": f"Ollama not reachable at {Config.OLLAMA_URL}: {e or type(e).__name__}", "type": "ollama_unreachable"}})
 
     @app.exception_handler(HTTPException)
-    async def _http_error(_, e: HTTPException):
+    async def _http_error(request, e: HTTPException):
+        # The access log only shows the status code; put the reason next to it.
+        log.warning("%s %s -> %s: %s", request.method, request.url.path, e.status_code, e.detail)
         return JSONResponse(status_code=e.status_code, content={"error": {"message": str(e.detail), "type": "request_error"}})
 
     @app.exception_handler(AttachmentError)

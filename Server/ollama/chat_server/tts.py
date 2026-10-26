@@ -29,6 +29,7 @@ import io
 import json
 import logging
 import re
+import sys
 import threading
 import time
 import urllib.parse
@@ -45,22 +46,30 @@ from .config import Config
 log = logging.getLogger(__name__)
 router = APIRouter()
 
+IMPORT_ERRORS = {}              # engine -> why its package didn't import, shown with the 503
+
 try:
     import edge_tts
-except ImportError:
+except Exception as e:
     edge_tts = None
+    IMPORT_ERRORS["edge"] = e
 
 try:
     import piper
 except Exception as e:          # onnxruntime can fail to import on odd systems
     piper = None
-    log.info("piper not available: %s", e)
+    IMPORT_ERRORS["piper"] = e
 
 try:
     import kokoro_onnx
 except Exception as e:
     kokoro_onnx = None
-    log.info("kokoro not available: %s", e)
+    IMPORT_ERRORS["kokoro"] = e
+
+for _engine, _err in IMPORT_ERRORS.items():
+    if not isinstance(_err, ModuleNotFoundError) or _err.name not in ("edge_tts", "piper", "kokoro_onnx"):
+        # Installed, but it broke on import (a missing dependency, say): say why at start-up.
+        log.warning("%s is installed but can't be imported: %s: %s", _engine, type(_err).__name__, _err)
 
 # Chatterbox pulls in torch, which takes seconds to import: only look for it here.
 HAVE_CHATTERBOX = importlib.util.find_spec("chatterbox") is not None
@@ -78,6 +87,18 @@ SPEED_RANGE = (0.5, 2.0)
 def available() -> dict:
     return {"edge": edge_tts is not None, "kokoro": kokoro_onnx is not None,
             "chatterbox": HAVE_CHATTERBOX, "piper": piper is not None}
+
+
+def not_available(engine: str) -> str:
+    """Why `engine` can't speak, and what to do about it."""
+    err = IMPORT_ERRORS.get(engine)
+    pip = f"{sys.executable} -m pip install {ENGINE_INSTALL[engine].split()[-1]}"
+    if err is None or (isinstance(err, ModuleNotFoundError)
+                       and err.name in ("edge_tts", "piper", "kokoro_onnx", "chatterbox")):
+        return (f"{ENGINE_NAMES[engine]} isn't installed in the server's Python. On the server run "
+                f"{pip}, then restart the server.")
+    return (f"{ENGINE_NAMES[engine]} is installed but fails to load: {type(err).__name__}: {err}. "
+            f"Reinstalling it may help ({pip} --force-reinstall), then restart the server.")
 
 
 def to_wav(samples, rate: int) -> bytes:
@@ -395,7 +416,10 @@ class _Chatterbox:
         if name and name != "default":
             clip = next((c for c in chatterbox_clips() if c.stem == name), None)
             if clip is None:
-                raise HTTPException(404, f"The Chatterbox voice clip {name!r} isn't in {Config.TTS_CHATTERBOX_DIR}")
+                found = ", ".join(c.name for c in chatterbox_clips()) or "no clips"
+                raise HTTPException(404, f"The Chatterbox voice clip {name!r} isn't in {Config.TTS_CHATTERBOX_DIR} "
+                                         f"(it has {found}). Folder names are case-sensitive on Linux; "
+                                         "after adding a clip, reopen Chat Settings to reload the voice list.")
         pieces = []
         with self.lock:
             model = self.model(multilingual=lang != "en")
@@ -545,7 +569,7 @@ async def text_to_speech(req: SpeechRequest, request: Request):
     if engine not in ENGINE_NAMES:
         raise HTTPException(400, f"Unknown speech engine {engine!r}; use one of {', '.join(ENGINE_NAMES)}")
     if not available()[engine]:
-        raise HTTPException(503, f"{ENGINE_NAMES[engine]} isn't installed on the server; {ENGINE_INSTALL[engine]}")
+        raise HTTPException(503, not_available(engine))
     text = clean_for_speech(req.input or req.text)[:Config.TTS_MAX_CHARS]
     if not text:
         raise HTTPException(400, "There is nothing to read aloud in this text")

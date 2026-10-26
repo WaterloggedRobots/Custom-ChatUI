@@ -137,11 +137,21 @@ public class AvatarAnimationPlayer : MonoBehaviour
                 defaultEntry = e;
         }
 #if UNITY_EDITOR
-        RefreshModelClips();
+        try
+        {
+            RefreshModelClips();
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"AvatarAnimationPlayer: couldn't read the animations inside the avatar's FBX: {e.Message}");
+        }
 #endif
+        int before = entries.Count;
         AddClips(modelClips, "Model");
+        int fromModel = entries.Count - before;
         if (autoAddClips)
             AddClips(Resources.LoadAll<AnimationClip>(autoAddFolder), autoAddFolder);
+        Debug.Log($"AvatarAnimationPlayer: {entries.Count} animations, {fromModel} of them from the avatar's FBX.");
 
         graph = PlayableGraph.Create("AvatarAnimation");
         graph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
@@ -399,13 +409,18 @@ public class AvatarAnimationPlayer : MonoBehaviour
             modelClips = found;
     }
 
-    /// <summary>Editor only: the animation takes inside the model asset a scene object was made from.</summary>
-    public static AnimationClip[] ModelClipsInEditor(GameObject sceneObject)
+    /// <summary>Editor only: the animation takes inside the FBX an avatar in the scene was made from.</summary>
+    public static AnimationClip[] ModelClipsInEditor(GameObject avatarRoot)
     {
-        if (sceneObject == null)
+        if (avatarRoot == null)
             return null;
-        GameObject source = UnityEditor.PrefabUtility.GetCorrespondingObjectFromOriginalSource(sceneObject);
-        string path = source != null ? UnityEditor.AssetDatabase.GetAssetPath(source) : null;
+        // The skinned mesh is a sub-asset of the FBX, so its asset path is the
+        // FBX itself. Unlike the prefab link, this also works in Play mode and
+        // after the instance is unpacked.
+        string path = avatarRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true)
+            .Where(r => r.sharedMesh != null)
+            .Select(r => UnityEditor.AssetDatabase.GetAssetPath(r.sharedMesh))
+            .FirstOrDefault(p => !string.IsNullOrEmpty(p));
         if (string.IsNullOrEmpty(path))
             return null;
         return UnityEditor.AssetDatabase.LoadAllAssetsAtPath(path)

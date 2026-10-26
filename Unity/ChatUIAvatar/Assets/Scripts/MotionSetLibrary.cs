@@ -48,6 +48,9 @@ public class MotionSetLibrary : MonoBehaviour
         [Tooltip("Body animation. Empty keeps whatever is playing.")]
         [AnimationName] public string animation;
 
+        [Tooltip("After a play-once Animation ends, carry on looping this one, e.g. sit down then sitting. The set then lasts until another plays.")]
+        [AnimationName] public string thenLoop;
+
         [Tooltip("Playback speed for this set: 1 is normal, 0.5 half speed, 2 double.")]
         [Min(0.01f)] public float speed = 1f;
 
@@ -60,6 +63,12 @@ public class MotionSetLibrary : MonoBehaviour
         public List<ShapeWeight> shapeKeys = new List<ShapeWeight>();
 
         public MotionSet() { }
+
+        public MotionSet Then(string loopAnimation)
+        {
+            thenLoop = loopAnimation;
+            return this;
+        }
 
         public MotionSet(string name, string description, string animation, LoopMode loop, float duration, params ShapeWeight[] shapeKeys)
         {
@@ -79,7 +88,7 @@ public class MotionSetLibrary : MonoBehaviour
 
     public List<MotionSet> motionSets = new List<MotionSet>
     {
-        new MotionSet("idle", "Relaxed, neutral standing.", "Happy Idle", LoopMode.Loop, 0f),
+        new MotionSet("idle", "Relaxed, neutral standing.", "idle breathe", LoopMode.Loop, 0f),
         new MotionSet("happy", "Pleased or excited about something.", "Excited", LoopMode.Once, 0f,
             new ShapeWeight("happy")),
         new MotionSet("joyful", "Very happy, celebrating.", "Joyful Jump", LoopMode.Once, 0f,
@@ -112,10 +121,31 @@ public class MotionSetLibrary : MonoBehaviour
             new ShapeWeight("playful")),
         new MotionSet("adoring", "Affectionate, looking at someone she likes.", "", LoopMode.AnimationDefault, 6f,
             new ShapeWeight("adoring")),
-        new MotionSet("fighting stance", "Playfully ready to fight.", "FightingIdle_mixamo", LoopMode.Loop, 0f),
-        new MotionSet("sit", "Sitting down, relaxed.", "Female Sitting Pose", LoopMode.Loop, 0f),
-        new MotionSet("sleepy", "Tired, lying down.", "Female Laying Pose", LoopMode.Loop, 0f,
-            new ShapeWeight("sleepy")),
+        new MotionSet("nod", "Agreeing, yes.", "nod", LoopMode.Once, 0f),
+        new MotionSet("head shake", "Disagreeing, no.", "head shake", LoopMode.Once, 0f),
+        new MotionSet("head tilt", "Curious or puzzled.", "head tilt", LoopMode.Once, 0f,
+            new ShapeWeight("smile soft")),
+        new MotionSet("wave", "Saying hello or goodbye.", "wave", LoopMode.Once, 0f,
+            new ShapeWeight("happy")),
+        new MotionSet("bow", "Polite greeting or thanks.", "bow", LoopMode.Once, 0f),
+        new MotionSet("shrug", "Not sure, who knows.", "shrug", LoopMode.Once, 0f),
+        new MotionSet("shy", "Shy and fidgety.", "shy fidget", LoopMode.Once, 0f,
+            new ShapeWeight("embarrassed")),
+        new MotionSet("hmph", "Tsundere huff, looking away.", "hmph look away", LoopMode.Once, 0f,
+            new ShapeWeight("tsun hmph")),
+        new MotionSet("arms crossed", "Unimpressed, waiting.", "arms crossed", LoopMode.Once, 0f,
+            new ShapeWeight("annoyed")),
+        new MotionSet("hand on hip", "Casual and confident.", "left hand on hip", LoopMode.Once, 0f,
+            new ShapeWeight("smug")),
+        new MotionSet("hands on hips", "Proud or scolding.", "both hands on hips", LoopMode.Once, 0f),
+        new MotionSet("lean in", "Leaning in, teasing.", "lean forward hands on hips", LoopMode.Once, 0f,
+            new ShapeWeight("playful")),
+        new MotionSet("sit", "Sits down on the floor and stays sitting.", "sit down on floor", LoopMode.Once, 0f).Then("sit on floor loop"),
+        new MotionSet("stand up", "Stands up from sitting on the floor.", "stand up from floor", LoopMode.Once, 0f),
+        new MotionSet("lie down", "Lies down on the floor and stays there.", "lay down on floor", LoopMode.Once, 0f).Then("lay on floor loop"),
+        new MotionSet("sleepy", "Tired, lies down on the floor.", "lay down on floor", LoopMode.Once, 0f,
+            new ShapeWeight("sleepy")).Then("lay on floor loop"),
+        new MotionSet("get up", "Gets up from lying on the floor.", "get up from floor", LoopMode.Once, 0f),
     };
 
     /// <summary>Bottom edge of the motion set panel, so the animation panel can sit under it.</summary>
@@ -231,12 +261,26 @@ public class MotionSetLibrary : MonoBehaviour
         return motionSets.Find(s => string.Equals(s.name, setName, StringComparison.OrdinalIgnoreCase));
     }
 
-    // A play-once animation that belongs to the current set ends the set,
-    // unless the set has its own duration.
+    // A play-once animation that belongs to the current set either chains
+    // into the set's Then Loop animation or ends the set (unless the set has
+    // its own duration).
     void OnClipFinished(AvatarAnimationPlayer.Entry entry)
     {
-        if (Current != null && entry == setEntry && Current.duration <= 0f)
+        if (Current == null || entry != setEntry)
+            return;
+
+        AvatarAnimationPlayer.Entry next = string.IsNullOrEmpty(Current.thenLoop) ? null : player.Find(Current.thenLoop);
+        if (next?.clip != null)
+        {
+            setEntry = next;
+            startingClip = true;
+            player.Play(next, Current.speed, true);
+            startingClip = false;
+        }
+        else if (Current.duration <= 0f)
+        {
             PlayDefault();
+        }
     }
 
     // A clip picked by hand (panel or F-keys) takes over from the set's

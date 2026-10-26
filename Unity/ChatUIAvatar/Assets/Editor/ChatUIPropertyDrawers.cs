@@ -44,13 +44,15 @@ public class AnimationNameDrawer : PropertyDrawer
 
     public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
     {
-        string[] names = AssetDatabase.IsValidFolder(Folder)
+        // The avatar's own animations first, then the FBXs in the animation folder.
+        var modelClips = AvatarAnimationPlayer.ModelClipsInEditor(AvatarAnimationPlayer.FindAvatarRootInEditor());
+        var fromModel = modelClips != null ? modelClips.Select(c => c.name) : Enumerable.Empty<string>();
+        var fromFolder = AssetDatabase.IsValidFolder(Folder)
             ? AssetDatabase.FindAssets("t:Model", new[] { Folder })
                 .Select(guid => Path.GetFileNameWithoutExtension(AssetDatabase.GUIDToAssetPath(guid)))
-                .Distinct()
                 .OrderBy(n => n)
-                .ToArray()
-            : null;
+            : Enumerable.Empty<string>();
+        string[] names = fromModel.Concat(fromFolder).Distinct().ToArray();
         ChatUIDropdown.Draw(position, property, label, names, "(keep current)");
     }
 }

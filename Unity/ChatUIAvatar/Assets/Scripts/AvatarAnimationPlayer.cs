@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Animations;
 using UnityEngine.Playables;
@@ -15,6 +16,10 @@ using UnityEngine.Serialization;
 /// Clips on they are listed by file name without any setup, and no Animator
 /// Controller is needed. The avatar and the animation FBXs use the Humanoid
 /// rig, so clips made for other skeletons (e.g. mixamorig) retarget onto her.
+///
+/// Animations exported inside the avatar's own FBX are listed too, by take
+/// name. They're found automatically in the editor and stored in Model Clips
+/// when building, so nothing needs setting up.
 ///
 /// Looping entries play until another one is chosen. One-shot entries play
 /// once, then fade back to the default (first looping) entry. Playback speed
@@ -56,6 +61,9 @@ public class AvatarAnimationPlayer : MonoBehaviour
     [Tooltip("Also list every clip under Resources/<Auto Add Folder> that has no entry below (looping if its name has idle, pose or loop).")]
     public bool autoAddClips = true;
     public string autoAddFolder = "Animations";
+
+    [Tooltip("Animations inside the avatar's own FBX. Filled automatically in the editor and when building.")]
+    public AnimationClip[] modelClips = new AnimationClip[0];
 
     [Tooltip("Seconds to crossfade between animations.")]
     public float fadeTime = 0.3f;
@@ -128,8 +136,12 @@ public class AvatarAnimationPlayer : MonoBehaviour
             else if (defaultEntry == null && e.loop)
                 defaultEntry = e;
         }
+#if UNITY_EDITOR
+        RefreshModelClips();
+#endif
+        AddClips(modelClips, "Model");
         if (autoAddClips)
-            AddUnlistedClips();
+            AddClips(Resources.LoadAll<AnimationClip>(autoAddFolder), autoAddFolder);
 
         graph = PlayableGraph.Create("AvatarAnimation");
         graph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
@@ -349,19 +361,20 @@ public class AvatarAnimationPlayer : MonoBehaviour
     // Adds every clip in Resources/Animations that has no entry yet, so new
     // FBXs dropped into that folder show up in the panel without setup. The
     // import postprocessor names each clip after its file.
-    void AddUnlistedClips()
+    void AddClips(IEnumerable<AnimationClip> clips, string group)
     {
+        if (clips == null)
+            return;
+
         var added = new List<Entry>();
-        foreach (AnimationClip clip in Resources.LoadAll<AnimationClip>(autoAddFolder))
+        foreach (AnimationClip clip in clips)
         {
-            if (clip.name.StartsWith("__preview__", StringComparison.Ordinal))
+            if (clip == null || clip.name.StartsWith("__preview__", StringComparison.Ordinal))
                 continue;
-            if (entries.Exists(e => e.clip == clip || e.Label == clip.name))
+            if (entries.Exists(e => e.clip == clip || e.Label == clip.name) || added.Exists(e => e.Label == clip.name))
                 continue;
 
-            string lower = clip.name.ToLowerInvariant();
-            bool loop = lower.Contains("idle") || lower.Contains("pose") || lower.Contains("loop");
-            added.Add(new Entry(KeyCode.None, autoAddFolder + "/" + clip.name, loop) { clip = clip });
+            added.Add(new Entry(KeyCode.None, group + "/" + clip.name, LoopsByName(clip.name)) { clip = clip });
         }
 
         added.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase));
@@ -369,6 +382,53 @@ public class AvatarAnimationPlayer : MonoBehaviour
         if (defaultEntry == null)
             defaultEntry = added.Find(e => e.loop);
     }
+
+    static bool LoopsByName(string clipName)
+    {
+        string lower = clipName.ToLowerInvariant();
+        return lower.Contains("idle") || lower.Contains("pose") || lower.Contains("loop");
+    }
+
+#if UNITY_EDITOR
+    /// <summary>Editor only: fills Model Clips from the FBX the avatar in the scene came from.</summary>
+    public void RefreshModelClips()
+    {
+        GameObject root = animator != null ? animator.gameObject : FindAvatarRootInEditor();
+        AnimationClip[] found = ModelClipsInEditor(root);
+        if (found != null)
+            modelClips = found;
+    }
+
+    /// <summary>Editor only: the animation takes inside the model asset a scene object was made from.</summary>
+    public static AnimationClip[] ModelClipsInEditor(GameObject sceneObject)
+    {
+        if (sceneObject == null)
+            return null;
+        GameObject source = UnityEditor.PrefabUtility.GetCorrespondingObjectFromOriginalSource(sceneObject);
+        string path = source != null ? UnityEditor.AssetDatabase.GetAssetPath(source) : null;
+        if (string.IsNullOrEmpty(path))
+            return null;
+        return UnityEditor.AssetDatabase.LoadAllAssetsAtPath(path)
+            .OfType<AnimationClip>()
+            .Where(c => !c.name.StartsWith("__preview__", StringComparison.Ordinal))
+            .ToArray();
+    }
+
+    /// <summary>Editor only: the avatar's root object in the open scene.</summary>
+    public static GameObject FindAvatarRootInEditor()
+    {
+        var face = FindObjectOfType<BlendShapeKeyController>();
+        SkinnedMeshRenderer renderer = face != null ? face.target : null;
+        if (renderer == null)
+        {
+            renderer = FindObjectsOfType<SkinnedMeshRenderer>()
+                .Where(r => r.sharedMesh != null)
+                .OrderByDescending(r => r.sharedMesh.blendShapeCount)
+                .FirstOrDefault();
+        }
+        return renderer != null ? renderer.transform.root.gameObject : null;
+    }
+#endif
 
     static AnimationClip LoadClip(Entry e)
     {

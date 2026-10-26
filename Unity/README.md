@@ -8,7 +8,7 @@ same controller will be driven by the ChatUI server (expressions, lip sync).
 
 1. The avatar model and its animations are third-party, so they aren't committed.
    Copy them in **before** opening the project:
-   - `miomio10261045.fbx` (renamed from `miomio 10261045.fbx`, no space) into `ChatUIAvatar/Assets/Models/` (its committed `.meta` keeps the scene reference working).
+   - `miomio10261410.fbx` (renamed from `mio mio 10261410.fbx`, no spaces) into `ChatUIAvatar/Assets/Models/` (its committed `.meta` keeps the scene reference working).
    - `miorine tx.png` into `Assets/Models/` as well. Newer exports embed it, but the importer falls back to this copy.
    - Mixamo animation FBXs (`Happy Idle.fbx`, `Angry.fbx`, `Excited.fbx`, `Joyful Jump.fbx`,
      `Female Sitting Pose.fbx`, `Female Laying Pose.fbx`) into `Assets/Resources/Animations/`.
@@ -70,7 +70,7 @@ Body (animations), on `AvatarController` > Avatar Animation Player:
   Clips** on they show up in the panel by file name (looping if the name has
   idle, pose or loop). Add an entry only to give one a key, speed or loop setting.
 
-Face mesh shape keys: `miomio10261045` has 88, including the tsundere (`tsun ...`),
+Face mesh shape keys: `miomio10261410` has 88, including the tsundere (`tsun ...`),
 kuudere (`kuu ...`) and happy (`laugh`, `giggle`, `beaming`, `playful`, `adoring` ...) sets. The in-game panel always shows the current list.
 
 ## Motion sets
@@ -80,7 +80,8 @@ one name (e.g. `happy` = Excited animation + `happy` shape key). Edit them in
 **Motion Set Library** on `AvatarController`:
 
 - **Name**: what the panel and the API call it. **Description**: when to use it; this is what the LLM will see.
-- **Animation**: dropdown of the clips in `Assets/Resources/Animations` (empty keeps the current animation).
+- **Animation**: dropdown of the animations inside the avatar's own FBX (Blender actions, by name) and the clips in `Assets/Resources/Animations` (empty keeps the current animation).
+- **Then Loop**: after a play-once animation, keep looping this one (e.g. `sit down on floor` then `sit on floor loop`).
 - **Speed**: 1 = normal, 0.5 = half, 2 = double, for this set only.
 - **Loop**: the clip's own setting, or force loop / play once.
 - **Duration**: seconds before going back to the default set. 0 stays until another set plays, or until a play-once animation finishes.

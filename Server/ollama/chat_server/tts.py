@@ -416,7 +416,10 @@ class _Chatterbox:
         if name and name != "default":
             clip = next((c for c in chatterbox_clips() if c.stem == name), None)
             if clip is None:
-                raise HTTPException(404, f"The Chatterbox voice clip {name!r} isn't in {Config.TTS_CHATTERBOX_DIR}")
+                found = ", ".join(c.name for c in chatterbox_clips()) or "no clips"
+                raise HTTPException(404, f"The Chatterbox voice clip {name!r} isn't in {Config.TTS_CHATTERBOX_DIR} "
+                                         f"(it has {found}). Folder names are case-sensitive on Linux; "
+                                         "after adding a clip, reopen Chat Settings to reload the voice list.")
         pieces = []
         with self.lock:
             model = self.model(multilingual=lang != "en")

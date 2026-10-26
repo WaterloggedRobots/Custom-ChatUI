@@ -15,6 +15,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import search as web
+from . import speech
+from . import tts
 from .config import Config
 from .documents import AttachmentError, load_attachment
 from .ollama import Ollama, OllamaError
@@ -37,6 +39,10 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
             log.info("Ollama at %s has: %s", Config.OLLAMA_URL, ", ".join(names) or "(no models)")
         except Exception as e:
             log.warning("Ollama not reachable at %s yet: %s", Config.OLLAMA_URL, e)
+        log.info("Speech to text: %s", speech.ENGINE or "off")
+        if Config.STT_PRELOAD:
+            asyncio.get_running_loop().run_in_executor(None, speech.preload)
+        asyncio.get_running_loop().run_in_executor(None, tts.preload)
         yield
         await app.state.ollama.close()
         await app.state.http.aclose()
@@ -55,19 +61,25 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
             "message": f"Ollama not reachable at {Config.OLLAMA_URL}: {e or type(e).__name__}", "type": "ollama_unreachable"}})
 
     @app.exception_handler(HTTPException)
-    async def _http_error(_, e: HTTPException):
+    async def _http_error(request, e: HTTPException):
+        # The access log only shows the status code; put the reason next to it.
+        log.warning("%s %s -> %s: %s", request.method, request.url.path, e.status_code, e.detail)
         return JSONResponse(status_code=e.status_code, content={"error": {"message": str(e.detail), "type": "request_error"}})
 
     @app.exception_handler(AttachmentError)
     async def _attachment_error(_, e: AttachmentError):
         return JSONResponse(status_code=400, content={"error": {"message": str(e), "type": "attachment_error"}})
 
+    app.include_router(speech.router)
+    app.include_router(tts.router)
     if Config.ENABLE_EXTRAS:
         from . import extras
         app.include_router(extras.router)
-        extras_available = extras.AVAILABLE
+        extras_available = dict(extras.AVAILABLE)
     else:
         extras_available = {}
+    extras_available["stt"] = speech.ENGINE is not None
+    extras_available["tts"] = tts.default_engine() is not None
 
     # ------------------------------------------------------------------ info
 
@@ -82,6 +94,8 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
                 "web_search": "POST /web_search",
                 "browse": "POST /v1/web/browse",
                 "extract": "POST /v1/files/extract",
+                "text_to_speech": "POST /v1/audio/speech {input, model: edge|piper, voice, speed}; GET /v1/audio/voices",
+                "speech_to_text": "POST /v1/audio/transcriptions (multipart: file, language); GET /v1/audio/stt",
                 "health": "GET /health",
             },
         }

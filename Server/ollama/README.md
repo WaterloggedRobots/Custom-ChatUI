@@ -16,6 +16,13 @@ OpenAI-style client, such as Futu-Network later) one chat endpoint that adds:
   searches; `"off"` (the default for API callers) never does.
   Queries run in parallel on DuckDuckGo (Wikipedia as fallback), the top pages
   are read in parallel, and the model cites them as `[1]`, `[2]`.
+- **Speech to text.** The GUI's 🎤 button records the microphone and sends the
+  clip to `/v1/audio/transcriptions`; local Whisper (faster-whisper) turns it
+  into text on this machine. See [Speech to text](#speech-to-text).
+- **Text to speech.** The GUI's ▶ Play buttons send a reply here with the
+  chat's engine, voice and speed and play the audio that comes back: Microsoft
+  Edge's online voices, or Kokoro, Chatterbox or Piper running on this machine. See
+  [Text to speech](#text-to-speech).
 
 ## Setup (Ubuntu 24.04)
 
@@ -29,7 +36,7 @@ sudo apt install python3-venv          # once
 cd ~/Custom-ChatUI/Server/ollama        # wherever you cloned it
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest -q tests     # optional: 16 tests, no Ollama needed
+.venv/bin/python -m pytest -q tests     # optional: no Ollama or network needed
 ```
 
 ## Run
@@ -60,7 +67,16 @@ keep tokens there. All addresses are summarised at the top of
 | `NUM_CTX` | `16384` | context window requested from Ollama |
 | `KEEP_ALIVE` | `30m` | how long Ollama keeps a model loaded |
 | `SEARCH_RESULTS` / `SEARCH_FETCH_PAGES` | `6` / `3` | results kept / pages read |
-| `ENABLE_EXTRAS` | `1` | TTS, STT and the tool-calling test routes |
+| `STT_ENGINE` | `auto` | speech to text: `whisper` (local), `google` (internet), `off`; `auto` = whisper if installed |
+| `STT_MODEL` / `STT_DEVICE` | (auto) / `auto` | Whisper model and `cuda`/`cpu`; auto = `large-v3-turbo` on the GPU, `small` on the CPU |
+| `STT_PRELOAD` | `0` | `1` loads Whisper at start-up instead of on the first clip |
+| `TTS_ENGINE` / `TTS_VOICE` | `edge` / `en-US-JennyNeural` | engine and Edge voice used when the GUI asks for "Server default" |
+| `TTS_PIPER_DIR` | `Server/ollama/voices` | where Piper voices (`.onnx` + `.onnx.json`) are kept |
+| `TTS_KOKORO_DIR` / `TTS_KOKORO_MODEL` | `voices/kokoro` / `kokoro-v1.0.onnx` | Kokoro model files (downloaded by themselves) |
+| `TTS_CHATTERBOX_DIR` / `TTS_CHATTERBOX_LANGUAGES` | `voices/chatterbox` / `en,zh,ja` | voice clips for Chatterbox to copy, and the languages offered |
+| `TTS_PRELOAD` | `kokoro` | engines loaded at start-up (`kokoro,chatterbox`, or empty) |
+| `TTS_TRANSLATE_MODEL` | (the chat's model) | Ollama model that translates replies for "speak in the voice's language" |
+| `ENABLE_EXTRAS` | `1` | the tool-calling test routes |
 
 ## Endpoints
 
@@ -72,8 +88,13 @@ keep tokens there. All addresses are summarised at the top of
 | POST | `/v1/web/browse` | `{"url"}` → page title and text |
 | POST | `/v1/files/extract` | multipart upload → the text the model would see |
 | POST | `/v1/models/load`, `/v1/models/unload/{model}` | preload or free a model |
+| POST | `/v1/audio/transcriptions` (also `/stt`) | multipart `file` (+ optional `language`, `prompt`, `response_format=text`) → `{"text", "language", "duration", "engine"}` |
+| GET | `/v1/audio/stt` | whether speech to text is available, and which engine/model |
+| POST | `/v1/audio/speech` (also `/tts`) | `{"input", "model": "edge"\|"kokoro"\|"chatterbox"\|"piper", "voice", "speed", "translate", "translate_model"}` → mp3 (Edge) or wav; with `translate`, the `X-Spoken-Language` and `X-Spoken-Text` (URL-encoded) headers carry the translation |
+| GET | `/v1/audio/voices` | the engines and their voices `{"engines", "voices": [{"id", "engine", "language", "name"}]}` |
+| POST | `/v1/audio/voices/download` | `{"voice": "en_US-lessac-medium"}` fetches a Piper voice |
 | GET | `/health` | Ollama reachability and optional features |
-| | `/tts`, `/stt`, `/v1/tools/*` | unchanged extras; function calling is to be reworked later |
+| | `/v1/tools/*` | unchanged extras; function calling is to be reworked later |
 
 ### Chat request
 
@@ -112,6 +133,99 @@ in its next request as `{"role": "tool", "tool_call_id", "name", "content"}`
 after the assistant message that holds the `tool_calls`. The ChatUI client uses
 this for its file, git and terminal tools, which act on the Windows PC. A model
 that can't call tools is retried without them.
+
+## Speech to text
+
+`pip install -r requirements.txt` installs faster-whisper. The model downloads
+from Hugging Face the first time a clip arrives (`large-v3-turbo` is about
+1.6 GB; `small` about 0.5 GB) and is cached in `~/.cache/huggingface`, so the
+first clip takes a while and later ones take a second or two. Set
+`STT_PRELOAD=1` to do that at start-up instead.
+
+On the GPU, faster-whisper needs CUDA 12 cuBLAS and cuDNN 9. With
+`STT_DEVICE=auto` the server first tries the GPU in a separate process (a missing
+cuDNN would otherwise crash the server) and falls back to the CPU by itself; the
+log then says `Whisper can't run on the GPU`. To use the GPU, install the
+libraries into the venv (`run.sh` then puts them on the library path itself;
+when starting `ollama_server.py` by hand, export the path first):
+
+```bash
+.venv/bin/pip install nvidia-cublas-cu12 "nvidia-cudnn-cu12==9.*"
+export LD_LIBRARY_PATH=$(.venv/bin/python -c 'import nvidia.cublas.lib as b, nvidia.cudnn.lib as d; print(b.__path__[0] + ":" + d.__path__[0])')
+```
+
+Whisper shares the GPU with Ollama; `large-v3-turbo` needs about 2 GB of VRAM.
+Language is detected per clip unless the GUI sets one. Check it by hand:
+
+```bash
+curl -F file=@clip.wav http://localhost:8100/v1/audio/transcriptions
+```
+
+## Text to speech
+
+The GUI picks an engine and voice per chat (Chat Settings > Voice). Engines
+that aren't installed show up there as "not installed on the server".
+
+| Engine | Runs | Sounds | Languages | Setup |
+|---|---|---|---|---|
+| `edge` (default) | Microsoft's servers (needs internet) | natural | 100+ incl. Cantonese `zh-HK` | none (in `requirements.txt`) |
+| `kokoro` | here, CPU is fine | natural; ★ voices are the best | English (US/UK), Mandarin, Japanese, Spanish, French, Hindi, Italian, Portuguese | `pip install kokoro-onnx` |
+| `chatterbox` | here, wants an NVIDIA GPU | the most human; copies any voice from a clip | 23, set by `TTS_CHATTERBOX_LANGUAGES` | `pip install chatterbox-tts` (large) |
+| `piper` | here, very light | plainer | many, one file per voice | `pip install piper-tts` + download voices |
+
+**Kokoro** (82M parameters, Apache 2.0). Install it and restart the server:
+
+```bash
+.venv/bin/pip install kokoro-onnx
+```
+
+Its model (`kokoro-v1.0.onnx`, 310 MB, plus `voices-v1.0.bin`, 28 MB) downloads
+from GitHub into `voices/kokoro/` by itself when the server starts
+(`TTS_PRELOAD=kokoro`), so the first Play doesn't wait. 54 voices; the model
+card rates `af_heart`, `af_bella`, `bf_emma`, `ff_siwis`, `jf_alpha` and
+`zf_xiaoxiao` best (★ in the list). `TTS_KOKORO_MODEL=kokoro-v1.0.int8.onnx`
+uses the 90 MB version, a little rougher. No Cantonese: use Edge's `zh-HK` voices for that.
+
+**Chatterbox** (Resemble AI, MIT). The most natural of the four, and it can
+speak in *any* voice: put a clean 5 to 20 second recording of someone speaking
+(`.wav`, `.mp3`, `.flac`, ...) into `voices/chatterbox/`, and it shows up in the
+voice list under the file's name, once per language. Without clips there is a
+built-in default voice. English uses the English model; other languages use
+the multilingual one (both download from Hugging Face on first use, a few GB).
+It installs PyTorch, so it is a big install, and it is slow without an NVIDIA
+GPU. Speed can't be changed for it.
+
+```bash
+.venv/bin/pip install chatterbox-tts
+# TTS_PRELOAD=kokoro,chatterbox in .env loads it at start-up instead of on the first Play
+```
+
+**Piper**: light and offline, plainer voices; each voice is a file to fetch
+once into `voices/` (names at https://huggingface.co/rhasspy/piper-voices):
+
+```bash
+.venv/bin/pip install piper-tts
+.venv/bin/python -m piper.download_voices en_US-lessac-medium zh_CN-huayan-medium --download-dir voices
+```
+
+or, with the server running,
+`curl -X POST localhost:8100/v1/audio/voices/download -H 'Content-Type: application/json' -d '{"voice": "en_US-lessac-medium"}'`.
+
+**Speaking another language.** With `"translate": true` the text is first
+translated by an Ollama model into the language of the voice (`ja-JP` for
+`ja-JP-NanamiNeural` or `jf_alpha`, written Cantonese for `zh-HK` voices, the
+part after `|` for Chatterbox), then read. The GUI sends the chat's own model,
+which is usually already loaded, so this costs one short extra answer;
+`TTS_TRANSLATE_MODEL` picks a different (e.g. smaller) one.
+
+New voices and clips show up in the GUI the next time the list is opened.
+Markdown, code blocks, links and citation numbers are removed before reading.
+Check an engine by hand:
+
+```bash
+curl -X POST localhost:8100/v1/audio/speech -H 'Content-Type: application/json' \
+     -d '{"input": "Hello there", "model": "kokoro", "voice": "af_heart"}' -o hello.wav
+```
 
 ## Why Python and not C++
 

@@ -12,3 +12,6 @@ unsloth_compiled_cache/
 
 # Stray pip output (e.g. `pip install foo>=0.43.0` without quotes)
 Server/ollama/=*
+
+# Piper text-to-speech voices (downloaded on the server)
+Server/ollama/voices/

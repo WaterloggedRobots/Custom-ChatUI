@@ -1,5 +1,11 @@
 """Tools the chat model can call on this PC: files and folders, git, and a terminal.
 
+They come in three groups that each chat turns on separately (Chat Settings):
+  files  browse, read and edit files and folders   (files.py)
+  git    git in the user's repositories              (git.py; github_login.py signs in)
+  run    run scripts, programs and shell commands    (terminal.py)
+change_directory belongs to all three, since each of them starts in the working folder.
+
 They run here, in the client, because the files are on this PC and the LLM
 server is another machine. The server only passes the tool list to Ollama and
 streams the model's calls back (see Server/ollama/chat_server/pipeline.py);
@@ -20,9 +26,11 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 MAX_OUTPUT_CHARS = 20000      # what one tool result may add to the conversation
+GROUPS = ("files", "git", "run")
+SHARED = {"change_directory"}  # in every group
 
 
 @dataclass
@@ -33,6 +41,7 @@ class Tool:
     func: Callable[..., str]         # func(ctx, **args) -> text for the model
     kind: str = "read"               # read | write | run
     summary: Optional[Callable[[Dict[str, Any]], str]] = None   # one line for the approval prompt
+    group: str = ""                  # one of GROUPS; set by ToolBox
 
     def schema(self) -> Dict[str, Any]:
         return {"type": "function", "function": {
@@ -63,7 +72,22 @@ class ToolBox:
         # Turns a PDF or Word file into text (llmClient uses the server's /v1/files/extract).
         self.extract_text = extract_text
         from . import files, git, terminal
-        self.tools: Dict[str, Tool] = {t.name: t for t in (*files.TOOLS, *git.TOOLS, *terminal.TOOLS)}
+        self.tools: Dict[str, Tool] = {}
+        for group, module in zip(GROUPS, (files, git, terminal)):
+            for t in module.TOOLS:
+                t.group = group
+                self.tools[t.name] = t
+        self.groups: set = set(GROUPS)    # the groups this chat turned on
+
+    def set_groups(self, groups: Iterable[str]) -> None:
+        self.groups = {g for g in groups if g in GROUPS}
+
+    def enabled(self, name: str) -> bool:
+        tool = self.tools.get(name)
+        return bool(tool) and (tool.group in self.groups or (name in SHARED and bool(self.groups)))
+
+    def active(self) -> List[Tool]:
+        return [t for t in self.tools.values() if self.enabled(t.name)]
 
     # ---------------------------------------------------------------- paths
 
@@ -106,7 +130,7 @@ class ToolBox:
     # ---------------------------------------------------------------- calls
 
     def schemas(self) -> List[Dict[str, Any]]:
-        return [t.schema() for t in self.tools.values()]
+        return [t.schema() for t in self.active()]
 
     def kind(self, name: str) -> str:
         tool = self.tools.get(name)
@@ -128,8 +152,12 @@ class ToolBox:
 
     def run(self, name: str, args: Dict[str, Any]) -> str:
         tool = self.tools.get(name)
-        if tool is None:
-            return f"Error: there is no tool called {name}. Available: {', '.join(self.tools)}"
+        if tool is None or not self.enabled(name):
+            available = ", ".join(t.name for t in self.active()) or "none"
+            if tool is not None:
+                return (f"Error: {name} is turned off for this chat (the user's {tool.group} tools are off). "
+                        f"Available: {available}")
+            return f"Error: there is no tool called {name}. Available: {available}"
         try:
             return clip(tool.func(self, **args) or "(done, no output)")
         except ToolError as e:
@@ -143,13 +171,21 @@ class ToolBox:
 
     def system_note(self) -> str:
         """Tells the model what it can do and where it is."""
+        can = [text for group, text in (
+            ("files", "browse, read and edit files and folders"),
+            ("git", "use git"),
+            ("run", "run scripts, programs and terminal commands (PowerShell by default)"),
+        ) if group in self.groups]
+        off = [g for g in ("files", "git", "run") if g not in self.groups]
+        names = {"files": "file browsing", "git": "git", "run": "running programs"}
         return (
-            "You can use tools on the user's own PC (Windows): browse and read folders and files, "
-            "edit files, use git, and run terminal commands (PowerShell by default). "
+            f"You can use tools on the user's own PC (Windows): {'; '.join(can)}. "
+            + (f"The user turned off {' and '.join(names[g] for g in off)} for this chat; don't offer those. "
+               if off and can else "")
             + (f"The user linked these folders for you to work in: {'; '.join(str(f) for f in self.folders)}. "
                if self.folders else "") +
             f"The working folder is {self.working_dir}; relative paths start there and "
-            "change_directory moves it. Look before you change anything: list or read first, and use "
-            "edit_file for small changes instead of rewriting whole files. The user is asked to approve "
-            "every change and command, and may decline; if so, don't retry the same thing. After using "
-            "tools, tell the user briefly what you did and what you found.")
+            "change_directory moves it. Look before you change anything: list or read first"
+            + (", and use edit_file for small changes instead of rewriting whole files" if "files" in self.groups else "")
+            + ". The user is asked to approve every change and command, and may decline; if so, don't retry "
+            "the same thing. After using tools, tell the user briefly what you did and what you found.")

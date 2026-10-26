@@ -41,6 +41,9 @@ public class HeadLookAtCamera : MonoBehaviour
 
     public KeyCode toggleKey = KeyCode.L;
 
+    /// <summary>Scales Weight for the current motion set (0 = no head tracking). Fades like the L toggle.</summary>
+    [System.NonSerialized] public float motionSetWeight = 1f;
+
     [Header("Body")]
     [Tooltip("How far the whole body turns toward the camera: 0 keeps her original facing, 1 faces it fully.")]
     [Range(0f, 1f)] public float bodyTurn = 0.3f;
@@ -141,7 +144,7 @@ public class HeadLookAtCamera : MonoBehaviour
             return;
 
         float t = smoothing <= 0f ? 1f : 1f - Mathf.Exp(-smoothing * Time.deltaTime);
-        activeWeight = Mathf.Lerp(activeWeight, active ? weight : 0f, t);
+        activeWeight = Mathf.Lerp(activeWeight, active ? weight * motionSetWeight : 0f, t);
 
         Vector3 headForward = head.rotation * headForwardLocal;
         Vector3 toTarget = lookTarget.position - head.position;

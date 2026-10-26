@@ -85,6 +85,7 @@ one name (e.g. `happy` = Excited animation + `happy` shape key). Edit them in
 - **Speed**: 1 = normal, 0.5 = half, 2 = double, for this set only.
 - **Loop**: the clip's own setting, or force loop / play once.
 - **Duration**: seconds before going back to the default set. 0 stays until another set plays, or until a play-once animation finishes.
+- **Head Tracking**: how strongly her head follows the camera during the set (0 for looking away, bowing, lying down).
 - **Shape Keys**: dropdown of the face mesh's shape keys, each with a weight.
 
 **Default Motion Set** plays at start and whenever a set ends. Sets are listed

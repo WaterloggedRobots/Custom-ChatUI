@@ -60,9 +60,18 @@ public class MotionSetLibrary : MonoBehaviour
         [Tooltip("Seconds before going back to the default set. 0 stays until another set plays (or until a play-once animation ends).")]
         [Min(0f)] public float duration;
 
+        [Tooltip("How strongly her head follows the camera during this set: 1 fully, 0 not at all (e.g. while looking away or bowing).")]
+        [Range(0f, 1f)] public float headTracking = 1f;
+
         public List<ShapeWeight> shapeKeys = new List<ShapeWeight>();
 
         public MotionSet() { }
+
+        public MotionSet Head(float tracking)
+        {
+            headTracking = tracking;
+            return this;
+        }
 
         public MotionSet Then(string loopAnimation)
         {
@@ -121,18 +130,18 @@ public class MotionSetLibrary : MonoBehaviour
             new ShapeWeight("playful")),
         new MotionSet("adoring", "Affectionate, looking at someone she likes.", "", LoopMode.AnimationDefault, 6f,
             new ShapeWeight("adoring")),
-        new MotionSet("nod", "Agreeing, yes.", "nod", LoopMode.Once, 0f),
-        new MotionSet("head shake", "Disagreeing, no.", "head shake", LoopMode.Once, 0f),
+        new MotionSet("nod", "Agreeing, yes.", "nod", LoopMode.Once, 0f).Head(0.3f),
+        new MotionSet("head shake", "Disagreeing, no.", "head shake", LoopMode.Once, 0f).Head(0.3f),
         new MotionSet("head tilt", "Curious or puzzled.", "head tilt", LoopMode.Once, 0f,
-            new ShapeWeight("smile soft")),
+            new ShapeWeight("smile soft")).Head(0.5f),
         new MotionSet("wave", "Saying hello or goodbye.", "wave", LoopMode.Once, 0f,
             new ShapeWeight("happy")),
-        new MotionSet("bow", "Polite greeting or thanks.", "bow", LoopMode.Once, 0f),
+        new MotionSet("bow", "Polite greeting or thanks.", "bow", LoopMode.Once, 0f).Head(0f),
         new MotionSet("shrug", "Not sure, who knows.", "shrug", LoopMode.Once, 0f),
         new MotionSet("shy", "Shy and fidgety.", "shy fidget", LoopMode.Once, 0f,
-            new ShapeWeight("embarrassed")),
+            new ShapeWeight("embarrassed")).Head(0.4f),
         new MotionSet("hmph", "Tsundere huff, looking away.", "hmph look away", LoopMode.Once, 0f,
-            new ShapeWeight("tsun hmph")),
+            new ShapeWeight("tsun hmph")).Head(0f),
         new MotionSet("arms crossed", "Unimpressed, waiting.", "arms crossed", LoopMode.Once, 0f,
             new ShapeWeight("annoyed")),
         new MotionSet("hand on hip", "Casual and confident.", "left hand on hip", LoopMode.Once, 0f,
@@ -140,12 +149,12 @@ public class MotionSetLibrary : MonoBehaviour
         new MotionSet("hands on hips", "Proud or scolding.", "both hands on hips", LoopMode.Once, 0f),
         new MotionSet("lean in", "Leaning in, teasing.", "lean forward hands on hips", LoopMode.Once, 0f,
             new ShapeWeight("playful")),
-        new MotionSet("sit", "Sits down on the floor and stays sitting.", "sit down on floor", LoopMode.Once, 0f).Then("sit on floor loop"),
-        new MotionSet("stand up", "Stands up from sitting on the floor.", "stand up from floor", LoopMode.Once, 0f),
-        new MotionSet("lie down", "Lies down on the floor and stays there.", "lay down on floor", LoopMode.Once, 0f).Then("lay on floor loop"),
+        new MotionSet("sit", "Sits down on the floor and stays sitting.", "sit down on floor", LoopMode.Once, 0f).Then("sit on floor loop").Head(0.8f),
+        new MotionSet("stand up", "Stands up from sitting on the floor.", "stand up from floor", LoopMode.Once, 0f).Head(0.5f),
+        new MotionSet("lie down", "Lies down on the floor and stays there.", "lay down on floor", LoopMode.Once, 0f).Then("lay on floor loop").Head(0f),
         new MotionSet("sleepy", "Tired, lies down on the floor.", "lay down on floor", LoopMode.Once, 0f,
-            new ShapeWeight("sleepy")).Then("lay on floor loop"),
-        new MotionSet("get up", "Gets up from lying on the floor.", "get up from floor", LoopMode.Once, 0f),
+            new ShapeWeight("sleepy")).Then("lay on floor loop").Head(0f),
+        new MotionSet("get up", "Gets up from lying on the floor.", "get up from floor", LoopMode.Once, 0f).Head(0f),
     };
 
     /// <summary>Bottom edge of the motion set panel, so the animation panel can sit under it.</summary>
@@ -158,6 +167,7 @@ public class MotionSetLibrary : MonoBehaviour
     public MotionSet Current { get; private set; }
 
     BlendShapeKeyController face;
+    HeadLookAtCamera look;
     AvatarAnimationPlayer player;
     AvatarAnimationPlayer.Entry setEntry;
     bool startingClip;
@@ -180,6 +190,7 @@ public class MotionSetLibrary : MonoBehaviour
     IEnumerator Start()
     {
         face = FindObjectOfType<BlendShapeKeyController>();
+        look = FindObjectOfType<HeadLookAtCamera>();
         player = FindObjectOfType<AvatarAnimationPlayer>();
         if (player != null)
         {
@@ -212,6 +223,8 @@ public class MotionSetLibrary : MonoBehaviour
     {
         Current = set;
         endTime = set.duration > 0f ? Time.time + set.duration : 0f;
+        if (look != null)
+            look.motionSetWeight = set.headTracking;
 
         if (face != null)
         {
@@ -292,6 +305,8 @@ public class MotionSetLibrary : MonoBehaviour
             setEntry = null;
             Current = null;
             endTime = 0f;
+            if (look != null)
+                look.motionSetWeight = 1f;
         }
     }
 

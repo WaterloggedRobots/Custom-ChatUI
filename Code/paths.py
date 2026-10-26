@@ -7,7 +7,8 @@ There are three places the client reads or writes:
                     In the packaged ChatUI.exe this is PyInstaller's unpack folder.
 
   CLIENT_DATA_DIR   Your chats (each with its own settings), your server address and
-                    the audio of replies read aloud (Audio/) on this PC:
+                    the audio of replies read aloud (Audio/) and the pictures
+                    drawn for them (Images/) on this PC:
                     Windows: %APPDATA%\\Waterlogged\\ChatUI   (AppData\\Roaming)
                     Linux:   ~/.local/share/Waterlogged/ChatUI
                     (the same folder Qt's AppDataLocation gave earlier versions)
@@ -51,6 +52,7 @@ CHAT_DIR = SAVE_DIR / "Chat"                  # one <name>.json per chat, settin
 CHAT_INDEX_FILE = SAVE_DIR / ".temp.json"     # last opened chat + recent-chats order
 USER_NETWORK_FILE = CLIENT_DATA_DIR / "network.json"   # your saved server address
 AUDIO_DIR = CLIENT_DATA_DIR / "Audio"         # replies read aloud by the server, kept for replays
+IMAGE_DIR = CLIENT_DATA_DIR / "Images"        # pictures ComfyUI drew for the chats
 
 
 def ensure_data_dirs():

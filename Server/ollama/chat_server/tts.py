@@ -41,6 +41,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from . import sovits
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -77,20 +78,25 @@ HAVE_CHATTERBOX = importlib.util.find_spec("chatterbox") is not None
 ENGINE_NAMES = {"edge": "Microsoft Edge voices (online)",
                 "kokoro": "Kokoro (on the server, offline, natural)",
                 "chatterbox": "Chatterbox (on the server, most human, clones voices; GPU)",
-                "piper": "Piper (on the server, offline, light)"}
+                "piper": "Piper (on the server, offline, light)",
+                "gpt-sovits": "GPT-SoVITS (on the server, voices you train yourself; GPU)"}
 ENGINE_INSTALL = {"edge": "pip install edge-tts", "kokoro": "pip install kokoro-onnx",
-                  "chatterbox": "pip install chatterbox-tts", "piper": "pip install piper-tts"}
-ENGINE_SPEED = {"edge": True, "kokoro": True, "chatterbox": False, "piper": True}
+                  "chatterbox": "pip install chatterbox-tts", "piper": "pip install piper-tts",
+                  "gpt-sovits": "start GPT-SoVITS's api_v2.py on port 9880 (see the server README)"}
+ENGINE_SPEED = {"edge": True, "kokoro": True, "chatterbox": False, "piper": True, "gpt-sovits": True}
 SPEED_RANGE = (0.5, 2.0)
 
 
 def available() -> dict:
     return {"edge": edge_tts is not None, "kokoro": kokoro_onnx is not None,
-            "chatterbox": HAVE_CHATTERBOX, "piper": piper is not None}
+            "chatterbox": HAVE_CHATTERBOX, "piper": piper is not None, "gpt-sovits": sovits.up()}
 
 
 def not_available(engine: str) -> str:
     """Why `engine` can't speak, and what to do about it."""
+    if engine == "gpt-sovits":
+        return (f"GPT-SoVITS isn't running at {Config.TTS_SOVITS_URL}: on the server, "
+                f"{ENGINE_INSTALL[engine]}.")
     err = IMPORT_ERRORS.get(engine)
     pip = f"{sys.executable} -m pip install {ENGINE_INSTALL[engine].split()[-1]}"
     if err is None or (isinstance(err, ModuleNotFoundError)
@@ -393,7 +399,18 @@ class _Chatterbox:
         if Config.TTS_CHATTERBOX_DEVICE != "auto":
             return Config.TTS_CHATTERBOX_DEVICE
         import torch
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        if not torch.cuda.is_available():
+            return "cpu"
+        # A torch wheel only runs on the GPU generations it was built for (a new card
+        # needs a newer CUDA build): "no kernel image is available" otherwise.
+        major, minor = torch.cuda.get_device_capability()
+        built = torch.cuda.get_arch_list()
+        if built and f"sm_{major}{minor}" not in built:
+            log.warning("Chatterbox on CPU: this torch (%s) has no kernels for %s (sm_%d%d; built for %s). "
+                        "See 'Chatterbox on a new GPU' in the README.", torch.__version__,
+                        torch.cuda.get_device_name(), major, minor, " ".join(built))
+            return "cpu"
+        return "cuda"
 
     def model(self, multilingual: bool):
         key = "multi" if multilingual else "en"
@@ -404,13 +421,23 @@ class _Chatterbox:
                 from chatterbox.mtl_tts import ChatterboxMultilingualTTS as Model
             else:
                 from chatterbox.tts import ChatterboxTTS as Model
-            self.models[key] = Model.from_pretrained(device=device)
+            try:
+                self.models[key] = Model.from_pretrained(device=device)
+            except RuntimeError as e:
+                if device != "cuda" or Config.TTS_CHATTERBOX_DEVICE == "cuda":
+                    raise
+                log.warning("Chatterbox can't use the GPU (%s); loading it on the CPU", str(e).splitlines()[0])
+                device = "cpu"
+                self.models[key] = Model.from_pretrained(device=device)
             log.info("Chatterbox %s loaded on %s in %.0fs", key, device, time.time() - started)
         return self.models[key]
 
     def speak(self, text: str, voice: str) -> bytes:
         import numpy as np
-        name, _, lang = (voice or "default|en").partition("|")
+        if "|" not in (voice or ""):
+            # Not a Chatterbox voice (e.g. an Edge voice kept after switching engines): use the default.
+            voice = "default|en"
+        name, _, lang = voice.partition("|")
         lang = lang or "en"
         clip = None
         if name and name != "default":
@@ -494,6 +521,8 @@ async def voice_language(engine: str, voice: str) -> str:
         return KOKORO_LANGUAGES[voice[0]][0]
     if engine == "chatterbox":
         return (voice or "default|en").partition("|")[2] or "en"
+    if engine == "gpt-sovits":
+        return sovits.voice_language(voice)
     if engine == "piper":
         for v in piper_voices():
             if v["id"] == voice or not voice:
@@ -542,6 +571,7 @@ class DownloadRequest(BaseModel):
 @router.get("/v1/audio/voices")
 async def list_voices(engine: str = ""):
     """The engines and their voices, for the voice pickers in Chat Settings."""
+    await sovits.check(force=True)
     have = available()
     engines = [{"id": e, "name": ENGINE_NAMES[e], "available": ok, "install": ENGINE_INSTALL[e],
                 "speed": ENGINE_SPEED[e]} for e, ok in have.items()]
@@ -558,6 +588,8 @@ async def list_voices(engine: str = ""):
         voices += chatterbox_voices()
     if engine in ("", "piper"):
         voices += piper_voices()
+    if engine in ("", "gpt-sovits"):
+        voices += sovits.voice_list()
     return {"engines": engines, "default_engine": default_engine(),
             "default_voice": {"edge": Config.TTS_VOICE}, "voices": voices, "errors": errors}
 
@@ -568,6 +600,8 @@ async def text_to_speech(req: SpeechRequest, request: Request):
     engine = (req.model or req.engine or default_engine() or "").lower()
     if engine not in ENGINE_NAMES:
         raise HTTPException(400, f"Unknown speech engine {engine!r}; use one of {', '.join(ENGINE_NAMES)}")
+    if engine == "gpt-sovits":
+        await sovits.check()
     if not available()[engine]:
         raise HTTPException(503, not_available(engine))
     text = clean_for_speech(req.input or req.text)[:Config.TTS_MAX_CHARS]
@@ -591,7 +625,9 @@ async def text_to_speech(req: SpeechRequest, request: Request):
             log.info("TTS translated into %s with %s in %.1fs", language, model, time.time() - started)
             headers["X-Spoken-Language"] = language
             headers["X-Spoken-Text"] = urllib.parse.quote(text[:3000])
-    if engine == "edge":
+    if engine == "gpt-sovits":
+        audio, media = await sovits.speak(text, req.voice, speed), "audio/wav"
+    elif engine == "edge":
         try:
             audio, media = await edge_speak(text, req.voice, speed), "audio/mpeg"
         except HTTPException:

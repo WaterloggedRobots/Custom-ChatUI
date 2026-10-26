@@ -6,8 +6,8 @@ another chat or share them.
 
 Every read goes through normalize(): an entry that is missing, of the wrong
 type or out of range takes its default from DEFAULTS, so an old, partial or
-hand-edited file never breaks a chat. To add a setting later (a ComfyUI
-workflow, say), add it to DEFAULTS and give it a check in normalize().
+hand-edited file never breaks a chat. To add a setting later, add it to
+DEFAULTS and give it a check in normalize().
 
 No Qt here, so it can be tested on its own (tests/test_chat_settings.py).
 """
@@ -18,8 +18,9 @@ from pathlib import Path
 
 WEB_MODES = ("auto", "on", "off")
 TEMPERATURE_RANGE = (0.0, 2.0)
-TTS_ENGINES = ("edge", "kokoro", "chatterbox", "piper")   # the server's; it may add more
+TTS_ENGINES = ("edge", "kokoro", "chatterbox", "piper", "gpt-sovits")   # the server's; it may add more
 TTS_SPEED_RANGE = (0.5, 2.0)
+IMAGE_MODES = ("auto", "on")           # auto: the model decides when to draw; on: a picture with every reply
 TOOL_KEYS = {"files": "Tool Files", "git": "Tool Git", "run": "Tool Run"}   # local_tools group -> setting
 EXPORT_TAG = "ChatUI Settings"        # marks an exported file; the value is the format version
 EXPORT_VERSION = 1
@@ -42,6 +43,9 @@ DEFAULTS = {
     "TTS Speed": 1.0,
     "TTS Auto Play": True,            # read each new reply aloud when it arrives
     "TTS Translate": False,           # speak in the voice's language: the chat model translates the reply first
+    # Pictures, drawn by ComfyUI on the server (Server/ollama/chat_server/comfy.py)
+    "Image Workflow": "",             # a workflow id from the server's workflows/ folder; "" = no pictures
+    "Image Mode": "auto",             # one of IMAGE_MODES
 }
 
 
@@ -87,6 +91,11 @@ def normalize(data) -> dict:
             s[key] = data[key]
     if data.get("Web Search") in WEB_MODES:
         s["Web Search"] = data["Web Search"]
+    workflow = data.get("Image Workflow")
+    if isinstance(workflow, str) and len(workflow) <= 120:
+        s["Image Workflow"] = workflow.strip()
+    if data.get("Image Mode") in IMAGE_MODES:
+        s["Image Mode"] = data["Image Mode"]
     return s
 
 

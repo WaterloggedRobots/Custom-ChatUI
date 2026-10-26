@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from . import comfy
 from . import search as web
 from . import speech
 from . import tts
@@ -26,14 +27,17 @@ log = logging.getLogger("chat_server")
 
 
 def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
-               web_transport: Optional[httpx.AsyncBaseTransport] = None) -> FastAPI:
-    """Transports are injectable so the tests can stand in for Ollama and the web."""
+               web_transport: Optional[httpx.AsyncBaseTransport] = None,
+               comfy_transport: Optional[httpx.AsyncBaseTransport] = None) -> FastAPI:
+    """Transports are injectable so the tests can stand in for Ollama, the web and ComfyUI."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.ollama = Ollama(transport=ollama_transport)
         app.state.http = httpx.AsyncClient(transport=web_transport, headers={"User-Agent": Config.USER_AGENT},
                                            limits=httpx.Limits(max_connections=20))
+        app.state.comfy = comfy.make_client(comfy_transport)
+        log.info("Pictures: ComfyUI at %s, workflows in %s", Config.COMFYUI_URL, comfy.workflow_dir())
         try:
             names = [m["name"] for m in await app.state.ollama.tags()]
             log.info("Ollama at %s has: %s", Config.OLLAMA_URL, ", ".join(names) or "(no models)")
@@ -46,6 +50,7 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
         yield
         await app.state.ollama.close()
         await app.state.http.aclose()
+        await app.state.comfy.aclose()
 
     app = FastAPI(title="ChatUI server", version="3.0.0", lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -72,6 +77,7 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
 
     app.include_router(speech.router)
     app.include_router(tts.router)
+    app.include_router(comfy.router)
     if Config.ENABLE_EXTRAS:
         from . import extras
         app.include_router(extras.router)
@@ -89,7 +95,9 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
             "service": "ChatUI server",
             "version": app.version,
             "endpoints": {
-                "chat": "POST /v1/chat/completions (OpenAI-style; extras: think, web_search, file parts, tools)",
+                "chat": "POST /v1/chat/completions (OpenAI-style; extras: think, web_search, file parts, tools, "
+                        "image_workflow, image_mode)",
+                "images": "POST /v1/images/generations {prompt, negative_prompt, workflow}; GET /v1/images/workflows",
                 "models": "GET /v1/models?detailed=true",
                 "web_search": "POST /web_search",
                 "browse": "POST /v1/web/browse",
@@ -191,6 +199,8 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
         options: Optional[Dict[str, Any]] = Field(None, description="raw Ollama options")
         keep_alive: Optional[Union[int, str]] = None
         tools: Optional[List[Dict[str, Any]]] = Field(None, description="OpenAI-style function tools; the client runs them")
+        image_workflow: Optional[str] = Field(None, description="ComfyUI workflow id; the model may then draw pictures")
+        image_mode: Optional[str] = Field(None, description="auto (the model decides) | on (every reply)")
 
     def make_job(req: ChatRequest) -> ChatJob:
         opts: Dict[str, Any] = {}
@@ -221,10 +231,14 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
         if mode not in ("off", "auto", "on"):
             raise HTTPException(400, "web_search must be off, auto or on")
 
+        image_mode = req.image_mode or "auto"
+        if image_mode not in ("auto", "on"):
+            raise HTTPException(400, "image_mode must be auto or on")
+
         think = req.think if req.think is not None else req.reasoning_effort
         return ChatJob(model=req.model or Config.DEFAULT_MODEL, messages=req.messages, think=think,
                        web_search=mode, options=opts, format=fmt, keep_alive=req.keep_alive,
-                       tools=req.tools or None)
+                       tools=req.tools or None, image_workflow=req.image_workflow or None, image_mode=image_mode)
 
     def chunk(cid, model, delta=None, finish=None, **extra):
         body = {"id": cid, "object": "chat.completion.chunk", "created": int(time.time()), "model": model,
@@ -235,7 +249,7 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
     async def stream_events(job: ChatJob, cid: str):
         yield chunk(cid, job.model, {"role": "assistant", "content": ""})
         try:
-            async for ev in run_chat(job, app.state.ollama, app.state.http):
+            async for ev in run_chat(job, app.state.ollama, app.state.http, app.state.comfy):
                 if ev.kind == "content":
                     yield chunk(cid, job.model, {"content": ev.data})
                 elif ev.kind == "thinking":
@@ -244,6 +258,8 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
                     yield chunk(cid, job.model, status=ev.data)
                 elif ev.kind == "sources":
                     yield chunk(cid, job.model, sources=ev.data)
+                elif ev.kind == "images":
+                    yield chunk(cid, job.model, images=ev.data)
                 elif ev.kind == "tool_calls":
                     yield chunk(cid, job.model, {"tool_calls": ev.data})
                 elif ev.kind == "done":
@@ -269,14 +285,16 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
         if req.stream:
             return StreamingResponse(stream_events(job, cid), media_type="text/event-stream",
                                      headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-        content, thinking, sources, calls, done = [], [], None, [], {}
-        async for ev in run_chat(job, app.state.ollama, app.state.http):
+        content, thinking, sources, calls, images, done = [], [], None, [], [], {}
+        async for ev in run_chat(job, app.state.ollama, app.state.http, app.state.comfy):
             if ev.kind == "content":
                 content.append(ev.data)
             elif ev.kind == "thinking":
                 thinking.append(ev.data)
             elif ev.kind == "sources":
                 sources = ev.data
+            elif ev.kind == "images":
+                images += ev.data
             elif ev.kind == "tool_calls":
                 calls += [{k: v for k, v in c.items() if k != "index"} for c in ev.data]
             elif ev.kind == "done":
@@ -291,6 +309,8 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
                 "usage": done.get("usage", {}), "timings": done.get("timings", {})}
         if sources is not None:
             body["sources"] = sources
+        if images:
+            body["images"] = images
         return body
 
     # ------------------------------------------------------------------- web

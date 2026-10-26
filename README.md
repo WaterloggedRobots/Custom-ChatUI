@@ -86,6 +86,7 @@ The server makes the audio, so each chat's choice goes to it with every request:
   - *Kokoro*: runs on the server with no internet, natural voices (★ marks the best ones), English, Mandarin, Japanese and more. One `pip install` on the server; its model downloads by itself.
   - *Chatterbox*: runs on the server, the most human-sounding, and can copy anyone's voice from a short recording you drop into `Server/ollama/voices/chatterbox/`. Best with an NVIDIA GPU; speed is fixed.
   - *Piper*: runs on the server, very light, plainer voices that are downloaded one by one.
+  - *GPT-SoVITS*: runs on the server's GPU as its own program, with voices you **train** from a few minutes of someone's recordings; the closest to a real person, and strong in Japanese, Chinese and Cantonese. See *GPT-SoVITS* in `Server/ollama/README.md`.
 
   Engines the server doesn't have yet say so, with the command to install them (see *Text to speech* in `Server/ollama/README.md`).
 - **Language** narrows the voice list; **Voice** picks the speaker, and **▶ Test** plays a short line in that voice.
@@ -94,12 +95,22 @@ The server makes the audio, so each chat's choice goes to it with every request:
 
 Markdown, code blocks, links and source numbers like `[1]` are left out of what is read.
 
+## 2.9. Pictures with ComfyUI (v0.13)
+The chat can draw pictures with ComfyUI, which runs on the server machine next to Ollama. Pick a **Workflow** in a chat's settings (the *Pictures* box) and it works like auto web search: the model decides when a picture fits (you ask for one, want to see something, or a scene is worth showing) and writes the positive and negative prompts itself. The picture appears under the reply and in the panel on the right of the chat window. *When: With every reply* draws one for each reply instead. *Off* turns it off for the chat.
+
+- Click a picture in the chat to open it full size; double-click the panel for the same.
+- **Reload Image** draws the picture in the panel again with the same prompts and a new seed.
+- Pictures are kept on this PC in `Images/` in the client data folder; the chat file stores where they are.
+- The model is told what it drew before, so later pictures can keep a character's looks. Describe the character's appearance in the *Pretext*, since the image model only sees the prompt.
+
+The workflows are ComfyUI graphs saved with *Workflow > Export (API)* into `Server/ollama/workflows/` on the server, with `{{positive}}` and `{{negative}}` typed into the prompt boxes (see `Server/ollama/workflows/README.md`). The list in Chat Settings reloads each time you open it, so a newly added file shows up without restarting anything. Server settings (ComfyUI address, sharing one GPU with Ollama) are under *Pictures* in `Server/ollama/README.md`.
+
 ## Where things live
 | Name | Where | What |
 |---|---|---|
 | LLM server | `192.168.0.192:8100` (Ubuntu), code in `Server/ollama/` | Ollama wrapper the client talks to. Addresses: `Server/ollama/chat_server/config.py`, overrides in `Server/ollama/.env` |
 | Client git folder | `Code/` (`paths.CLIENT_REPO_DIR`) | app files: UI layouts, images, default addresses in `Code/UI/network.json` |
-| Client data | `%APPDATA%\Waterlogged\ChatUI` (`paths.CLIENT_DATA_DIR`) | chats (each with its settings) and your saved server address (`network.json`) |
+| Client data | `%APPDATA%\Waterlogged\ChatUI` (`paths.CLIENT_DATA_DIR`) | chats (each with its settings), your saved server address (`network.json`), reply audio (`Audio/`) and pictures (`Images/`) |
 | Client PC | `192.168.0.184` (Windows) | runs `Code/`; listed in `network.json` for reference |
 | NAS | `192.168.0.163` (Samba): `nas` in `Code/UI/network.json`, `NAS_IP` on the server | chat and bot saves move here next; nothing uses it yet |
 

@@ -74,6 +74,8 @@ keep tokens there. All addresses are summarised at the top of
 | `TTS_PIPER_DIR` | `Server/ollama/voices` | where Piper voices (`.onnx` + `.onnx.json`) are kept |
 | `TTS_KOKORO_DIR` / `TTS_KOKORO_MODEL` | `voices/kokoro` / `kokoro-v1.0.onnx` | Kokoro model files (downloaded by themselves) |
 | `TTS_CHATTERBOX_DIR` / `TTS_CHATTERBOX_LANGUAGES` | `voices/chatterbox` / `en,zh,ja` | voice clips for Chatterbox to copy, and the languages offered |
+| `TTS_SOVITS_URL` / `TTS_SOVITS_HOME` / `TTS_SOVITS_DIR` | `http://127.0.0.1:9880` / `~/GPT-SoVITS` / `voices/gpt-sovits` | GPT-SoVITS's API, its clone (trained files), and the reference clips |
+| `TTS_SOVITS_LANGUAGES` | `ja,zh,en,zh-HK,ko` | languages each GPT-SoVITS voice is offered in |
 | `TTS_PRELOAD` | `kokoro` | engines loaded at start-up (`kokoro,chatterbox`, or empty) |
 | `TTS_TRANSLATE_MODEL` | (the chat's model) | Ollama model that translates replies for "speak in the voice's language" |
 | `ENABLE_EXTRAS` | `1` | the tool-calling test routes |
@@ -93,6 +95,8 @@ keep tokens there. All addresses are summarised at the top of
 | POST | `/v1/audio/speech` (also `/tts`) | `{"input", "model": "edge"\|"kokoro"\|"chatterbox"\|"piper", "voice", "speed", "translate", "translate_model"}` → mp3 (Edge) or wav; with `translate`, the `X-Spoken-Language` and `X-Spoken-Text` (URL-encoded) headers carry the translation |
 | GET | `/v1/audio/voices` | the engines and their voices `{"engines", "voices": [{"id", "engine", "language", "name"}]}` |
 | POST | `/v1/audio/voices/download` | `{"voice": "en_US-lessac-medium"}` fetches a Piper voice |
+| POST | `/v1/images/generations` | `{"prompt", "negative_prompt", "workflow", "seed"}` → `{"data": [{"b64_json", "mime", "filename", ...}]}`, drawn by ComfyUI |
+| GET | `/v1/images/workflows` | the workflows in `workflows/` `{"data": [{"id", "name", "usable", "error"}], "comfyui": true\|false}` |
 | GET | `/health` | Ollama reachability and optional features |
 | | `/v1/tools/*` | unchanged extras; function calling is to be reworked later |
 
@@ -121,8 +125,8 @@ Standard fields (`model`, `messages`, `stream`, `temperature`, `top_p`,
 `think` can also be `"low"`, `"medium"` or `"high"` for gpt-oss; OpenAI's
 `reasoning_effort` is accepted as well. Streamed chunks carry
 `delta.reasoning_content`, `delta.content`, and two extra top-level keys:
-`status` (progress text such as `"Searching: …"`) and `sources`
-(`[{"n", "title", "url"}]`). The last chunk has `usage` with Ollama's real
+`status` (progress text such as `"Searching: …"`), `sources`
+(`[{"n", "title", "url"}]`) and `images` (see Pictures below). The last chunk has `usage` with Ollama's real
 token counts.
 
 `tools` (OpenAI function tools) are passed to Ollama, but the server never runs
@@ -172,6 +176,7 @@ that aren't installed show up there as "not installed on the server".
 | `kokoro` | here, CPU is fine | natural; ★ voices are the best | English (US/UK), Mandarin, Japanese, Spanish, French, Hindi, Italian, Portuguese | `pip install kokoro-onnx` |
 | `chatterbox` | here, wants an NVIDIA GPU | the most human; copies any voice from a clip | 23, set by `TTS_CHATTERBOX_LANGUAGES` | `pip install chatterbox-tts` (large) |
 | `piper` | here, very light | plainer | many, one file per voice | `pip install piper-tts` + download voices |
+| `gpt-sovits` | here, its own program, NVIDIA GPU | closest to a real person: voices you **train** on your own audio | Japanese, Mandarin, English, Cantonese, Korean | install GPT-SoVITS and run its `api_v2.py` (below) |
 
 **Kokoro** (82M parameters, Apache 2.0). Install it and restart the server:
 
@@ -200,6 +205,20 @@ GPU. Speed can't be changed for it.
 # TTS_PRELOAD=kokoro,chatterbox in .env loads it at start-up instead of on the first Play
 ```
 
+*Chatterbox on a new GPU.* `chatterbox-tts` installs a PyTorch built for
+CUDA 12.4, which has no code for the newest cards (RTX 50xx, `sm_120`):
+loading fails with "no kernel image is available for execution on the
+device". The server then logs a warning and runs Chatterbox on the CPU
+(slow). To use the GPU, check what torch was built for, then install a build
+for CUDA 12.8 (pip warns that chatterbox asked for an older torch; that's fine):
+
+```bash
+.venv/bin/python -c "import torch; print(torch.__version__, torch.cuda.get_device_name(), torch.cuda.get_device_capability(), torch.cuda.get_arch_list())"
+.venv/bin/pip install --upgrade torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+```
+
+`TTS_CHATTERBOX_DEVICE=cpu` in `.env` skips the GPU on purpose.
+
 **Piper**: light and offline, plainer voices; each voice is a file to fetch
 once into `voices/` (names at https://huggingface.co/rhasspy/piper-voices):
 
@@ -210,6 +229,49 @@ once into `voices/` (names at https://huggingface.co/rhasspy/piper-voices):
 
 or, with the server running,
 `curl -X POST localhost:8100/v1/audio/voices/download -H 'Content-Type: application/json' -d '{"voice": "en_US-lessac-medium"}'`.
+
+**GPT-SoVITS** (github.com/RVC-Boss/GPT-SoVITS, MIT). You train a voice from
+1 to 10 minutes of clean recordings of one person, on the GPU, in its own web
+UI; then this server speaks with it. It's a separate program with its own
+Python, so its big dependencies stay out of this server's `.venv`. Install it
+once next to this repo (`~/GPT-SoVITS`, or set `TTS_SOVITS_HOME`); `CU128` is
+the build for RTX 50xx cards:
+
+```bash
+cd ~ && git clone https://github.com/RVC-Boss/GPT-SoVITS.git && cd GPT-SoVITS
+conda create -n GPTSoVits python=3.10 -y && conda activate GPTSoVits   # Miniconda, if you don't have conda
+bash install.sh --device CU128 --source HF
+```
+
+*Train a voice* (once per voice): `python webui.py en` opens the training UI
+at http://SERVER:9874. In tab 0, give it the folder with your recordings, then
+slice, (denoise), ASR and proofread the transcripts. In tab 1, give the
+experiment a name, say `Mio`, then format the data, train SoVITS, and train
+GPT. It saves `SoVITS_weights_*/Mio_e*_s*.pth` and `GPT_weights_*/Mio-e*.ckpt`.
+Close the web UI when you're done, since it holds GPU memory.
+
+*Give it a reference clip:* copy one of the sliced clips (3 to 10 seconds, from
+`output/slicer_opt/`) to this server's `voices/gpt-sovits/Mio.wav`, and put what
+it says in `voices/gpt-sovits/Mio.txt`. The names must match the experiment.
+The clip's language is guessed from the text; `Mio.json` with
+`{"language": "ja"}` sets it (ja, zh, en, zh-HK, ko), and `"gpt"`/`"sovits"`
+paths pick other trained files than the newest. A clip with no trained files
+works too: GPT-SoVITS then copies it with whichever models it has loaded,
+less closely.
+
+*Run its API* while the chat server runs:
+
+```bash
+cd ~/GPT-SoVITS && conda activate GPTSoVits
+python api_v2.py -a 127.0.0.1 -p 9880 -c GPT_SoVITS/configs/tts_infer.yaml
+```
+
+The voices show up in Chat Settings under GPT-SoVITS as `Mio (Japanese,
+trained)`, once per language in `TTS_SOVITS_LANGUAGES`. A voice can speak a
+language other than its clip's, e.g. a Japanese voice speaking English; with
+*Speak in the voice's language* the reply is translated first. The server
+loads the voice's trained files into GPT-SoVITS when a chat switches voice
+(a few seconds), then keeps them loaded.
 
 **Speaking another language.** With `"translate": true` the text is first
 translated by an Ollama model into the language of the voice (`ja-JP` for
@@ -225,6 +287,45 @@ Check an engine by hand:
 ```bash
 curl -X POST localhost:8100/v1/audio/speech -H 'Content-Type: application/json' \
      -d '{"input": "Hello there", "model": "kokoro", "voice": "af_heart"}' -o hello.wav
+```
+
+## Pictures (ComfyUI)
+
+ComfyUI runs on this same machine (default `http://127.0.0.1:8188`, set
+`COMFYUI_URL` in `.env` otherwise). Start it as usual, e.g.
+`python main.py --listen 127.0.0.1` in the ComfyUI folder; nothing extra is
+installed here, the server only uses ComfyUI's HTTP API.
+
+A chat picks a workflow in **Chat Settings > Pictures**. The workflows are the
+API-format `.json` files in `workflows/` (see `workflows/README.md`: in
+ComfyUI, *Workflow > Export (API)*, with `{{positive}}` and `{{negative}}` in
+the prompt boxes). New files show up without a restart.
+
+It works like auto web search: with `"image_workflow": "<id>"` in a chat
+request, a fixed system note tells the model it can put
+
+```
+<image>
+positive: a cosy café at night, warm light, watercolour
+negative: blurry, text
+</image>
+```
+
+anywhere in its reply when a picture fits (`"image_mode": "on"` asks for one
+with every reply). The block is cut out of the streamed text; when the answer
+is done the server queues the workflow, waits for it, and sends the picture in
+a chunk `{"images": [{"b64_json", "mime", "prompt", "negative_prompt",
+"workflow"}]}` (or `{"error", "prompt", ...}` if ComfyUI failed). At most
+`COMFYUI_MAX_IMAGES` pictures per reply.
+
+One GPU for both Ollama and ComfyUI: if a big chat model and the image model
+don't fit together, set `COMFYUI_UNLOAD_OLLAMA=1` (the chat model is unloaded
+before drawing and reloads on the next message) and/or `COMFYUI_FREE_AFTER=1`
+(ComfyUI frees its models after each picture).
+
+```bash
+curl -X POST localhost:8100/v1/images/generations -H 'Content-Type: application/json' \
+     -d '{"prompt": "a red fox in snow", "workflow": "sd15-basic"}' | head -c 200
 ```
 
 ## Why Python and not C++
@@ -248,5 +349,5 @@ cd Server/ollama
 python -m pytest -q tests
 ```
 
-The tests run the server against a fake Ollama and a fake web, so they need
-neither Ollama nor network access.
+The tests run the server against a fake Ollama, a fake web and a fake ComfyUI,
+so they need none of them nor network access.

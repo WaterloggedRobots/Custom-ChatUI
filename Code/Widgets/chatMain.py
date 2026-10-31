@@ -1,3 +1,4 @@
+import avatar
 import chat_settings
 import llmClient
 import paths
@@ -23,7 +24,7 @@ IMAGE_HEIGHT = 240              # pictures in the chat; click one to open it ful
 CAP_ICONS = (("vision", "👁"), ("thinking", "💭"), ("tools", "🔧"))
 WEB_LABELS = {"auto": "Web: Auto", "on": "Web: Always", "off": "Web: Off"}
 TOOL_STATE_ICONS = {"ok": "✓", "error": "⚠", "declined": "✗ declined"}
-APP_VERSION = "0.13.0_Pictures"
+APP_VERSION = "0.14.0_Avatar"
 # Mic button languages: label, code sent to the server ("" = Whisper detects it)
 VOICE_LANGUAGES = (("Detect automatically", ""), ("English", "en"), ("中文 Chinese", "zh"),
                    ("粵語 Cantonese", "yue"), ("日本語 Japanese", "ja"))
@@ -219,6 +220,12 @@ class ChatMain(QMainWindow):
         self.speaker.spoken.connect(self.on_spoken)
         self.expanded_spoken = set()     # indices of replies showing what they were spoken as
         self._speak_redraw_pending = False
+        # The 3D model (avatar.py): in chats with "3D model" on she acts out and speaks each reply
+        self.avatar_link = avatar.AvatarLink(self)
+        self.avatar_link.failed.connect(lambda err: self.status_label.setText("🧍 " + err))
+        self.performer = avatar.Performer(self.speaker, self.avatar_link, self)
+        self._tag_filter = None          # hides her stage directions while a reply streams in
+        self._reacted = False            # the streaming reply's first act was played already
 
         self.load_ui()
         self.setup_connections()
@@ -773,11 +780,15 @@ class ChatMain(QMainWindow):
     # Text to speech
     # ------------------------------------------------------------------
 
-    def speak(self, index):
-        """Play, pause or resume reply `index` with this chat's voice."""
+    def speak(self, index, reacted=False):
+        """Play, pause or resume reply `index` with this chat's voice. With the 3D
+        model on she acts it out too (`reacted`: its first act was played already)."""
         if not self.settings["TTS"] or not 0 <= index < len(self.chat_markdown):
             return
         s = self.settings
+        if s["Avatar"] and self.speaker.key != index:
+            msg = self.chat_markdown[index]
+            self.performer.prepare(index, msg.get("content", ""), msg.get("acts"), skip_first=reacted)
         translate_model = (self.client.model_name or "") if s["TTS Translate"] else None
         self.speaker.toggle(index, self.chat_markdown[index].get("content", ""),
                             s["TTS Engine"], s["TTS Voice"], s["TTS Speed"], translate_model)
@@ -811,6 +822,8 @@ class ChatMain(QMainWindow):
         self.thinking_time = None
         self.stream_phase = None
         self._streamed_images = []
+        self._tag_filter = avatar.TagFilter() if self.settings["Avatar"] else None
+        self._reacted = False
         self.ui.pushButton_5.setText("Stop")
         self.client.generate(self.chat_markdown)
 
@@ -839,6 +852,13 @@ class ChatMain(QMainWindow):
     def on_token(self, text):
         if self.response_start_pos is None:
             return
+        if self._tag_filter is not None:
+            text, acts = self._tag_filter.feed(text)
+            if acts and not self._reacted:          # she reacts as the answer appears
+                self.performer.react(acts[0])
+                self._reacted = True
+            if not text:
+                return
         if self.stream_phase != "answer":
             if self.stream_phase == "thinking":
                 if self.thinking_time is None:
@@ -871,9 +891,12 @@ class ChatMain(QMainWindow):
             return
 
         end_time = time.time()
+        content, acts = result.get("content", ""), []
+        if self.settings["Avatar"]:
+            content, acts = avatar.strip_tags(content)
         msg = {
             "role": "assistant",
-            "content": result.get("content", ""),
+            "content": content,
             "ts": end_time,
             "response_time": round(end_time - self.response_start_time, 2),
         }
@@ -890,6 +913,8 @@ class ChatMain(QMainWindow):
             msg["usage"] = result["usage"]
         if result.get("aborted"):
             msg["stopped"] = True
+        if acts:
+            msg["acts"] = acts            # her stage directions, with where they were in the text
         self.chat_markdown.append(msg)
 
         cursor = self._clear_streamed()
@@ -902,8 +927,9 @@ class ChatMain(QMainWindow):
             self._speak_redraw_pending = False
             self._rebuild_chat_ui()
         s = self.settings
-        if s["TTS"] and s["TTS Auto Play"] and msg["content"].strip() and not result.get("aborted"):
-            self.speak(len(self.chat_markdown) - 1)
+        if s["TTS"] and (s["TTS Auto Play"] or s["Avatar"]) and msg["content"].strip() \
+                and not result.get("aborted"):
+            self.speak(len(self.chat_markdown) - 1, reacted=self._reacted)
 
     # ------------------------------------------------------------------
     # Pictures (ComfyUI, through the server)
@@ -1186,12 +1212,22 @@ class ChatMain(QMainWindow):
         s = self.settings
         self.botName = s["Character"]
         self.client.set_preset(s["Pretext"])
+        self.client.stage_note = self._stage_note if s["Avatar"] else None
+        if s["Avatar"]:
+            self.avatar_link.personality(s["Avatar Personality"])
         self.client.temperature = s["Temperature"]
         if not s["Model"] and self.models:
             s["Model"] = next(iter(self.models))
         self.client.set_model(s["Model"] or None)
         self._fill_model_combo()            # also applies Think, Web Search, Tools and Pictures
         self._show_image_panel()
+
+    def _stage_note(self) -> str:
+        """The 3D model's system note (on llmClient's worker thread); "" while she isn't running."""
+        info = self.avatar_link.catalog()
+        if info is None:
+            return ""
+        return avatar.system_note(info, self.settings["Avatar Personality"], self.settings["Avatar Notes"])
 
     def apply_settings(self, title, settings):
         """Save from the Chat Settings window for the open chat; a new title renames its file."""

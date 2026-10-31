@@ -21,6 +21,8 @@ TEMPERATURE_RANGE = (0.0, 2.0)
 TTS_ENGINES = ("edge", "kokoro", "chatterbox", "piper", "gpt-sovits")   # the server's; it may add more
 TTS_SPEED_RANGE = (0.5, 2.0)
 IMAGE_MODES = ("auto", "on")           # auto: the model decides when to draw; on: a picture with every reply
+AVATAR_PERSONALITIES = ("Any", "Tsundere", "Kuudere")   # the 3D model's ExpressionLibrary.Personality
+AVATAR_NOTES_LIMIT = 2000
 TOOL_KEYS = {"files": "Tool Files", "git": "Tool Git", "run": "Tool Run"}   # local_tools group -> setting
 EXPORT_TAG = "ChatUI Settings"        # marks an exported file; the value is the format version
 EXPORT_VERSION = 1
@@ -46,6 +48,10 @@ DEFAULTS = {
     # Pictures, drawn by ComfyUI on the server (Server/ollama/chat_server/comfy.py)
     "Image Workflow": "",             # a workflow id from the server's workflows/ folder; "" = no pictures
     "Image Mode": "auto",             # one of IMAGE_MODES
+    # The 3D model (ChatUIAvatar, Unity) acts out and speaks each reply (avatar.py). On turns TTS on.
+    "Avatar": False,
+    "Avatar Personality": "Any",      # one of AVATAR_PERSONALITIES: her faces and the replies' tone
+    "Avatar Notes": "",               # how she acts: faces and moves to favour or avoid
 }
 
 
@@ -86,7 +92,7 @@ def normalize(data) -> dict:
     if isinstance(data.get("Tools"), bool):          # the old single switch
         for key in TOOL_KEYS.values():
             s[key] = data["Tools"]
-    for key in ("Think", *TOOL_KEYS.values(), "TTS", "TTS Auto Play", "TTS Translate"):
+    for key in ("Think", *TOOL_KEYS.values(), "TTS", "TTS Auto Play", "TTS Translate", "Avatar"):
         if isinstance(data.get(key), bool):
             s[key] = data[key]
     if data.get("Web Search") in WEB_MODES:
@@ -96,6 +102,12 @@ def normalize(data) -> dict:
         s["Image Workflow"] = workflow.strip()
     if data.get("Image Mode") in IMAGE_MODES:
         s["Image Mode"] = data["Image Mode"]
+    if data.get("Avatar Personality") in AVATAR_PERSONALITIES:
+        s["Avatar Personality"] = data["Avatar Personality"]
+    if isinstance(data.get("Avatar Notes"), str):
+        s["Avatar Notes"] = data["Avatar Notes"].strip()[:AVATAR_NOTES_LIMIT]
+    if s["Avatar"]:
+        s["TTS"] = True                   # she speaks every reply, so the voice is always on with her
     return s
 
 

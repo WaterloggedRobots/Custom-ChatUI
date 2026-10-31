@@ -88,6 +88,96 @@ QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px}</string>
         </property>
        </widget>
       </item>
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_avatar">
+        <item>
+         <widget class="QLabel" name="label_avatar">
+          <property name="text">
+           <string>3D model: she acts out each reply with her face and body, and speaks it (turns Text to speech on)</string>
+          </property>
+          <property name="wordWrap">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="avatarCheck">
+          <property name="toolTip">
+           <string>Needs the ChatUIAvatar app (or Unity in Play mode) running on this PC</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QWidget" name="avatarBox" native="true">
+        <layout class="QGridLayout" name="gridLayout_avatar" columnstretch="0,1,0">
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_avatarPersonality">
+           <property name="text">
+            <string>Personality</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QComboBox" name="avatarPersonalityCombo">
+           <property name="toolTip">
+            <string>Sets which faces she picks and the tone of her replies</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="2">
+          <widget class="QPushButton" name="avatarCheckButton">
+           <property name="toolTip">
+            <string>See if the 3D model is running, and what faces and moves she has</string>
+           </property>
+           <property name="text">
+            <string>Check</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0" colspan="3">
+          <widget class="QLabel" name="label_avatarNotes">
+           <property name="text">
+            <string>Acting notes (how she moves and emotes: faces and moves to favour or avoid, how big her reactions are)</string>
+           </property>
+           <property name="wordWrap">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0" colspan="3">
+          <widget class="QPlainTextEdit" name="avatarNotesEdit">
+           <property name="maximumSize">
+            <size>
+             <width>16777215</width>
+             <height>90</height>
+            </size>
+           </property>
+           <property name="placeholderText">
+            <string>E.g. Shy at first: small reactions, looks away when praised. Waves only when greeting. Never lies down.</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="0" colspan="3">
+          <widget class="QLabel" name="avatarStatusLabel">
+           <property name="wordWrap">
+            <bool>true</bool>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">color:#8a8a8a</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>

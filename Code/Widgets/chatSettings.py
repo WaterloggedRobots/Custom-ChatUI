@@ -5,7 +5,8 @@ to main.py on Save; ChatMain applies and saves them in the chat file. The
 model list is the same one the main window's quick model picker shows. The
 voice lists come from the server (GET /v1/audio/voices) the first time text
 to speech is switched on here, and the ComfyUI workflows (GET
-/v1/images/workflows) each time their list is opened.
+/v1/images/workflows) each time their list is opened. "3D model" turns the
+voice on with it and asks the 3D model what she can do (avatar.py).
 """
 
 import chat_settings
@@ -80,6 +81,10 @@ class ChatSettings(QMainWindow):
         self.ui.ttsSpeedSpin.setDecimals(2)
         self.ui.ttsBox.setVisible(False)
 
+        for name in chat_settings.AVATAR_PERSONALITIES:
+            self.ui.avatarPersonalityCombo.addItem(name, name)
+        self.ui.avatarBox.setVisible(False)
+
     def setup_connections(self):
         spin, slider = self.ui.temperatureSpin, self.ui.temperatureSlider
         spin.valueChanged.connect(lambda v: self._quietly(slider, slider.setValue, round(v * 100)))
@@ -94,6 +99,8 @@ class ChatSettings(QMainWindow):
         self.ui.ttsTestButton.clicked.connect(self.test_voice)
         self.ui.githubButton.clicked.connect(self.github_login)
         self.workflow_combo.activated.connect(self.on_workflow_chosen)
+        self.ui.avatarCheck.toggled.connect(self.on_avatar_toggled)
+        self.ui.avatarCheckButton.clicked.connect(self.check_avatar)
 
     @staticmethod
     def _quietly(widget, setter, value):
@@ -139,6 +146,14 @@ class ChatSettings(QMainWindow):
         self.ui.ttsCheck.setChecked(s["TTS"])
         self.ui.ttsCheck.blockSignals(False)
         self.on_tts_toggled(s["TTS"])
+        self.ui.avatarPersonalityCombo.setCurrentIndex(
+            max(0, self.ui.avatarPersonalityCombo.findData(s["Avatar Personality"])))
+        self.ui.avatarNotesEdit.setPlainText(s["Avatar Notes"])
+        self.ui.avatarStatusLabel.setText("")
+        self.ui.avatarCheck.blockSignals(True)
+        self.ui.avatarCheck.setChecked(s["Avatar"])
+        self.ui.avatarCheck.blockSignals(False)
+        self._show_avatar(s["Avatar"])
 
     def title(self) -> str:
         return self.ui.titleEdit.text().strip() or "New Chat"
@@ -160,6 +175,9 @@ class ChatSettings(QMainWindow):
             "TTS Speed": self.ui.ttsSpeedSpin.value(),
             "TTS Auto Play": self.ui.ttsAutoCheck.isChecked(),
             "TTS Translate": self.ui.ttsTranslateCheck.isChecked(),
+            "Avatar": self.ui.avatarCheck.isChecked(),
+            "Avatar Personality": self.ui.avatarPersonalityCombo.currentData(),
+            "Avatar Notes": self.ui.avatarNotesEdit.toPlainText(),
         })
 
     # ------------------------------------------------------------------
@@ -262,6 +280,41 @@ class ChatSettings(QMainWindow):
         info = next((w for w in self.workflow_list or [] if w["id"] == self.image_workflow), None)
         if info and not info.get("usable", True):
             self.ui.imageStatusLabel.setText(f"{info['id']}: {info.get('error', '')}")
+
+    # ------------------------------------------------------------------
+    # 3D model (avatar.py)
+    # ------------------------------------------------------------------
+
+    def on_avatar_toggled(self, on):
+        """She speaks every reply, so turning her on turns the voice on (and auto play)."""
+        if on:
+            self.ui.ttsAutoCheck.setChecked(True)
+            self.ui.ttsCheck.setChecked(True)
+            self.check_avatar()
+        self._show_avatar(on)
+
+    def _show_avatar(self, on):
+        self.ui.avatarBox.setVisible(on)
+        # The voice can't be turned off while she's on; it comes back with her off.
+        self.ui.ttsCheck.setEnabled(not on)
+        self.ui.ttsCheck.setToolTip("The 3D model speaks every reply, so the voice stays on while she's on"
+                                    if on else "Off: no Play buttons in the chat and no voice settings here")
+        self.adjustSize()
+
+    def check_avatar(self):
+        link = self.chat_main.avatar_link
+        self.ui.avatarStatusLabel.setText(f"Looking for the 3D model at {link.url}…")
+        self.ui.avatarStatusLabel.repaint()
+        info = link.catalog(max_age=0)
+        if info is None:
+            self.ui.avatarStatusLabel.setText(
+                f"The 3D model isn't running at {link.url}. Start ChatUIAvatar on this PC (or press Play in Unity); "
+                "this setting is kept and she joins in once she's running.")
+            return
+        faces = len(info.get("expressions") or []) + len(info.get("specialExpressions") or [])
+        self.ui.avatarStatusLabel.setText(
+            f"✓ Connected: {faces} faces, {len(info.get('actions') or [])} moves, "
+            f"{len(info.get('motionSets') or [])} presets; she's {str(info.get('posture', '')).lower() or 'here'}.")
 
     # ------------------------------------------------------------------
     # Voice (text to speech)

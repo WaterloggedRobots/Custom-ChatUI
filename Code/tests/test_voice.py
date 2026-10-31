@@ -297,7 +297,7 @@ def test_new_reply_plays_by_itself(gui, monkeypatch):
     main, _, _ = gui
     main.create_chat("Talk", {**chat_settings.DEFAULTS, "Model": "m1", "TTS": True})
     spoken = []
-    monkeypatch.setattr(main, "speak", spoken.append)
+    monkeypatch.setattr(main, "speak", lambda index, reacted=False: spoken.append(index))
     main.chat_markdown.append({"role": "user", "content": "hi", "ts": 1})
     main._start_response = lambda: None
     main.response_start_pos = main.chat.textCursor().position()

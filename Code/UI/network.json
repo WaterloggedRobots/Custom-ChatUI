@@ -9,6 +9,11 @@
         "_about": "This Windows PC. For reference only; the client never needs its own IP.",
         "ip": "192.168.0.184"
     },
+    "avatar": {
+        "_about": "The 3D model (ChatUIAvatar, Unity) on this PC: its Avatar Api Server. Chats with \"3D model\" on drive it.",
+        "ip": "127.0.0.1",
+        "port": 7870
+    },
     "nas": {
         "_about": "Samba NAS. Chat and bot saves move here in the next step; not used yet.",
         "ip": "192.168.0.163",

@@ -254,7 +254,8 @@ class Speaker(QObject):
     changed = Signal()           # the playing key or its state changed: redraw the buttons
     failed = Signal(str)
     spoken = Signal(object, str, str)       # key, language, text: what a translated reply was spoken as
-    _fetched = Signal(object, str)          # key, file (from the worker thread)
+    started = Signal(object, str, str)      # key, audio file, the text it says: playing starts (avatar.Performer)
+    _fetched = Signal(object, str, str)     # key, file, the text it says (from the worker thread)
     _fetch_failed = Signal(object, str)
 
     def __init__(self, base_url, cache_dir: Path, parent=None):
@@ -329,6 +330,7 @@ class Speaker(QObject):
 
     def _fetch(self, key, text, engine, voice, speed, translate_model=None):
         translate = translate_model is not None
+        said = text
         path = self.cached(text, engine, voice, speed, translate)
         if path is None:
             body = {"input": text, "model": engine, "voice": voice, "speed": speed}
@@ -363,9 +365,10 @@ class Speaker(QObject):
             try:
                 info = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
                 self.spoken.emit(key, info.get("language", ""), info.get("text", ""))
+                said = info.get("text") or text
             except (OSError, ValueError):
                 pass
-        self._fetched.emit(key, str(path))
+        self._fetched.emit(key, str(path), said)
 
     def _prune(self):
         try:
@@ -376,7 +379,7 @@ class Speaker(QObject):
         except OSError:
             pass
 
-    def _on_fetched(self, key, path):
+    def _on_fetched(self, key, path, said):
         if key != self.key:            # another reply was picked meanwhile
             return
         self._loading = False
@@ -389,6 +392,15 @@ class Speaker(QObject):
         self._last_state = "loading"
         self._poll.start()
         self.changed.emit()
+        self.started.emit(key, path, said)
+
+    def position(self) -> int:
+        """Milliseconds played of the current clip."""
+        return self._player.position() if self._player is not None else 0
+
+    def duration(self) -> int:
+        """Length of the current clip in milliseconds; 0 until it's known."""
+        return max(0, self._player.duration()) if self._player is not None else 0
 
     def _on_fetch_failed(self, key, err):
         if key == self.key:

@@ -18,7 +18,9 @@ builds its message list from it here:
   MAX_TOOL_ROUNDS rounds per answer;
 - with a ComfyUI workflow picked for the chat, the model can ask for
   pictures in its reply; the server draws them and streams them back, and
-  they are saved in CLIENT_DATA_DIR/Images and kept with the reply.
+  they are saved in CLIENT_DATA_DIR/Images and kept with the reply;
+- with the 3D model on, `stage_note` (avatar.system_note) tells the model
+  what she can do, and earlier replies carry their stage directions again.
 """
 
 import base64
@@ -32,6 +34,7 @@ from pathlib import Path
 import requests
 from PySide6.QtCore import QObject, Signal
 
+import avatar
 import paths
 from local_tools import ToolBox
 
@@ -81,6 +84,7 @@ class LLMClient(QObject):
         self.image_workflow = ""       # ComfyUI workflow id on the server; "" = no pictures
         self.image_mode = "auto"
         self.summary = None            # {"upto": n, "text": "..."} covering history[:n]
+        self.stage_note = None         # 3D model on: a function returning its system note, or "" if she's away
 
         # LLM server address: Code/UI/network.json, or your saved copy (see paths.py)
         server = paths.load_network().get("llm_server", {})
@@ -210,6 +214,9 @@ class LLMClient(QObject):
         messages = []
         if self.preset:
             messages.append({"role": "system", "content": self.preset})
+        stage = self.stage_note() if self.stage_note else ""
+        if stage:
+            messages.append({"role": "system", "content": stage})
         if summary_text:
             messages.append({"role": "system", "content": f"Summary of the earlier conversation:\n{summary_text}"})
         user_idx = [i for i, m in enumerate(recent) if m["role"] == "user"]
@@ -220,6 +227,8 @@ class LLMClient(QObject):
             if m["role"] not in ("user", "assistant"):
                 continue
             content = self._content(m, i in full)
+            if stage and m.get("acts") and isinstance(content, str):
+                content = avatar.with_tags(content, m["acts"])
             if m.get("tools"):
                 # Earlier tool use, in one line each, so follow-up questions have the context.
                 used = "\n".join(f"- {t['summary'].splitlines()[0]} ({t['state']})" for t in m["tools"])

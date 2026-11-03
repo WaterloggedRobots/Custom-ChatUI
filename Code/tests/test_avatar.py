@@ -161,7 +161,7 @@ class FakeLink:
 def stage(gui, monkeypatch):
     main, win, tmp = gui
     link = FakeLink()
-    link.url = "http://127.0.0.1:7870"
+    link.url = "http://localhost:7870"
     monkeypatch.setattr(main, "avatar_link", link)
     main.performer.link = link
     return main, win, link

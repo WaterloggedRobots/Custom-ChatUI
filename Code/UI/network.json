@@ -11,7 +11,7 @@
     },
     "avatar": {
         "_about": "The 3D model (ChatUIAvatar, Unity) on this PC: its Avatar Api Server. Chats with \"3D model\" on drive it.",
-        "ip": "127.0.0.1",
+        "ip": "localhost",
         "port": 7870
     },
     "nas": {

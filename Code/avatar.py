@@ -1,7 +1,7 @@
 """The 3D model: she acts out and speaks each reply when a chat has "3D model" on.
 
 The model is the ChatUIAvatar app (Unity; its README is next to the project
-on the NAS). It runs on this PC and listens on http://127.0.0.1:7870
+on the NAS). It runs on this PC and listens on http://localhost:7870
 (`avatar` in Code/UI/network.json):
 
   GET  /api/catalog      her faces, moves, presets, posture and personality
@@ -56,7 +56,7 @@ PERSONALITY_TONES = {
 
 def avatar_url() -> str:
     net = paths.load_network().get("avatar", {})
-    host = str(net.get("ip") or "127.0.0.1")
+    host = str(net.get("ip") or "localhost")
     port = int(net.get("port") or DEFAULT_PORT)
     return f"http://{host}:{port}"
 

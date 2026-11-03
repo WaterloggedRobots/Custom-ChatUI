@@ -103,7 +103,7 @@ Tick *3D model* in a chat's settings (the *Character* box) and the 3D character 
 - **Personality** (*Any*, *Tsundere*, *Kuudere*) is sent to her so she prefers matching faces, and also sets the tone of the replies. **Acting notes** below it fine-tune her: which faces and moves to favour or avoid, how big her reactions are. Both are saved per chat with the rest of the settings. The *Pretext* above is still who she is.
 - *Check* shows whether she's running and how many faces and moves she has. If she isn't running, the chat works as before and the status line says so.
 
-The replies keep their stage directions in the chat file (`acts`, with where each one was), so ▶ Play on an older reply acts it out again, and the model sees how it directed her earlier. Her address is `avatar` in `Code/UI/network.json` (default `127.0.0.1:7870`, the Avatar Api Server's port). The code is in `Code/avatar.py`.
+The replies keep their stage directions in the chat file (`acts`, with where each one was), so ▶ Play on an older reply acts it out again, and the model sees how it directed her earlier. Her address is `avatar` in `Code/UI/network.json` (default `localhost:7870`, the Avatar Api Server's port). The code is in `Code/avatar.py`.
 
 ## 2.9. Pictures with ComfyUI (v0.13)
 The chat can draw pictures with ComfyUI, which runs on the server machine next to Ollama. Pick a **Workflow** in a chat's settings (the *Pictures* box) and it works like auto web search: the model decides when a picture fits (you ask for one, want to see something, or a scene is worth showing) and writes the positive and negative prompts itself. The picture appears under the reply and in the panel on the right of the chat window. *When: With every reply* draws one for each reply instead. *Off* turns it off for the chat.
@@ -119,7 +119,7 @@ The workflows are ComfyUI graphs saved with *Workflow > Export (API)* into `Serv
 | Name | Where | What |
 |---|---|---|
 | LLM server | `192.168.0.192:8100` (Ubuntu), code in `Server/ollama/` | Ollama wrapper the client talks to. Addresses: `Server/ollama/chat_server/config.py`, overrides in `Server/ollama/.env` |
-| 3D model | `127.0.0.1:7870` on the client PC: `avatar` in `Code/UI/network.json` | the ChatUIAvatar app's Avatar Api Server, driven by chats with *3D model* on (`Code/avatar.py`) |
+| 3D model | `localhost:7870` on the client PC: `avatar` in `Code/UI/network.json` | the ChatUIAvatar app's Avatar Api Server, driven by chats with *3D model* on (`Code/avatar.py`) |
 | Client git folder | `Code/` (`paths.CLIENT_REPO_DIR`) | app files: UI layouts, images, default addresses in `Code/UI/network.json` |
 | Client data | `%APPDATA%\Waterlogged\ChatUI` (`paths.CLIENT_DATA_DIR`) | chats (each with its settings), your saved server address (`network.json`), reply audio (`Audio/`) and pictures (`Images/`) |
 | Client PC | `192.168.0.184` (Windows) | runs `Code/`; listed in `network.json` for reference |

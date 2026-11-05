@@ -243,6 +243,7 @@ class ChatMain(QMainWindow):
         # The 3D model (avatar.py): in chats with "3D model" on she acts out and speaks each reply
         self.avatar_link = avatar.AvatarLink(self)
         self.avatar_link.failed.connect(lambda err: self.status_label.setText("🧍 " + err))
+        self.avatar_link.status.connect(self.on_avatar_status)
         self.performer = avatar.Performer(self.speaker, self.avatar_link, self)
         self._tag_filter = None          # hides her stage directions while a reply streams in
         self._reacted = False            # the streaming reply's first act was played already
@@ -1455,6 +1456,7 @@ class ChatMain(QMainWindow):
         self.botName = s["Character"]
         self.client.set_preset(s["Pretext"])
         self.client.stage_note = self._stage_note if s["Avatar"] else None
+        self.avatar_link.watch("chat", s["Avatar"])
         if s["Avatar"]:
             self.avatar_link.personality(s["Avatar Personality"])
         self.client.temperature = s["Temperature"]
@@ -1463,6 +1465,12 @@ class ChatMain(QMainWindow):
         self.client.set_model(s["Model"] or None)
         self._fill_model_combo()            # also applies Think, Web Search, Tools and Pictures
         self._show_image_panel()
+
+    def on_avatar_status(self, info):
+        """The 3D model was started or closed while this chat uses her."""
+        if self.settings["Avatar"]:
+            self.status_label.setText("🧍 " + ("The 3D model is connected." if info is not None
+                                              else self.avatar_link.missing_text()))
 
     def _stage_note(self) -> str:
         """The 3D model's system note (on llmClient's worker thread); "" while she isn't running."""

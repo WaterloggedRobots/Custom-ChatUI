@@ -53,9 +53,10 @@ def languages() -> list:
 
 
 async def check(force: bool = False) -> bool:
-    """Is GPT-SoVITS's API running? Asked at most every CHECK_EVERY seconds."""
+    """Is GPT-SoVITS's API running? Once up, asked at most every CHECK_EVERY seconds;
+    while it's down, every time, so it's found as soon as it's started."""
     now = time.monotonic()
-    if force or now - _state["checked"] > CHECK_EVERY:
+    if force or not _state["up"] or now - _state["checked"] > CHECK_EVERY:
         try:
             async with _client(1.5) as client:
                 await client.get(f"{Config.TTS_SOVITS_URL}/control")   # 400 without a command: it's up

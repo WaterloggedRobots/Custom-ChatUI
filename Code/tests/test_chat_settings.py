@@ -332,3 +332,46 @@ def test_general_settings_show_the_github_user(gui, monkeypatch):
     assert win.github_label.text() == "✓ Connected as someone"
     win._show_github_user(None)
     assert win.github_label.text() == "Not signed in"
+
+
+def test_voice_list_follows_gpt_sovits_starting_and_new_voices(gui, monkeypatch):
+    main, win, _ = gui
+    from Widgets import chatSettings
+    edge = {"id": "en-US-A", "engine": "edge", "language": "en-US", "name": "A"}
+    mio = {"id": "miomio|ja", "engine": "gpt-sovits", "language": "ja", "name": "miomio (Japanese, trained)"}
+
+    def engines(up):
+        return [{"id": "edge", "name": "Edge", "available": True},
+                {"id": "gpt-sovits", "name": "GPT-SoVITS", "available": up, "install": "start its api_v2.py"}]
+
+    monkeypatch.setattr(chatSettings.voice, "list_voices", lambda *a, **k: {"engines": engines(False), "voices": [edge]})
+    win.open_for("Chat", {**win.settings(), "TTS": True, "TTS Engine": "gpt-sovits", "TTS Voice": "miomio|ja"}, False)
+    assert win._voice_timer.isActive()
+    assert "Not running on the server yet" in win.ui.ttsStatusLabel.text()
+    assert "not available" in win.ui.ttsEngineCombo.currentText()
+
+    win._on_voices_checked({"engines": engines(True), "voices": [mio]}, "gpt-sovits")
+    assert win.ui.ttsEngineCombo.currentText() == "GPT-SoVITS" and win.ui.ttsStatusLabel.text() == ""
+    assert win.ui.ttsVoiceCombo.currentData() == "miomio|ja"
+    assert [v["id"] for v in win.voice_list["voices"]] == ["en-US-A", "miomio|ja"]     # the other engines stay
+
+    win._on_voices_checked(None, "the server's gone")                                   # keeps what it has
+    assert win.ui.ttsVoiceCombo.currentData() == "miomio|ja"
+
+    win.hide()
+    assert not win._voice_timer.isActive()
+
+
+def test_settings_window_shows_the_3d_model_arriving(gui, monkeypatch):
+    main, win, _ = gui
+    link = main.avatar_link
+    monkeypatch.setattr(link, "watch", lambda who, on: watching.__setitem__(who, on))
+    watching = {}
+    win.open_for("Chat", {**win.settings(), "Avatar": True}, False)
+    assert watching["settings"] is True
+    win._show_avatar_status(None)
+    assert "isn't running" in win.ui.avatarStatusLabel.text()
+    win._show_avatar_status({"expressions": ["a"], "actions": [], "motionSets": []})
+    assert "Connected" in win.ui.avatarStatusLabel.text()
+    win.hide()
+    assert watching["settings"] is False

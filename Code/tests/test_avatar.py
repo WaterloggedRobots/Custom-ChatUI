@@ -144,6 +144,9 @@ class FakeLink:
     def __init__(self):
         self.sent = []
 
+    def watch(self, who, on):
+        pass
+
     def act(self, act):
         self.sent.append(("act", act))
 
@@ -237,3 +240,61 @@ def test_settings_window_avatar_turns_the_voice_on(stage, monkeypatch):
         (True, True, True, "Kuudere", "Never lies down.")
     win.ui.avatarCheck.setChecked(False)
     assert win.ui.ttsCheck.isEnabled()
+
+
+# ---------------------------------------------------------------------------
+# Finding her when ChatUIAvatar is started after the chat client
+# ---------------------------------------------------------------------------
+
+class _Answer:
+    status_code = 200
+
+    def json(self):
+        return CATALOG
+
+
+def _link(monkeypatch, answers):
+    """An AvatarLink whose threads don't run, with `answers` to its requests; (link, what it heard, what it sent)."""
+    monkeypatch.setattr(avatar.threading.Thread, "start", lambda self: None)
+    monkeypatch.setattr(avatar, "avatar_url", lambda: "http://nowhere")
+
+    def get(url, timeout):
+        if not answers.pop(0):
+            raise avatar.requests.ConnectionError()
+        return _Answer()
+
+    monkeypatch.setattr(avatar.requests, "get", get)
+    link = avatar.AvatarLink()
+    heard, sent = [], []
+    link.status.connect(heard.append)
+    link._send = lambda path, body: sent.append((path, body))
+    return link, heard, sent
+
+
+def test_status_is_only_reported_when_she_comes_or_goes(monkeypatch):
+    link, heard, _ = _link(monkeypatch, [False, False, True, True, False])
+    for _ in range(5):
+        link._look()
+    assert heard == [None, CATALOG, None]
+
+
+def test_she_is_told_her_personality_again_when_she_appears(monkeypatch):
+    link, _, sent = _link(monkeypatch, [False, True, True])
+    link.personality("Tsundere")
+    sent.clear()
+    link._look()
+    assert sent == []
+    link._look()
+    assert sent == [("/api/personality", {"personality": "Tsundere"})]
+    link._look()
+    assert len(sent) == 1
+
+
+def test_a_new_watcher_hears_where_things_stand(monkeypatch):
+    link, heard, _ = _link(monkeypatch, [True, True])
+    link._look()
+    heard.clear()
+    link.watch("settings", True)
+    assert link._announce.is_set()
+    link._look(announce=link._announce.is_set())
+    assert heard == [CATALOG]

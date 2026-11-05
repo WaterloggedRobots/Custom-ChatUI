@@ -23,8 +23,31 @@ else
     done
 fi
 
-# ---- ChatUI server ----
 port_in_use() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+
+# ---- GPT-SoVITS voice API (optional; set TTS_SOVITS_AUTOSTART=0 in .env to leave it off) ----
+SOVITS_URL="${TTS_SOVITS_URL:-http://127.0.0.1:9880}"
+SOVITS_PORT="${SOVITS_URL##*:}"
+SOVITS_PYTHON="${TTS_SOVITS_PYTHON:-$HOME/miniconda3/envs/GPTSoVits/bin/python}"
+SOVITS_HOME=""
+for d in "$TTS_SOVITS_HOME" "$HOME/GPT-SoVITS" "$DIR/../../../GPT-SoVITS"; do
+    [ -n "$d" ] && [ -f "$d/api_v2.py" ] && { SOVITS_HOME="$(cd "$d" && pwd)"; break; }
+done
+
+if [ "${TTS_SOVITS_AUTOSTART:-1}" = "0" ]; then
+    :
+elif [[ "$SOVITS_URL" != *//127.0.0.1:* && "$SOVITS_URL" != *//localhost:* ]]; then
+    echo "GPT-SoVITS is set to run on another machine ($SOVITS_URL); not starting it here."
+elif port_in_use "$SOVITS_PORT"; then
+    echo "Port $SOVITS_PORT is already in use; taking that to be GPT-SoVITS."
+elif [ -z "$SOVITS_HOME" ] || [ ! -x "$SOVITS_PYTHON" ]; then
+    echo "GPT-SoVITS not found; skipping it. Set TTS_SOVITS_HOME and TTS_SOVITS_PYTHON in .env to use it."
+else
+    gnome-terminal -- bash -c "cd '$SOVITS_HOME'; '$SOVITS_PYTHON' api_v2.py -a 127.0.0.1 -p '$SOVITS_PORT' -c GPT_SoVITS/configs/tts_infer.yaml; exec bash"
+    echo "GPT-SoVITS voice API starting on port $SOVITS_PORT in a new terminal."
+fi
+
+# ---- ChatUI server ----
 
 if port_in_use "$PORT"; then
     if curl -sf --max-time 3 "http://localhost:$PORT/" | grep -q '"ChatUI server"'; then

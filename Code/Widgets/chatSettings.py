@@ -4,9 +4,11 @@ It edits a copy of the chat's settings (chat_settings.py) and hands them back
 to main.py on Save; ChatMain applies and saves them in the chat file. The
 model list is the same one the main window's quick model picker shows. The
 voice lists come from the server (GET /v1/audio/voices) the first time text
-to speech is switched on here, and the ComfyUI workflows (GET
+to speech is switched on here, then GPT-SoVITS's is checked every few seconds while
+it's on and the window is open, so it and its new voices appear once they're there.
+The ComfyUI workflows (GET
 /v1/images/workflows) each time their list is opened. "3D model" turns the
-voice on with it and asks the 3D model what she can do (avatar.py). Memory lists
+voice on with it and keeps looking for the 3D model (avatar.py). Memory lists
 the chat's memory notes and opens their folder. Personality picks a saved
 personality for the chat to talk as (personalities.py) and saves new ones.
 
@@ -15,6 +17,8 @@ a personality holds; saving it reaches every chat speaking as it.
 """
 
 import chat_links
+import threading
+
 import chat_settings
 import paths
 import personalities
@@ -24,7 +28,7 @@ from Widgets.chatMain import LiveComboBox, WEB_LABELS, safe_file_name
 
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QComboBox, QInputDialog, QMessageBox, QScrollArea
 from PySide6.QtUiTools import QUiLoader
-from PySide6.QtCore import QFile, QSettings, QTimer, QUrl
+from PySide6.QtCore import QFile, QSettings, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from pathlib import Path
 
@@ -32,6 +36,9 @@ IMAGE_MODE_LABELS = {"auto": "Auto: when a picture fits", "on": "With every repl
 
 
 class ChatSettings(QMainWindow):
+    voices_checked = Signal(object, str)    # from the worker thread: the list (None if it failed), its engine
+    VOICE_CHECK_MS = 5000
+
     def __init__(self, chat_main):
         super().__init__()
         self.chat_main = chat_main
@@ -47,6 +54,12 @@ class ChatSettings(QMainWindow):
         self.preview = voice.Speaker(lambda: chat_main.client.base_url, paths.AUDIO_DIR, self)
         self.preview.changed.connect(self._show_preview_state)
         self.preview.failed.connect(lambda err: self.ui.ttsStatusLabel.setText(err))
+        self._voice_timer = QTimer(self)
+        self._voice_timer.setInterval(self.VOICE_CHECK_MS)
+        self._voice_timer.timeout.connect(self._check_voices)
+        self._voices_checking = False
+        self.voices_checked.connect(self._on_voices_checked)
+        chat_main.avatar_link.status.connect(self._show_avatar_status)
         self.load_ui()
         self.setup_connections()
         chat_main.model_changed.connect(self.on_main_model_changed)
@@ -452,6 +465,7 @@ class ChatSettings(QMainWindow):
 
     def _show_avatar(self, on):
         self.ui.avatarBox.setVisible(on)
+        self._update_watching()
         # The voice can't be turned off while she's on; it comes back with her off.
         self.ui.ttsCheck.setEnabled(not on)
         self.ui.ttsCheck.setToolTip("The 3D model speaks every reply, so the voice stays on while she's on"
@@ -462,7 +476,10 @@ class ChatSettings(QMainWindow):
         link = self.chat_main.avatar_link
         self.ui.avatarStatusLabel.setText(f"Looking for the 3D model at {link.url}…")
         self.ui.avatarStatusLabel.repaint()
-        info = link.catalog(max_age=0)
+        self._show_avatar_status(link.catalog(max_age=0))
+
+    def _show_avatar_status(self, info):
+        link = self.chat_main.avatar_link
         if info is None:
             self.ui.avatarStatusLabel.setText(
                 f"The 3D model isn't running at {link.url}. Start ChatUIAvatar on this PC (or press Play in Unity); "
@@ -477,9 +494,62 @@ class ChatSettings(QMainWindow):
     # Voice (text to speech)
     # ------------------------------------------------------------------
 
+    def _update_watching(self):
+        """Keep an eye on the 3D model and the voices only while they're on screen."""
+        shown = self.isVisible()
+        self.chat_main.avatar_link.watch("settings", shown and self.ui.avatarCheck.isChecked())
+        if shown and self.ui.ttsCheck.isChecked():
+            self._voice_timer.start()
+        else:
+            self._voice_timer.stop()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_watching()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self._update_watching()
+
+    def _check_voices(self):
+        """Ask the server again, off the GUI thread; only GPT-SoVITS can change once the list is in."""
+        if self._voices_checking:
+            return
+        self._voices_checking = True
+        engine = "gpt-sovits" if self.voice_list else ""
+        base_url = self.chat_main.client.base_url
+
+        def run():
+            try:
+                self.voices_checked.emit(voice.list_voices(base_url, engine), engine)
+            except RuntimeError as e:    # the server's gone (this window's error is kept), or we're closing
+                try:
+                    self.voices_checked.emit(None, str(e))
+                except RuntimeError:
+                    pass
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_voices_checked(self, data, engine):
+        self._voices_checking = False
+        if data is None or not self.isVisible() or not self.ui.ttsCheck.isChecked():
+            return
+        if self.ui.ttsEngineCombo.view().isVisible() or self.ui.ttsLanguageCombo.view().isVisible() \
+                or self.ui.ttsVoiceCombo.view().isVisible():
+            return                       # they're choosing: the next check gets it
+        if engine and self.voice_list:
+            others = [v for v in self.voice_list.get("voices", []) if v.get("engine") != engine]
+            data = {**self.voice_list, "engines": data.get("engines"), "voices": others + data.get("voices", [])}
+        if self.voice_list and data.get("engines") == self.voice_list.get("engines") \
+                and data.get("voices") == self.voice_list.get("voices"):
+            return
+        self.voice_list = data
+        self._fill_engines()
+
     def on_tts_toggled(self, on):
         """Off hides every voice setting; on fetches the voices from the server the first time."""
         self.ui.ttsBox.setVisible(on)
+        self._update_watching()
         if on:
             if self.voice_list is None:
                 self.load_voices()
@@ -514,7 +584,7 @@ class ChatSettings(QMainWindow):
         self.engine_info = {e["id"]: e for e in engines}
         combo.clear()
         for e in engines:
-            combo.addItem(e["name"] + ("" if e.get("available") else "  (not installed on the server)"), e["id"])
+            combo.addItem(e["name"] + ("" if e.get("available") else "  (not available on the server)"), e["id"])
         if combo.findData(self._tts_engine) < 0:
             combo.addItem(f"{self._tts_engine} (not on the server)", self._tts_engine)
         combo.setCurrentIndex(max(0, combo.findData(self._tts_engine)))
@@ -526,7 +596,9 @@ class ChatSettings(QMainWindow):
         speed = info.get("speed", True)
         self.ui.ttsSpeedSpin.setEnabled(speed)
         self.ui.ttsSpeedSpin.setToolTip("" if speed else "This engine always speaks at its own pace")
-        if info and not info.get("available", True):
+        if info and not info.get("available", True) and info.get("install", "").startswith("start "):
+            self.ui.ttsStatusLabel.setText(f"Not running on the server yet: {info['install']}.")
+        elif info and not info.get("available", True):
             self.ui.ttsStatusLabel.setText(f"Not installed on the server yet. On the server, in Server/ollama: "
                                            f".venv/bin/{info.get('install', 'pip install ...')}, then restart it.")
         elif self.voice_list is not None:

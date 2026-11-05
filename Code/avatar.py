@@ -24,6 +24,10 @@ How a reply becomes a performance:
      acts when the speech gets to them and moves her mouth: loudness from the
      audio (WAV) or from the text (MP3), mouth shapes from the vowels.
 
+While a chat or the settings window wants her, AvatarLink looks for her every few
+seconds, so she's found whenever ChatUIAvatar is started, and is told her personality
+again then: it may have been sent while nothing was listening.
+
 Everything above Performer has no Qt in it (tests/test_avatar.py).
 """
 
@@ -367,7 +371,9 @@ class AvatarLink(QObject):
     """Sends commands to the 3D model in the order given, on one worker thread,
     so the window never waits for it. Only the newest mouth shape is kept."""
     failed = Signal(str)
+    status = Signal(object)         # she was found (the catalog) or lost (None)
     COMPLAIN_EVERY = 15.0
+    WATCH_EVERY = 3.0
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -378,7 +384,46 @@ class AvatarLink(QObject):
         self._session = requests.Session()
         self._catalog = (0.0, None)
         self._complained = 0.0
+        self._online = None             # None: not looked yet
+        self._personality = None
+        self._watchers = set()
+        self._announce = threading.Event()
         threading.Thread(target=self._work, daemon=True).start()
+        threading.Thread(target=self._watch, daemon=True).start()
+
+    def watch(self, who: str, on: bool):
+        """Look for her every few seconds while anyone (a chat, the settings window) wants her.
+        A new watcher hears where things stand straight away."""
+        if on and who not in self._watchers:
+            self._watchers.add(who)
+            self._announce.set()
+        elif not on:
+            self._watchers.discard(who)
+
+    def _watch(self):
+        while True:
+            announce = self._announce.wait(self.WATCH_EVERY)
+            self._announce.clear()
+            if self._watchers:
+                try:
+                    self._look(announce)
+                except RuntimeError:        # closing: the Qt object is gone
+                    return
+
+    def _look(self, announce: bool = False):
+        """Ask for the catalog (blocks for up to two seconds) and tell anyone listening if she came or went."""
+        try:
+            r = requests.get(f"{self.url}/api/catalog", timeout=2)
+            data = r.json() if r.status_code == 200 else None
+        except (requests.RequestException, ValueError):
+            data = None
+        self._catalog = (time.monotonic(), data)
+        was, self._online = self._online, data is not None
+        if was is False and self._online and self._personality:
+            self._send("/api/personality", {"personality": self._personality})
+        if announce or was != self._online:
+            self.status.emit(data)
+        return data
 
     def catalog(self, max_age: float = 5.0):
         """What she can do, or None if the model isn't running. Blocks for up to
@@ -386,12 +431,7 @@ class AvatarLink(QObject):
         at, data = self._catalog
         if data is not None and time.monotonic() - at < max_age:
             return data
-        try:
-            r = requests.get(f"{self.url}/api/catalog", timeout=2)
-            data = r.json() if r.status_code == 200 else None
-        except (requests.RequestException, ValueError):
-            data = None
-        self._catalog = (time.monotonic(), data)
+        data = self._look()
         if data is None:
             self._complain()
         return data
@@ -405,6 +445,7 @@ class AvatarLink(QObject):
             self._send("/api/act", body)
 
     def personality(self, name: str):
+        self._personality = name
         self._send("/api/personality", {"personality": name})
 
     def mouth(self, viseme: str, amount: float):
@@ -435,8 +476,10 @@ class AvatarLink(QObject):
         now = time.monotonic()
         if now - self._complained > self.COMPLAIN_EVERY:
             self._complained = now
-            self.failed.emit(f"The 3D model isn't answering at {self.url}. Start ChatUIAvatar on this PC "
-                             "(or press Play in Unity).")
+            self.failed.emit(self.missing_text())
+
+    def missing_text(self) -> str:
+        return f"The 3D model isn't answering at {self.url}. Start ChatUIAvatar on this PC (or press Play in Unity)."
 
 
 class Performer(QObject):

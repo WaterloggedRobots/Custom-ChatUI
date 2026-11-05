@@ -113,3 +113,13 @@ def test_translation_uses_the_voice_language():
     assert asyncio.run(tts.voice_language("gpt-sovits", "Mio|zh-HK")) == "zh-HK"
     assert sovits.guess_language("佢唔喺度") == "zh-HK"
     assert sovits.guess_language("你好") == "zh"
+
+
+def test_it_is_found_as_soon_as_it_starts(fake, client):
+    api, home, clips = fake
+    api.running = False
+    r = client.post("/v1/audio/speech", json={"input": "Hi.", "model": "gpt-sovits", "voice": "Mio|en"})
+    assert r.status_code == 503
+    api.running = True            # no waiting out CHECK_EVERY once it's up
+    r = client.post("/v1/audio/speech", json={"input": "Hi.", "model": "gpt-sovits", "voice": "Mio|en"})
+    assert r.status_code == 200

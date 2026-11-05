@@ -259,7 +259,10 @@ paths pick other trained files than the newest. A clip with no trained files
 works too: GPT-SoVITS then copies it with whichever models it has loaded,
 less closely.
 
-*Run its API* while the chat server runs:
+*Run its API* while the chat server runs. `run.sh` starts it in its own terminal
+if it finds GPT-SoVITS (`TTS_SOVITS_HOME`, `~/GPT-SoVITS` or next to this repo) and
+its Python (`TTS_SOVITS_PYTHON`, by default the `GPTSoVits` conda environment);
+`TTS_SOVITS_AUTOSTART=0` leaves it off, as it keeps a few GB of GPU memory. By hand:
 
 ```bash
 cd ~/GPT-SoVITS && conda activate GPTSoVits
@@ -280,7 +283,9 @@ part after `|` for Chatterbox), then read. The GUI sends the chat's own model,
 which is usually already loaded, so this costs one short extra answer;
 `TTS_TRANSLATE_MODEL` picks a different (e.g. smaller) one.
 
-New voices and clips show up in the GUI the next time the list is opened.
+New GPT-SoVITS voices show up in Chat Settings within a few seconds, and so does
+the engine itself once its API is started. Other engines' voices are read when the
+GUI first lists them, so a restart of the GUI picks up new ones.
 Markdown, code blocks, links and citation numbers are removed before reading.
 Check an engine by hand:
 

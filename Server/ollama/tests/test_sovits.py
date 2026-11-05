@@ -90,6 +90,7 @@ def test_speaking_loads_the_trained_models_once(client, fake):
     assert gpt[1]["weights_path"].endswith("Mio-e15.ckpt")
     tts_body = [c[2] for c in api.calls if c[0] == "/tts"][-1]
     assert tts_body["text_lang"] == "yue" and tts_body["prompt_lang"] == "ja"
+    assert tts_body["use_cuda_graph"] is False
     assert tts_body["prompt_text"] == "こんにちは、ミオです。" and tts_body["speed_factor"] == 1.2
     assert tts_body["ref_audio_path"].endswith("Mio.wav")
     client.post("/v1/audio/speech", json={"input": "Again.", "model": "gpt-sovits", "voice": "Mio|en"})

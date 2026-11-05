@@ -168,6 +168,7 @@ async def speak(text: str, voice: str, speed: float) -> bytes:
         "prompt_text": v["text"], "prompt_lang": TEXT_LANG[v["language"]],
         "text_split_method": "cut5", "batch_size": 1, "speed_factor": speed,
         "media_type": "wav", "streaming_mode": False,
+        "use_cuda_graph": False,      # on by default: it rebuilds for every new line length, 16 s against 0.5 s
     }
     async with _lock, _client(Config.TTS_SOVITS_TIMEOUT) as client:
         try:

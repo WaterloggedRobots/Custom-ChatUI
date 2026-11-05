@@ -338,3 +338,53 @@ def test_linked_repos(box):
     assert wanted in box.system_note() and "can't clone" in box.system_note()
     box.remove_repo(wanted)
     assert box.repos == [] and "repositories" not in box.system_note()
+
+
+def test_memory_notes(box, tmp_path):
+    names = lambda: {s["function"]["name"] for s in box.schemas()}
+    assert "save_memory" not in names() and box.memory_note() == ""     # memory off
+
+    box.memory_dir = tmp_path / "chat" / "memory"
+    assert {"save_memory", "read_memory", "delete_memory"} <= names()
+    assert box.memory_note() == "" and "save_memory" in box.system_note()
+    assert box.needs_approval("save_memory") and box.needs_approval("delete_memory")
+    assert not box.needs_approval("read_memory")
+
+    assert "Saved rules.md" in box.run("save_memory", {"name": "rules.md", "content": "Answer in French."})
+    assert "Updated rules.md" in box.run("save_memory", {"name": "rules", "content": "Answer in Dutch."})
+    assert "Answer in Dutch." in box.run("read_memory", {"name": "rules"})
+    assert "## rules.md\nAnswer in Dutch." in box.memory_note()
+
+    # A name can't lead out of the folder.
+    box.run("save_memory", {"name": "../../escape", "content": "x"})
+    assert (box.memory_dir / "escape.md").exists() and not (tmp_path / "escape.md").exists()
+    assert "Error" in box.run("save_memory", {"name": "..", "content": "x"})
+    assert "Error" in box.run("save_memory", {"name": "empty", "content": "  "})
+    assert "Error" in box.run("save_memory", {"name": "big", "content": "x" * 10001})
+
+    assert "no note" in box.run("read_memory", {"name": "gone"})
+    box.run("delete_memory", {"name": "rules"})
+    assert not (box.memory_dir / "rules.md").exists()
+
+    # With the PC's tools off, the note is only about memory.
+    box.set_groups([])
+    assert names() == {"save_memory", "read_memory", "delete_memory"}
+    assert box.system_note().startswith("You can keep memory notes")
+
+
+def test_own_repos_reads_every_page_with_git_login(monkeypatch):
+    from local_tools import github_login
+    monkeypatch.setattr(github_login, "_git", lambda *a, **k: (0, "username=me\npassword=tok\n", ""))
+    pages = {1: [{"full_name": f"me/r{i}"} for i in range(100)], 2: [{"full_name": "me/last"}]}
+    seen = []
+
+    def api(url, token, timeout=20):
+        seen.append((url, token))
+        return pages[int(url.rsplit("=", 1)[1])]
+
+    monkeypatch.setattr(github_login, "_api", api)
+    repos = github_login.own_repos()
+    assert len(repos) == 101 and repos[-1] == "me/last" and len(seen) == 2
+    assert "affiliation=owner" in seen[0][0] and seen[0][1] == "tok"
+    monkeypatch.setattr(github_login, "_git", lambda *a, **k: (1, "", "no login"))
+    assert github_login.own_repos() is None

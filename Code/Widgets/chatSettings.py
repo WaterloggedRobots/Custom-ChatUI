@@ -7,7 +7,8 @@ voice lists come from the server (GET /v1/audio/voices) the first time text
 to speech is switched on here, and the ComfyUI workflows (GET
 /v1/images/workflows) each time their list is opened. "3D model" turns the
 voice on with it and asks the 3D model what she can do (avatar.py). The Git
-row shows which GitHub account git is signed in with.
+row shows which GitHub account git is signed in with. Memory lists the chat's
+memory notes and opens their folder.
 """
 
 import threading
@@ -15,12 +16,13 @@ import threading
 import chat_settings
 import paths
 import voice
-from local_tools import github_login
+from local_tools import github_login, memory
 from Widgets.chatMain import LiveComboBox, WEB_LABELS, safe_file_name
 
-from PySide6.QtWidgets import QMainWindow, QFileDialog, QComboBox, QMessageBox
+from PySide6.QtWidgets import QMainWindow, QFileDialog, QComboBox, QMessageBox, QScrollArea
 from PySide6.QtUiTools import QUiLoader
-from PySide6.QtCore import QFile, QSettings, Qt, Signal
+from PySide6.QtCore import QFile, QSettings, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from pathlib import Path
 
 IMAGE_MODE_LABELS = {"auto": "Auto: when a picture fits", "on": "With every reply"}
@@ -55,7 +57,13 @@ class ChatSettings(QMainWindow):
             return
         self.ui = QUiLoader().load(ui_file)
         ui_file.close()
-        self.setCentralWidget(self.ui)
+        # It scrolls: with the voice and 3D model sections open it's taller than most screens.
+        scroll = QScrollArea()
+        scroll.setWidget(self.ui)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setStyleSheet(self.ui.styleSheet())
+        self.setCentralWidget(scroll)
         self.resize(self.ui.size())
 
         self.model_combo = LiveComboBox(self.refresh_models)
@@ -104,10 +112,13 @@ class ChatSettings(QMainWindow):
         self.ui.ttsVoiceCombo.activated.connect(self.on_voice_chosen)
         self.ui.ttsTestButton.clicked.connect(self.test_voice)
         self.ui.githubButton.clicked.connect(self.github_login)
+        self.ui.memoryButton.clicked.connect(self.open_memory_folder)
         self.ui.githubUserLabel.setTextFormat(Qt.PlainText)
         self._github_checked.connect(self._show_github_user)
         self.workflow_combo.activated.connect(self.on_workflow_chosen)
         self.ui.avatarCheck.toggled.connect(self.on_avatar_toggled)
+        for check in (self.ui.ttsCheck, self.ui.avatarCheck):      # they open sections of the window
+            check.toggled.connect(lambda _: QTimer.singleShot(0, self._fit_to_screen))
         self.ui.avatarCheckButton.clicked.connect(self.check_avatar)
 
     @staticmethod
@@ -127,9 +138,18 @@ class ChatSettings(QMainWindow):
         self.ui.titleEdit.setText(title)
         self.show_settings(settings)
         self.check_github()
+        self._show_memory()
         self.show()
         self.raise_()
         self.activateWindow()
+        QTimer.singleShot(0, self._fit_to_screen)     # sizes are only known once it's shown
+
+    def _fit_to_screen(self):
+        """Tall enough to show everything, if the screen has the room."""
+        need = self.ui.minimumSizeHint().expandedTo(self.ui.sizeHint())
+        room = self.screen().availableGeometry().height() - 60
+        bar = self.centralWidget().verticalScrollBar().sizeHint().width()
+        self.resize(max(self.width(), need.width() + bar), min(need.height(), room))
 
     def show_settings(self, settings: dict):
         s = chat_settings.normalize(settings)
@@ -141,6 +161,7 @@ class ChatSettings(QMainWindow):
         self.ui.thinkCheck.setChecked(s["Think"])
         for check, key in self._tool_checks():
             check.setChecked(s[key])
+        self.ui.memoryCheck.setChecked(s["Memory"])
         self.model = s["Model"]
         self.refresh_models()
         self.image_workflow = s["Image Workflow"]
@@ -178,6 +199,7 @@ class ChatSettings(QMainWindow):
             "Image Workflow": self.image_workflow,
             "Image Mode": self.ui.imageModeCombo.currentData(),
             **{key: check.isChecked() for check, key in self._tool_checks()},
+            "Memory": self.ui.memoryCheck.isChecked(),
             "TTS": self.ui.ttsCheck.isChecked(),
             "TTS Engine": self.tts_engine(),
             "TTS Voice": self.tts_voice,
@@ -236,6 +258,27 @@ class ChatSettings(QMainWindow):
         return [(ui.fileToolsCheck, chat_settings.TOOL_KEYS["files"]),
                 (ui.gitToolsCheck, chat_settings.TOOL_KEYS["git"]),
                 (ui.runToolsCheck, chat_settings.TOOL_KEYS["run"])]
+
+    def _memory_folder(self):
+        """The memory folder of the chat being edited; a new chat doesn't have one until it's saved."""
+        return None if self.is_new else self.chat_main.memory_folder()
+
+    def _show_memory(self):
+        folder = self._memory_folder()
+        self.ui.memoryButton.setEnabled(folder is not None)
+        if folder is None:
+            self.ui.memoryLabel.setText("A new chat gets its memory folder when you save it.")
+            return
+        names = [p.name for p in memory.memory_files(folder)]
+        self.ui.memoryLabel.setText(", ".join(names) if names else "No notes yet")
+        self.ui.memoryLabel.setToolTip(str(folder))
+
+    def open_memory_folder(self):
+        folder = self._memory_folder()
+        if folder is not None:
+            folder.mkdir(parents=True, exist_ok=True)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+            self._show_memory()
 
     def github_login(self):
         from Widgets.githubLogin import GitHubLogin

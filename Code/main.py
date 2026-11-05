@@ -81,7 +81,8 @@ class Main:
     def setupConnectors(self) -> None:
         mainChat.ui.actionChat_Settings.triggered.connect(self.openChatSettings)
         mainChat.ui.actionNew_Chat.triggered.connect(self.newChatSettings)
-        mainChat.ui.listWidget.clicked.connect(self.quick_select_chat)
+        mainChat.chat_list.new_chat_clicked.connect(self.newChatSettings)
+        mainChat.chat_list.chat_clicked.connect(mainChat.qs_chat)
         mainChat.ui.actionEdit_Message.triggered.connect(self.openEditMsg)
         mainChat.ui.actionSet_IP.triggered.connect(self.openIPSettings)
         mainChat.ui.actionCharacter_Settings.triggered.connect(self.openChatSettings)
@@ -126,13 +127,6 @@ class Main:
             self.newChatSettings()
             return
         settingsChat.open_for(mainChat.ui.lineEdit.text(), mainChat.settings, is_new=False)
-
-    def quick_select_chat(self):
-        chatName = mainChat.ui.listWidget.currentItem().text()
-        if chatName == "Create New Chat [+]":
-            self.newChatSettings()
-        else:
-            mainChat.qs_chat(chatName)
 
     def openEditMsg(self):
         message = mainChat.get_last_user_message()

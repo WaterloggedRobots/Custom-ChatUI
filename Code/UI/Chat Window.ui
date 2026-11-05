@@ -70,7 +70,7 @@ font-weight:700;</string>
        <enum>QLayout::SizeConstraint::SetDefaultConstraint</enum>
       </property>
       <item>
-       <widget class="QListWidget" name="listWidget">
+       <widget class="ChatList" name="chatList">
         <property name="sizePolicy">
          <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
           <horstretch>0</horstretch>
@@ -83,11 +83,6 @@ font-weight:700;</string>
           <height>0</height>
          </size>
         </property>
-        <item>
-         <property name="text">
-          <string>Create New Chat [+]</string>
-         </property>
-        </item>
        </widget>
       </item>
       <item>
@@ -491,6 +486,13 @@ color:rgb(255, 255, 255)</string>
    </property>
   </action>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>ChatList</class>
+   <extends>QTreeWidget</extends>
+   <header>Widgets/chatList.h</header>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections/>
 </ui>

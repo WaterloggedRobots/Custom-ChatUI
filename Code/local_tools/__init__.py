@@ -5,6 +5,7 @@ They come in three groups that each chat turns on separately (Chat Settings):
   git    git in the user's repositories              (git.py; github_login.py signs in)
   run    run scripts, programs and shell commands    (terminal.py)
 change_directory belongs to all three, since each of them starts in the working folder.
+Memory notes (memory.py) have their own switch: their tools are on while the chat has a memory_dir.
 
 They run here, in the client, because the files are on this PC and the LLM
 server is another machine. The server only passes the tool list to Ollama and
@@ -84,15 +85,19 @@ class ToolBox:
         self.working_dir = Path(working_dir).expanduser() if working_dir else Path.home()
         self.folders: List[Path] = []     # linked in the GUI
         self.repos: List[str] = []        # GitHub repository links, linked in the GUI
+        self.memory_dir: Optional[Path] = None   # this chat's memory notes; None = memory is off
         self.always_allow: set = set()
         # Turns a PDF or Word file into text (llmClient uses the server's /v1/files/extract).
         self.extract_text = extract_text
-        from . import files, git, terminal
+        from . import files, git, memory, terminal
         self.tools: Dict[str, Tool] = {}
         for group, module in zip(GROUPS, (files, git, terminal)):
             for t in module.TOOLS:
                 t.group = group
                 self.tools[t.name] = t
+        for t in memory.TOOLS:
+            t.group = "memory"
+            self.tools[t.name] = t
         self.groups: set = set(GROUPS)    # the groups this chat turned on
 
     def set_groups(self, groups: Iterable[str]) -> None:
@@ -100,6 +105,8 @@ class ToolBox:
 
     def enabled(self, name: str) -> bool:
         tool = self.tools.get(name)
+        if tool and tool.group == "memory":
+            return self.memory_dir is not None
         return bool(tool) and (tool.group in self.groups or (name in SHARED and bool(self.groups)))
 
     def active(self) -> List[Tool]:
@@ -200,8 +207,23 @@ class ToolBox:
         except Exception as e:
             return f"Error: {type(e).__name__}: {e}"
 
+    def memory_note(self) -> str:
+        """The chat's memory notes, for every model; "" if there are none or memory is off."""
+        from . import memory
+        return memory.system_note(self.memory_dir) if self.memory_dir else ""
+
     def system_note(self) -> str:
         """Tells the model what it can do and where it is."""
+        note = self._pc_note() if self.groups else ""
+        if self.memory_dir:
+            note += (" " if note else "") + (
+                "You can keep memory notes for this chat with save_memory: short Markdown files, one per topic, "
+                "for lasting context and rules such as facts about the user, decisions and how they want things "
+                "done. You see them at the start of every reply in this chat; other chats don't. Save what will "
+                "still matter later, and update a note rather than starting another. The user approves each save.")
+        return note
+
+    def _pc_note(self) -> str:
         can = [text for group, text in (
             ("files", "browse, read and edit files and folders"),
             ("git", "use git"),

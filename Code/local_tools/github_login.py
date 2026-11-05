@@ -19,6 +19,7 @@ import urllib.request
 HOST = "github.com"
 TOKEN_PAGE = "https://github.com/settings/tokens/new?scopes=repo,workflow&description=ChatUI%20git"
 API_USER = "https://api.github.com/user"
+API_REPOS = "https://api.github.com/user/repos?affiliation=owner&sort=pushed&per_page=100&page={}"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 QUIET = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}   # never ask, just answer
 
@@ -80,21 +81,44 @@ def browser_login(timeout=600) -> str:
     return signed_in_user() or ""
 
 
-def check_token(token: str, timeout=20) -> str:
-    """The GitHub user name the token belongs to. Raises LoginError if GitHub refuses it."""
-    req = urllib.request.Request(API_USER, headers={
+def _api(url: str, token: str, timeout=20):
+    """GitHub's JSON answer. Raises LoginError if GitHub refuses or can't be reached."""
+    req = urllib.request.Request(url, headers={
         "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "User-Agent": "ChatUI"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))["login"]
+            return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         if e.code == 401:
             raise LoginError("GitHub doesn't accept this token (wrong, expired or revoked)")
         raise LoginError(f"GitHub answered {e.code} {e.reason}")
     except (urllib.error.URLError, OSError) as e:
         raise LoginError(f"can't reach GitHub: {getattr(e, 'reason', e)}")
-    except (ValueError, KeyError):
+    except ValueError:
+        raise LoginError("GitHub's answer wasn't readable")
+
+
+def check_token(token: str, timeout=20) -> str:
+    """The GitHub user name the token belongs to. Raises LoginError if GitHub refuses it."""
+    try:
+        return _api(API_USER, token, timeout)["login"]
+    except (KeyError, TypeError):
         raise LoginError("GitHub's answer didn't name a user")
+
+
+def own_repos(max_pages=10):
+    """owner/name of the signed-in user's own repositories, last pushed first; None if not signed in."""
+    code, out, _ = _git(["credential", "fill"], _credential(), timeout=20)
+    token = _parse(out).get("password") if code == 0 else None
+    if not token:
+        return None
+    repos = []
+    for page in range(1, max_pages + 1):
+        batch = _api(API_REPOS.format(page), token)
+        repos += [r["full_name"] for r in batch]
+        if len(batch) < 100:
+            break
+    return repos
 
 
 def token_login(token: str) -> str:

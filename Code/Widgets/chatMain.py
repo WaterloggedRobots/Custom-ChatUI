@@ -1,12 +1,15 @@
 import avatar
+import chat_sections
 import chat_settings
 import llmClient
 import paths
 import voice
+from local_tools import github_login, repo_url
+from Widgets.chatList import ChatList
 
-from PySide6.QtWidgets import (QInputDialog, QMainWindow, QSizePolicy, QFileDialog, QComboBox, QLabel, QMenu,
-                               QMessageBox, QPushButton, QToolButton, QWidget, QHBoxLayout, QWidgetAction,
-                               QGraphicsScene, QGraphicsPixmapItem)
+from PySide6.QtWidgets import (QInputDialog, QListWidget, QListWidgetItem, QMainWindow, QSizePolicy, QFileDialog,
+                               QComboBox, QLabel, QMenu, QMessageBox, QPushButton, QScrollArea, QToolButton, QWidget,
+                               QHBoxLayout, QVBoxLayout, QWidgetAction, QGraphicsScene, QGraphicsPixmapItem)
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, Qt, QObject, QEvent, QUrl, QTimer, Signal, QSettings
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QDesktopServices, QKeySequence, QShortcut, QPixmap
@@ -24,7 +27,13 @@ IMAGE_HEIGHT = 240              # pictures in the chat; click one to open it ful
 CAP_ICONS = (("vision", "👁"), ("thinking", "💭"), ("tools", "🔧"))
 WEB_LABELS = {"auto": "Web: Auto", "on": "Web: Always", "off": "Web: Off"}
 TOOL_STATE_ICONS = {"ok": "✓", "error": "⚠", "declined": "✗ declined"}
-APP_VERSION = "0.14.1_Avatar"
+APP_VERSION = "0.15.0_Avatar"
+MENU_LIST_HEIGHT = 320          # a list in a menu scrolls beyond this
+MENU_STYLE = "QMenu{background:rgb(45,45,45);color:white}"
+REPO_LIST_STYLE = ("QListWidget{background:rgb(45,45,45);color:white;border:none}"
+                   "QListWidget::item{padding:3px 8px}"
+                   "QListWidget::item:hover{background:rgb(70,70,70)}"
+                   "QListWidget::item:disabled{color:#8a8a8a}")
 # Mic button languages: label, code sent to the server ("" = Whisper detects it)
 VOICE_LANGUAGES = (("Detect automatically", ""), ("English", "en"), ("中文 Chinese", "zh"),
                    ("粵語 Cantonese", "yue"), ("日本語 Japanese", "ja"))
@@ -169,6 +178,7 @@ class ChatMain(QMainWindow):
     saved in the chat file and edited in the Chat Settings window.
     """
     model_changed = Signal(str)      # the quick model picker changed this chat's model
+    _repos_fetched = Signal(object)  # your GitHub repositories, from the fetching thread
 
     def __init__(self):
         super().__init__()
@@ -241,12 +251,15 @@ class ChatMain(QMainWindow):
                 return
 
             loader = QUiLoader()
+            loader.registerCustomWidget(ChatList)
             self.ui = loader.load(ui_file)
             ui_file.close()
 
             if self.ui:
                 self.setCentralWidget(self.ui)
                 self.setWindowTitle("ChatUI")
+                self.chat_list = self.ui.chatList
+                self.chat_list.sections_changed.connect(self.save_sections)
                 self.chat = self.ui.textBrowser
                 self.input = self.ui.plainTextEdit
                 self.chat.setOpenLinks(False)
@@ -301,21 +314,38 @@ class ChatMain(QMainWindow):
         self.folder_list_button.setStyleSheet("background:rgb(57,57,57);color:white")
         self.folder_list_button.setToolTip("Linked folders")
         self.folder_menu = QMenu(self)
-        self.folder_menu.setStyleSheet("QMenu{background:rgb(45,45,45);color:white}")
+        self.folder_menu.setStyleSheet(MENU_STYLE)
         self.folder_list_button.clicked.connect(self.show_folder_menu)
         bar.insertWidget(1, self.folder_button)
         bar.insertWidget(2, self.folder_list_button)
-        # 🐙 links a GitHub repository the same way, with its own ▾ list.
+        # 🐙 drops down your own GitHub repositories to link, with Other… for any other link;
+        # its ▾ lists the linked ones, like the folders.
         self.repo_button = QPushButton("🐙")
         self.repo_button.setStyleSheet("background:rgb(57,57,57);color:white")
         self.repo_button.setFixedWidth(max(self.repo_button.sizeHint().width() // 2, 24))
-        self.repo_button.clicked.connect(self.add_repo)
+        self.repo_button.clicked.connect(self.show_repo_picker)
+        self._own_repos = []                # (owner/name) last fetched from GitHub
+        self._repo_note = ""                # shown when there are none to list
+        self._fetching_repos = False
+        self._repos_fetched.connect(self._on_repos_fetched)
+        self.repo_picker = QMenu(self)
+        self.repo_picker.setStyleSheet(MENU_STYLE)
+        self.repo_picker_list = QListWidget()
+        self.repo_picker_list.setStyleSheet(REPO_LIST_STYLE)
+        self.repo_picker_list.setMouseTracking(True)
+        self.repo_picker_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.repo_picker_list.itemClicked.connect(self.pick_repo)
+        self.repo_picker_action = QWidgetAction(self.repo_picker)
+        self.repo_picker_action.setDefaultWidget(self.repo_picker_list)
+        self.repo_picker.addAction(self.repo_picker_action)
+        self.repo_picker.addSeparator()
+        self.repo_picker.addAction("Other…", self.add_repo)
         self.repo_list_button = QToolButton()
         self.repo_list_button.setText("▾")
         self.repo_list_button.setStyleSheet("background:rgb(57,57,57);color:white")
         self.repo_list_button.setToolTip("Linked GitHub repositories")
         self.repo_menu = QMenu(self)
-        self.repo_menu.setStyleSheet("QMenu{background:rgb(45,45,45);color:white}")
+        self.repo_menu.setStyleSheet(MENU_STYLE)
         self.repo_list_button.clicked.connect(self.show_repo_menu)
         bar.insertWidget(3, self.repo_button)
         bar.insertWidget(4, self.repo_list_button)
@@ -424,7 +454,8 @@ class ChatMain(QMainWindow):
         self.client.think = s["Think"]
         groups = chat_settings.tool_groups(s)
         self.client.toolbox.set_groups(groups)
-        self.client.tools_enabled = bool(groups) and can_call
+        self.client.toolbox.memory_dir = self.memory_folder() if s["Memory"] else None
+        self.client.tools_enabled = (bool(groups) or self.client.toolbox.memory_dir is not None) and can_call
         if not groups:
             tip = "Tools are off for this chat (Character > Settings)"
         elif not can_call:
@@ -462,13 +493,36 @@ class ChatMain(QMainWindow):
         if not folders:
             menu.addAction("No folders").setEnabled(False)
             return
+        rows = []
         for folder in folders:
             label = QLabel(short_path(folder))
             label.setToolTip(str(folder))
             label.setStyleSheet("color:white")
-            self._add_menu_row(menu, label, f"Unlink {folder}", lambda f=folder: self.remove_tools_folder(f))
+            rows.append(self._menu_row(label, f"Unlink {folder}", lambda f=folder: self.remove_tools_folder(f)))
+        self._add_menu_rows(menu, rows)
 
-    def _add_menu_row(self, menu, label, remove_tip, on_remove):
+    def _add_menu_rows(self, menu, rows):
+        """Put rows in a menu, in a list that gets a scroll bar when it's too tall."""
+        rows_widget = QWidget()
+        lay = QVBoxLayout(rows_widget)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        for row in rows:
+            lay.addWidget(row)
+        scroll = QScrollArea()
+        scroll.setWidget(rows_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        hint = rows_widget.sizeHint()
+        tall = hint.height() > MENU_LIST_HEIGHT
+        scroll.setFixedSize(hint.width() + (scroll.verticalScrollBar().sizeHint().width() if tall else 0),
+                            min(hint.height(), MENU_LIST_HEIGHT))
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(scroll)
+        menu.addAction(action)
+
+    def _menu_row(self, label, remove_tip, on_remove):
         """A row in a linked folders or repositories menu: the label and an x to unlink it."""
         row = QWidget()
         lay = QHBoxLayout(row)
@@ -482,9 +536,81 @@ class ChatMain(QMainWindow):
         remove.clicked.connect(lambda: QTimer.singleShot(0, on_remove))
         lay.addWidget(label, 1)
         lay.addWidget(remove)
-        action = QWidgetAction(menu)
-        action.setDefaultWidget(row)
-        menu.addAction(action)
+        return row
+
+    def show_repo_picker(self):
+        """Drop down your repositories: the last list straight away, the fresh one when GitHub answers."""
+        if not self._own_repos:
+            self._repo_note = "Loading your repositories…"
+        self._fill_repo_picker()
+        self._popup_repo_picker()
+        if self._fetching_repos:
+            return
+        self._fetching_repos = True
+
+        def job():
+            try:
+                result = github_login.own_repos()
+            except github_login.LoginError as e:
+                result = str(e)
+            try:
+                self._repos_fetched.emit(result)
+            except RuntimeError:               # the window is gone
+                pass
+
+        threading.Thread(target=job, daemon=True).start()
+
+    def _popup_repo_picker(self):
+        btn = self.repo_button
+        self.repo_picker.popup(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _on_repos_fetched(self, result):
+        """`result`: the repository names, None if git isn't signed in, or an error's text."""
+        self._fetching_repos = False
+        if isinstance(result, list):
+            self._own_repos = result
+            self._repo_note = "You have no repositories"
+        else:
+            self._own_repos = []
+            self._repo_note = (f"⚠ {result}" if result else
+                               "Not signed in. Use GitHub… in Chat Settings to list your repositories")
+        self._fill_repo_picker()
+        if self.repo_picker.isVisible():
+            self._popup_repo_picker()          # it changed size: fit it on the screen again
+
+    def _fill_repo_picker(self):
+        rows = self.repo_picker_list
+        rows.clear()
+        linked = self.client.toolbox.repos
+        for name in self._own_repos:
+            is_linked = repo_url(name) in linked
+            item = QListWidgetItem(f"✓ {name}" if is_linked else name)
+            item.setData(Qt.UserRole, name)
+            if is_linked:
+                item.setFlags(Qt.NoItemFlags)   # the ▾ list unlinks it
+                item.setToolTip("Already linked to this chat")
+            rows.addItem(item)
+        if not self._own_repos:
+            item = QListWidgetItem(self._repo_note)
+            item.setFlags(Qt.NoItemFlags)
+            rows.addItem(item)
+        height = rows.sizeHintForRow(0) * rows.count() + 2
+        bar = rows.verticalScrollBar().sizeHint().width() if height > MENU_LIST_HEIGHT else 0
+        rows.setFixedSize(min(max(rows.sizeHintForColumn(0) + bar + 8, 240), 520), min(height, MENU_LIST_HEIGHT))
+        # A menu only measures its rows again when one changes, and resizing the list doesn't count.
+        self.repo_picker_action.setDefaultWidget(rows)
+        self.repo_picker.removeAction(self.repo_picker_action)
+        self.repo_picker.insertAction(self.repo_picker.actions()[0], self.repo_picker_action)
+        self.repo_picker.adjustSize()
+
+    def pick_repo(self, item):
+        name = item.data(Qt.UserRole)
+        if not name:
+            return
+        self.repo_picker.close()
+        self.client.toolbox.add_repo(name)
+        self._show_tools_folder()
+        self.save_chat()
 
     def add_repo(self):
         text, ok = QInputDialog.getText(self, "Link a GitHub repository",
@@ -516,12 +642,14 @@ class ChatMain(QMainWindow):
         if not repos:
             menu.addAction("No repositories").setEnabled(False)
             return
+        rows = []
         for url in repos:
             name = url.removeprefix("https://github.com/")
             label = QLabel(f'<a style="color:#7ab7ff" href="{html.escape(url)}">{html.escape(name)}</a>')
             label.setToolTip(url)
             label.setOpenExternalLinks(True)
-            self._add_menu_row(menu, label, f"Unlink {url}", lambda u=url: self.remove_repo(u))
+            rows.append(self._menu_row(label, f"Unlink {url}", lambda u=url: self.remove_repo(u)))
+        self._add_menu_rows(menu, rows)
 
     def _show_tools_folder(self):
         box = self.client.toolbox
@@ -532,7 +660,8 @@ class ChatMain(QMainWindow):
                                       f"Working folder now: {box.working_dir}" + (f"\n{tip}" if tip else ""))
         n = len(box.repos)
         self.repo_list_button.setText(f"▾ {n}" if n else "▾")
-        self.repo_button.setToolTip(f"Link a GitHub repository ({n} linked)" + (f"\n{tip}" if tip else ""))
+        self.repo_button.setToolTip(f"Link one of your GitHub repositories, or another by its link ({n} linked)"
+                                    + (f"\n{tip}" if tip else ""))
 
     def on_tool_event(self, ev):
         if ev["state"] == "running":
@@ -1142,14 +1271,14 @@ class ChatMain(QMainWindow):
             self.ui.pushButton_2.setText("<<")
 
     def hideChatList(self):
-        self.ui.listWidget.setVisible(False)
+        self.chat_list.setVisible(False)
         self.isShowChatList = False
         if not self.isShowImgWindowLock and self.isShowImgWindow:
             self.showImgWindow()
             self.ui.pushButton.setEnabled(True)
 
     def showChatList(self):
-        self.ui.listWidget.setVisible(True)
+        self.chat_list.setVisible(True)
         self.hideImgWindow()
         self.isShowChatList = True
         self.ui.pushButton.setEnabled(False)
@@ -1235,7 +1364,7 @@ class ChatMain(QMainWindow):
         if not isinstance(chatHist.get("Settings"), dict):
             self.save_chat()         # move a pre-0.9 chat's settings into the chat file now
 
-        self._fill_chat_list(logs["ChatList"])
+        self.chat_list.fill(logs["ChatList"], logs.get("Sections"))
 
         self.expanded_thinking = set()
         self.expanded_tools = set()
@@ -1323,7 +1452,9 @@ class ChatMain(QMainWindow):
         """CHAT_DIR/<title>.json, or <title> (1).json and so on if that's taken by another chat."""
         base = safe_file_name(title)
         path, i = paths.CHAT_DIR / f"{base}.json", 1
-        while path.exists() and not (current and path.resolve() == Path(current).resolve()):
+        # The chat's folder (its memory notes) goes by the same name, so that must be free too.
+        while ((path.exists() or (paths.CHAT_DIR / path.stem).exists())
+               and not (current and path.resolve() == Path(current).resolve())):
             path = paths.CHAT_DIR / f"{base} ({i}).json"
             i += 1
         return path
@@ -1335,24 +1466,34 @@ class ChatMain(QMainWindow):
             return
         try:
             os.replace(old, new)
+            if (paths.CHAT_DIR / old.stem).exists():
+                os.replace(paths.CHAT_DIR / old.stem, paths.CHAT_DIR / new.stem)
         except OSError as e:
             print(f"Rename failed: {e}")
             return
         self.chat_path = str(new)
+        self._apply_options()               # the memory folder moved with it
         logs = read_json_file(paths.CHAT_INDEX_FILE) or {"LastOpened": "", "ChatList": []}
         logs["ChatList"] = [new.stem if c == old.stem else c for c in logs.get("ChatList", [])]
         if new.stem not in logs["ChatList"]:
             logs["ChatList"].append(new.stem)
+        sections = chat_sections.normalize(logs.get("Sections"), [old.stem, *logs["ChatList"]])
+        chat_sections.rename_chat(sections, old.stem, new.stem)
+        logs["Sections"] = sections
         logs["LastChat"] = str(new)
         with open(paths.CHAT_INDEX_FILE, "w", encoding="utf-8") as f:
             json.dump(logs, f, indent=4)
-        self._fill_chat_list(logs["ChatList"])
+        self.chat_list.fill(logs["ChatList"], sections)
 
-    def _fill_chat_list(self, chat_list):
-        self.ui.listWidget.clear()
-        self.ui.listWidget.addItem("Create New Chat [+]")
-        for chatFile in reversed(chat_list):
-            self.ui.listWidget.addItem(chatFile)
+    def save_sections(self, sections):
+        logs = read_json_file(paths.CHAT_INDEX_FILE) or {"LastOpened": "", "ChatList": []}
+        logs["Sections"] = sections
+        with open(paths.CHAT_INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump(logs, f, indent=4)
+
+    def memory_folder(self):
+        """Where the open chat's memory notes go, or None with no chat open."""
+        return paths.chat_memory_dir(Path(self.chat_path).stem) if self.chat_path else None
 
     # ------------------------------------------------------------------
     # Sending, editing, regenerating

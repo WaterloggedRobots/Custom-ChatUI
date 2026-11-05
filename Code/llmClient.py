@@ -214,6 +214,9 @@ class LLMClient(QObject):
         messages = []
         if self.preset:
             messages.append({"role": "system", "content": self.preset})
+        memory = self.toolbox.memory_note()
+        if memory:
+            messages.append({"role": "system", "content": memory})
         stage = self.stage_note() if self.stage_note else ""
         if stage:
             messages.append({"role": "system", "content": stage})

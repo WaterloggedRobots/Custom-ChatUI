@@ -333,6 +333,46 @@ QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px}</string>
     </widget>
    </item>
    <item>
+    <widget class="QGroupBox" name="groupMemory">
+     <property name="title">
+      <string>Memory</string>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_memory" columnstretch="1,0">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_memory">
+        <property name="text">
+         <string>Send this chat's notes to the model, and let it write them</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1" alignment="Qt::AlignmentFlag::AlignRight">
+       <widget class="QCheckBox" name="memoryCheck">
+        <property name="toolTip">
+         <string>Every model reads the notes. Models that can call tools (🔧) also write them, and it asks you before each change</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="memoryLabel">
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QPushButton" name="memoryButton">
+        <property name="text">
+         <string>Open memory folder</string>
+        </property>
+        <property name="toolTip">
+         <string>The notes are Markdown files; you can add or edit them yourself</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QGroupBox" name="groupPictures">
      <property name="title">
       <string>Pictures</string>

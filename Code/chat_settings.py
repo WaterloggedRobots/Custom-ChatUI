@@ -38,6 +38,7 @@ DEFAULTS = {
     "Tool Files": True,               # browse, read and edit files and folders
     "Tool Git": True,                 # git in the user's repositories
     "Tool Run": True,                 # run scripts, programs and terminal commands
+    "Memory": True,                   # send the chat's memory notes to the model, and let it write them
     # Text to speech, done by the server (Server/ollama/chat_server/tts.py)
     "TTS": False,                     # off: no Play buttons and no voice settings shown
     "TTS Engine": "edge",             # an engine id from the server, e.g. one of TTS_ENGINES
@@ -92,7 +93,7 @@ def normalize(data) -> dict:
     if isinstance(data.get("Tools"), bool):          # the old single switch
         for key in TOOL_KEYS.values():
             s[key] = data["Tools"]
-    for key in ("Think", *TOOL_KEYS.values(), "TTS", "TTS Auto Play", "TTS Translate", "Avatar"):
+    for key in ("Think", *TOOL_KEYS.values(), "Memory", "TTS", "TTS Auto Play", "TTS Translate", "Avatar"):
         if isinstance(data.get(key), bool):
             s[key] = data[key]
     if data.get("Web Search") in WEB_MODES:

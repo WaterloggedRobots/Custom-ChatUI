@@ -49,10 +49,15 @@ else:
 
 SAVE_DIR = CLIENT_DATA_DIR / "Save"
 CHAT_DIR = SAVE_DIR / "Chat"                  # one <name>.json per chat, settings included
-CHAT_INDEX_FILE = SAVE_DIR / ".temp.json"     # last opened chat + recent-chats order
+CHAT_INDEX_FILE = SAVE_DIR / ".temp.json"     # last opened chat, recent-chats order and sections
 USER_NETWORK_FILE = CLIENT_DATA_DIR / "network.json"   # your saved server address
 AUDIO_DIR = CLIENT_DATA_DIR / "Audio"         # replies read aloud by the server, kept for replays
 IMAGE_DIR = CLIENT_DATA_DIR / "Images"        # pictures ComfyUI drew for the chats
+
+
+def chat_memory_dir(chat_name: str) -> Path:
+    """The folder of a chat's memory notes: CHAT_DIR/<chat name>/memory."""
+    return CHAT_DIR / chat_name / "memory"
 
 
 def ensure_data_dirs():

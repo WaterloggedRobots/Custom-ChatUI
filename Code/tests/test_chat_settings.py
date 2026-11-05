@@ -223,6 +223,101 @@ def test_repo_link_is_saved_with_the_chat_and_listed(gui, monkeypatch):
     assert _saved(main)["Tools Repos"] == [] and main.repo_list_button.text() == "▾"
 
 
+def _wait_for_repos(main, app):
+    for _ in range(200):
+        app.processEvents()
+        if not main._fetching_repos:
+            return
+        time.sleep(0.01)
+    raise AssertionError("the repositories never arrived")
+
+
+def test_repo_button_lists_your_repos_with_other_last(gui, monkeypatch):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QInputDialog
+    from local_tools import github_login
+    main, _, _ = gui
+    app = QApplication.instance()
+    main.create_chat("Repos", {**chat_settings.DEFAULTS, "Model": "m1"})
+    names = [f"me/repo{i}" for i in range(60)]
+    monkeypatch.setattr(github_login, "own_repos", lambda: names)
+    main.repo_button.click()
+    assert main.repo_picker_list.item(0).text() == "Loading your repositories…"
+    _wait_for_repos(main, app)
+    rows = main.repo_picker_list
+    assert rows.count() == 60 and rows.item(0).text() == "me/repo0"
+    assert rows.height() <= 320 and rows.verticalScrollBar().maximum() > 0    # it scrolls
+    assert [a.text() for a in main.repo_picker.actions()][-1] == "Other…"
+
+    main.pick_repo(rows.item(2))
+    assert main.client.toolbox.repos == ["https://github.com/me/repo2"]
+    assert _saved(main)["Tools Repos"] == ["https://github.com/me/repo2"]
+    main.show_repo_picker()
+    _wait_for_repos(main, app)
+    assert rows.item(2).text() == "✓ me/repo2" and rows.item(2).flags() == Qt.NoItemFlags
+
+    # Other… asks for a link
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a: ("someone/else", True))
+    main.repo_picker.actions()[-1].trigger()
+    assert main.client.toolbox.repos[-1] == "https://github.com/someone/else"
+    main.repo_picker.close()
+
+
+def test_repo_picker_says_why_it_has_no_repos(gui, monkeypatch):
+    from PySide6.QtWidgets import QApplication
+    from local_tools import github_login
+    main, _, _ = gui
+    app = QApplication.instance()
+    main.create_chat("Repos", {**chat_settings.DEFAULTS, "Model": "m1"})
+    monkeypatch.setattr(github_login, "own_repos", lambda: None)
+    main.show_repo_picker()
+    _wait_for_repos(main, app)
+    assert "Not signed in" in main.repo_picker_list.item(0).text()
+
+    def refused():
+        raise github_login.LoginError("can't reach GitHub")
+
+    monkeypatch.setattr(github_login, "own_repos", refused)
+    main.show_repo_picker()
+    _wait_for_repos(main, app)
+    assert "can't reach GitHub" in main.repo_picker_list.item(0).text()
+    main.repo_picker.close()
+
+
+def test_memory_folder_and_settings_section(gui):
+    main, win, tmp = gui
+    main.create_chat("First", {**chat_settings.DEFAULTS, "Model": "m1"})
+    folder = tmp / "Chat" / "First" / "memory"
+    assert main.client.toolbox.memory_dir == folder and main.memory_folder() == folder
+    assert main.client.tools_enabled
+
+    win.open_for("First", main.settings, is_new=False)
+    assert win.ui.memoryCheck.isChecked() and win.ui.memoryButton.isEnabled()
+    assert win.ui.memoryLabel.text() == "No notes yet"
+    main.client.toolbox.run("save_memory", {"name": "rules", "content": "Keep it short."})
+    win.open_for("First", main.settings, is_new=False)
+    assert win.ui.memoryLabel.text() == "rules.md"
+    system = [m["content"] for m in main.client.build_messages([{"role": "user", "content": "hi"}]) if m["role"] == "system"]
+    assert any("Keep it short." in c for c in system)
+
+    # The notes follow the chat when it's renamed, and stay out of other chats.
+    main.apply_settings("Renamed", win.settings())
+    assert (tmp / "Chat" / "Renamed" / "memory" / "rules.md").exists() and not (tmp / "Chat" / "First").exists()
+    assert main.client.toolbox.memory_dir == tmp / "Chat" / "Renamed" / "memory"
+    main.create_chat("Second", {**chat_settings.DEFAULTS, "Model": "m1"})
+    assert main.client.toolbox.memory_note() == ""
+
+    # Off: not sent and no tools, though the notes are kept.
+    main.qs_chat("Renamed")
+    main.apply_settings("Renamed", {**main.settings, "Memory": False})
+    assert main.client.toolbox.memory_note() == "" and main.client.toolbox.memory_dir is None
+    assert (tmp / "Chat" / "Renamed" / "memory" / "rules.md").exists()
+    main.create_chat("Taken", {**chat_settings.DEFAULTS, "Model": "m1"})
+    assert main.chat_path.endswith("Taken.json")
+    win.open_for("", main.settings, is_new=True)
+    assert not win.ui.memoryButton.isEnabled()
+
+
 def test_settings_show_the_github_user(gui, monkeypatch):
     from local_tools import github_login
     from PySide6.QtWidgets import QApplication

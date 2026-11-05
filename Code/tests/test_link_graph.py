@@ -251,6 +251,114 @@ def test_a_change_in_the_chat_stays_when_the_personality_changes(graph, main):
     assert main.client.preset == "kuudere" and main.settings["Temperature"] == 1.5
 
 
+def test_the_graphs_checkboxes_choose_what_the_open_chat_takes(graph, main):
+    from PySide6.QtWidgets import QCheckBox
+    own_voice = "own voice"
+    main.own_settings = {**main.own_settings, "TTS Voice": own_voice}
+    personalities.save("Mio", {**personalities.load("Mio"), "TTS Voice": "her voice"})
+    cl.add_link(main.links, A, MIO, cl.SPEAKS)
+    main.links_updated()
+    assert main.settings["TTS Voice"] == "her voice"
+    graph.select(graph.nodes[A])
+    checks = {c.text(): c for c in graph.panel.findChildren(QCheckBox)}
+    assert set(checks) == {"Voice", "3D model", "LLM model"} and checks["Voice"].isChecked()
+    checks["Voice"].setChecked(False)
+    assert cl.skipped_of(main.links, "a") == ["Voice"]
+    assert main.settings["TTS Voice"] == own_voice and main.settings["Character"] == "Mio"
+    main.save_chat()
+    main.load_chat(str(paths.CHAT_DIR / "b.json"))
+    main.load_chat(str(paths.CHAT_DIR / "a.json"))
+    assert main.settings["TTS Voice"] == own_voice and main.settings["Character"] == "Mio"
+
+
+def test_chat_settings_shows_and_returns_the_choice(graph, main):
+    from Widgets import chatSettings
+    window = chatSettings.ChatSettings(main)
+    personalities.save("Mio", {**personalities.load("Mio"), "TTS Voice": "her voice", "Avatar Notes": "wave"})
+    window.open_for("a", main.settings, is_new=False)
+    assert window.personality() is None and window.ui.useVoiceCheck.isHidden()
+    window.ui.personalityCombo.setCurrentIndex(window.ui.personalityCombo.findData("Mio"))
+    window.on_personality_chosen(0)
+    assert not window.ui.useVoiceCheck.isHidden() and window.ui.characterEdit.text() == "Mio"
+    assert window.settings()["TTS Voice"] == "her voice"
+    window.ui.useVoiceCheck.setChecked(False)
+    assert window.settings()["TTS Voice"] == "" and window.skipped() == ["Voice"]
+    window.ui.useVoiceCheck.setChecked(True)
+    assert window.settings()["TTS Voice"] == "her voice"
+    window.ui.useAvatarCheck.setChecked(False)
+    main.apply_settings("a", window.settings(), window.personality(), window.skipped())
+    assert cl.speaks_as(main.links, "a") == "Mio" and cl.skipped_of(main.links, "a") == ["3D model"]
+    assert main.settings["Avatar Notes"] == "" and main.settings["TTS Voice"] == "her voice"
+    window.close()
+
+
+def test_a_personality_edit_reaches_every_chat_even_one_that_changed_it(graph, main):
+    cl.add_link(main.links, A, MIO, cl.SPEAKS)
+    cl.add_link(main.links, B, MIO, cl.SPEAKS)
+    main.links_updated()
+    main.apply_settings("a", {**main.settings, "Pretext": "my own take", "Temperature": 1.5}, "Mio")
+    assert sorted(cl.overrides_of(main.links, "a")) == ["Pretext", "Temperature"]
+    main.save_personality("Mio", {**personalities.load("Mio"), "Pretext": "kuudere"})
+    assert main.client.preset == "kuudere"                     # the edited setting reaches it
+    assert main.settings["Temperature"] == 1.5                 # one nobody edited stays its own
+    main.load_chat(str(paths.CHAT_DIR / "b.json"))
+    assert main.client.preset == "kuudere"
+
+
+def test_the_graph_opens_the_settings_window_on_a_personality(graph, main):
+    from Widgets import chatSettings
+    window = chatSettings.ChatSettings(main)
+    graph.edit_personality.connect(window.open_for_personality)
+    graph.select(graph.nodes[MIO])
+    dict(graph._actions(MIO))["Edit settings…"]()
+    assert window.editing == "Mio" and window.ui.pretextEdit.toPlainText() == "tsundere"
+    ui = window.ui
+    assert ui.groupMemory.isHidden() and ui.groupPersonality.isHidden() and ui.fileToolsCheck.isHidden()
+    assert not ui.gitToolsCheck.isHidden() and not ui.groupVoice.isHidden() and ui.titleEdit.isReadOnly()
+    assert window.settings()["Model"] == ""                    # opening it doesn't choose a model for every chat
+    window.open_for("a", main.settings, is_new=False)
+    assert window.editing is None and not ui.groupMemory.isHidden() and not ui.titleEdit.isReadOnly()
+    window.close()
+
+
+def test_git_access_follows_the_personality(graph, main):
+    personalities.save("Mio", {**personalities.load("Mio"), "Tool Git": False})
+    cl.add_link(main.links, A, MIO, cl.SPEAKS)
+    main.links_updated()
+    assert main.settings["Tool Git"] is False and "git" not in main.client.toolbox.groups
+
+
+def test_a_chat_gets_folders_from_chats_it_can_read_but_doesnt_keep_them(graph, main, tmp_path):
+    data = json.loads((paths.CHAT_DIR / "b.json").read_text(encoding="utf-8"))
+    data.update({"Tools Folders": [str(tmp_path)], "Tools Repos": ["https://github.com/me/r"]})
+    (paths.CHAT_DIR / "b.json").write_text(json.dumps(data), encoding="utf-8")
+    cl.add_link(main.links, A, WORK, cl.MEMBER)
+    cl.add_link(main.links, B, WORK, cl.MEMBER)
+    main.links_updated()
+    box = main.client.toolbox
+    assert box.shared_folders() == {str(tmp_path): "b"} and box.shared_repos() == {"https://github.com/me/r": "b"}
+    assert main.folder_list_button.text() == "▾ +1" and main.repo_list_button.text() == "▾ +1"
+    main.save_chat()
+    saved = json.loads((paths.CHAT_DIR / "a.json").read_text(encoding="utf-8"))
+    assert saved["Tools Folders"] == [] and saved["Tools Repos"] == []
+    main.show_folder_menu()
+    main.folder_menu.close()
+    cl.remove_link(main.links, A, WORK, cl.MEMBER)
+    main.links_updated()
+    assert box.shared_folders() == {}
+
+
+def test_general_settings_has_the_login_and_chat_settings_doesnt(graph, main, monkeypatch):
+    from local_tools import github_login
+    from Widgets import chatSettings, generalSettings
+    monkeypatch.setattr(github_login, "signed_in_user", lambda: "octo")
+    window = generalSettings.GeneralSettings()
+    window._show_github_user("octo")
+    assert "octo" in window.github_label.text()
+    assert not hasattr(chatSettings.ChatSettings(main).ui, "githubButton")
+    assert main.ui.actionGeneral_Settings.text() == "General…"
+
+
 def test_a_new_chat_can_start_as_a_personality(graph, main):
     main.create_chat("new one", {**main.own_settings, "Character": "Mio", "Pretext": "tsundere", "Temperature": 1.9},
                      "Mio")

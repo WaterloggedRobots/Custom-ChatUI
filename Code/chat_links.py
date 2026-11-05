@@ -15,7 +15,8 @@ It all lives in Save/links.json:
    "Links": [{"From": node, "To": node, "Kind": kind}],
    "Private": [chat names], "Layout": {node: {"x", "y", "Pinned"}},
    "Summaries": {chat: {"Upto": messages covered, "Text": one line}},
-   "Overrides": {chat: [settings it changed from its personality]}}
+   "Overrides": {chat: [settings it changed from its personality]},
+   "Skipped": {chat: [groups of its personality's settings it doesn't take]}}
 A node is "<type>:<name>", such as "chat:Avatar part 2".
 
 No Qt here, so it can be tested on its own (tests/test_chat_links.py).
@@ -49,7 +50,7 @@ def clean_name(name: str) -> str:
 
 
 def empty() -> dict:
-    return {"Projects": [], "Personalities": [], "Links": [], "Private": [], "Layout": {}, "Summaries": {}, "Overrides": {}}
+    return {"Projects": [], "Personalities": [], "Links": [], "Private": [], "Layout": {}, "Summaries": {}, "Overrides": {}, "Skipped": {}}
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +92,10 @@ def normalize(data, chats) -> dict:
     for chat, keys in overrides.items():
         if speaks_as(out, chat) and isinstance(keys, list) and keys:
             out["Overrides"][chat] = [k for k in keys if isinstance(k, str)]
+    skipped = data.get("Skipped") if isinstance(data.get("Skipped"), dict) else {}
+    for chat, groups in skipped.items():
+        if speaks_as(out, chat) and isinstance(groups, list) and groups:
+            out["Skipped"][chat] = [g for g in groups if isinstance(g, str)]
     return out
 
 
@@ -165,7 +170,7 @@ def remove_link(data: dict, a: str, b: str, kind: str) -> None:
     data["Links"] = [l for l in data["Links"]
                      if not (l["From"] == start and l["To"] == end and l["Kind"] == kind)]
     if kind == SPEAKS:
-        data["Overrides"].pop(split_node(start)[1], None)
+        _forget_choices(data, split_node(start)[1])
 
 
 def links_of(data: dict, name: str) -> list:
@@ -181,9 +186,36 @@ def speaks_as(data: dict, chat: str):
 def set_speaks_as(data: dict, chat: str, personality) -> None:
     start = node(CHAT, chat)
     data["Links"] = [l for l in data["Links"] if not (l["From"] == start and l["Kind"] == SPEAKS)]
-    data["Overrides"].pop(chat, None)     # they were changes from the personality it had
+    _forget_choices(data, chat)           # they were about the personality it had
     if personality in data["Personalities"]:
         data["Links"].append({"From": start, "To": node(PERSONALITY, personality), "Kind": SPEAKS})
+
+
+def _forget_choices(data: dict, chat: str) -> None:
+    data["Overrides"].pop(chat, None)
+    data["Skipped"].pop(chat, None)
+
+
+def skipped_of(data: dict, chat: str) -> list:
+    return data["Skipped"].get(chat, [])
+
+
+def set_skipped(data: dict, chat: str, groups) -> None:
+    """Which groups of its personality's settings this chat keeps to itself."""
+    groups = list(groups)
+    if groups:
+        data["Skipped"][chat] = groups
+    else:
+        data["Skipped"].pop(chat, None)
+
+
+def drop_overrides(data: dict, personality: str, keys) -> None:
+    """The personality changed these settings, so every chat speaking as it takes the new values."""
+    target = node(PERSONALITY, personality)
+    for link in data["Links"]:
+        if link["To"] == target and link["Kind"] == SPEAKS:
+            chat = split_node(link["From"])[1]
+            set_overrides(data, chat, [k for k in overrides_of(data, chat) if k not in keys])
 
 
 def overrides_of(data: dict, chat: str) -> list:
@@ -233,7 +265,7 @@ def rename_node(data: dict, kind: str, old: str, new: str) -> None:
     was, now = node(kind, old), node(kind, new)
     if kind == CHAT:
         data["Private"] = [new if c == old else c for c in data["Private"]]
-        for table in (data["Summaries"], data["Overrides"]):
+        for table in (data["Summaries"], data["Overrides"], data["Skipped"]):
             if old in table:
                 table[new] = table.pop(old)
     else:
@@ -250,7 +282,7 @@ def remove_hub(data: dict, kind: str, name: str) -> None:
     gone = node(kind, name)
     for link in links_of(data, gone):
         if link["Kind"] == SPEAKS:
-            data["Overrides"].pop(split_node(link["From"])[1], None)
+            _forget_choices(data, split_node(link["From"])[1])
     data[_list_key(kind)] = [n for n in data[_list_key(kind)] if n != name]
     data["Links"] = [l for l in data["Links"] if gone not in (l["From"], l["To"])]
     data["Layout"].pop(gone, None)

@@ -33,6 +33,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 MAX_OUTPUT_CHARS = 20000      # what one tool result may add to the conversation
 GROUPS = ("files", "git", "run")
+SHARED_LISTED = 15            # folders or repositories from linked chats named in the note, of each
 SHARED = {"change_directory"}  # in every group
 
 
@@ -217,6 +218,15 @@ class ToolBox:
     def has_links(self) -> bool:
         return bool(self.link_scope and self.link_scope.chats)
 
+    def shared_folders(self) -> Dict[str, str]:
+        """Folders linked chats share with this one, and the chat each comes from."""
+        linked = {str(f) for f in self.folders}
+        return {f: c for f, c in (self.link_scope.folders if self.link_scope else {}).items() if f not in linked}
+
+    def shared_repos(self) -> Dict[str, str]:
+        """GitHub repositories linked chats share with this one, and the chat each comes from."""
+        return {r: c for r, c in (self.link_scope.repos if self.link_scope else {}).items() if r not in self.repos}
+
     def memory_places(self) -> Dict[str, Path]:
         """The memory folders this chat uses, by the name the tools know them by; {} if memory is off."""
         if not self.memory_dir:
@@ -226,10 +236,13 @@ class ToolBox:
     def memory_note(self) -> str:
         """The notes of this chat, then its projects, then its personality, for every model.
 
-        They share one limit, so the chat's own are the last to be cut. "" if there are none or memory is off."""
+        They share one limit, so the chat's own are the last to be cut. The chat's memory switch only
+        covers its own notes: what comes with its project or personality always comes. "" if there are none."""
         from . import memory
         parts, room = [], memory.MAX_NOTE_CHARS
-        for place, folder in self.memory_places().items():
+        places = {"chat": self.memory_dir} if self.memory_dir else {}
+        places.update(self.link_scope.places if self.link_scope else {})
+        for place, folder in places.items():
             if room <= 0:
                 break
             heading = {} if place == "chat" else {
@@ -260,6 +273,21 @@ class ToolBox:
                          f"{', '.join(others)}. Every chat linked to that place will read them.")
         return note
 
+    def _shared_note(self) -> str:
+        """Paths only, as the model opens them when it needs them; a very long list stops at SHARED_LISTED."""
+        def listed(items):
+            names = sorted(items, key=str.lower)
+            more = len(names) - SHARED_LISTED
+            return "; ".join(names[:SHARED_LISTED]) + (f"; and {more} more (list_linked_chats has them all)"
+                                                       if more > 0 else "")
+        note = ""
+        if self.shared_folders():
+            note += f"Chats linked to this one also work in these folders, which you can use too: " \
+                    f"{listed(self.shared_folders())}. "
+        if self.shared_repos():
+            note += f"They also use these GitHub repositories: {listed(self.shared_repos())}. "
+        return note
+
     def _pc_note(self) -> str:
         can = [text for group, text in (
             ("files", "browse, read and edit files and folders"),
@@ -277,7 +305,8 @@ class ToolBox:
             + (f"The user linked these GitHub repositories to this chat: {'; '.join(self.repos)}. "
                + ("Clone one with git_clone before working on it, unless it's already in a linked folder. "
                   if "git" in self.groups else "You can't clone them while git is off. ")
-               if self.repos else "") +
+               if self.repos else "")
+            + self._shared_note() +
             f"The working folder is {self.working_dir}; relative paths start there and "
             "change_directory moves it. Look before you change anything: list or read first"
             + (", and use edit_file for small changes instead of rewriting whole files" if "files" in self.groups else "")

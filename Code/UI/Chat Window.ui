@@ -416,6 +416,12 @@ color:rgb(255, 255, 255)</string>
     </property>
     <addaction name="actionCharacter_Settings"/>
    </widget>
+   <widget class="QMenu" name="menuSettings">
+    <property name="title">
+     <string>Settings</string>
+    </property>
+    <addaction name="actionGeneral_Settings"/>
+   </widget>
    <widget class="QMenu" name="menuServer">
     <property name="title">
      <string>Server</string>
@@ -426,6 +432,7 @@ color:rgb(255, 255, 255)</string>
    <addaction name="menuChara"/>
    <addaction name="menuCharacter"/>
    <addaction name="menuServer"/>
+   <addaction name="menuSettings"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <action name="actionEdit_Message">
@@ -471,6 +478,14 @@ color:rgb(255, 255, 255)</string>
   <action name="actionChat_Settings">
    <property name="text">
     <string>Chat Settings</string>
+   </property>
+  </action>
+  <action name="actionGeneral_Settings">
+   <property name="text">
+    <string>General…</string>
+   </property>
+   <property name="toolTip">
+    <string>Settings for the whole program, such as your GitHub sign-in</string>
    </property>
   </action>
   <action name="actionLink_Graph">

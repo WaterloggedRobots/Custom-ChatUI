@@ -318,16 +318,17 @@ def test_memory_folder_and_settings_section(gui):
     assert not win.ui.memoryButton.isEnabled()
 
 
-def test_settings_show_the_github_user(gui, monkeypatch):
+def test_general_settings_show_the_github_user(gui, monkeypatch):
     from local_tools import github_login
     from PySide6.QtWidgets import QApplication
+    from Widgets.generalSettings import GeneralSettings
     import time
-    _, win, _ = gui
+    win = GeneralSettings()
     monkeypatch.setattr(github_login, "signed_in_user", lambda: "someone")
     win.check_github()
     deadline = time.monotonic() + 5
-    while win.ui.githubUserLabel.text() == "Checking GitHub…" and time.monotonic() < deadline:
+    while win.github_label.text() == "Checking GitHub…" and time.monotonic() < deadline:
         QApplication.processEvents()
-    assert win.ui.githubUserLabel.text() == "✓ Connected as someone"
+    assert win.github_label.text() == "✓ Connected as someone"
     win._show_github_user(None)
-    assert win.ui.githubUserLabel.text() == "Not signed in"
+    assert win.github_label.text() == "Not signed in"

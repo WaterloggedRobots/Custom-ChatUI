@@ -6,9 +6,12 @@ PERSONALITY_KEYS; tools, web search, pictures and memory stay with each chat. It
 file is the same format as an exported settings file (chat_settings.py), kept in
 Save/Personalities/<name>/personality.json next to its memory folder.
 
-A chat that uses a personality follows it, except for "overrides": the keys the
-chat changed for itself. The chat's own values stay in its file, so unlinking the
-personality gives the chat back what it had.
+A chat that uses a personality always takes its name, description and whether its
+model may use git (REQUIRED).
+OPTIONAL holds what it can choose to keep to itself instead: the voice, the 3D
+model, and the LLM model. It also follows the personality except for "overrides":
+the keys the chat changed for itself. The chat's own values stay in its file, so
+unlinking the personality gives the chat back what it had.
 
 No Qt here, so it can be tested on its own (tests/test_chat_links.py).
 """
@@ -19,29 +22,39 @@ from pathlib import Path
 import chat_settings
 import paths
 
-PERSONALITY_KEYS = ("Character", "Pretext", "Model", "Temperature",
-                    "TTS", "TTS Engine", "TTS Voice", "TTS Speed", "TTS Auto Play", "TTS Translate",
-                    "Avatar", "Avatar Personality", "Avatar Notes")
+REQUIRED = ("Character", "Pretext", chat_settings.TOOL_KEYS["git"])
+OPTIONAL = {
+    "Voice": ("TTS", "TTS Engine", "TTS Voice", "TTS Speed", "TTS Auto Play", "TTS Translate"),
+    "3D model": ("Avatar", "Avatar Personality", "Avatar Notes"),
+    "LLM model": ("Model", "Temperature"),
+}
+PERSONALITY_KEYS = (*REQUIRED, *(key for keys in OPTIONAL.values() for key in keys))
+
+
+def followed_keys(skipped=()) -> tuple:
+    """The personality's keys a chat takes, when it keeps the groups in `skipped` to itself."""
+    left_out = {key for group in skipped for key in OPTIONAL.get(group, ())}
+    return tuple(key for key in PERSONALITY_KEYS if key not in left_out)
 
 
 def _follows(key: str, personality: dict) -> bool:
     return key != "Model" or bool(personality["Model"])      # no model saved: each chat picks its own
 
 
-def resolve(own: dict, personality, overrides=()) -> dict:
+def resolve(own: dict, personality, overrides=(), skipped=()) -> dict:
     """The settings a chat runs with: its own, with the personality's over them."""
     settings = dict(own)
     if personality:
-        for key in PERSONALITY_KEYS:
+        for key in followed_keys(skipped):
             if key not in overrides and _follows(key, personality):
                 settings[key] = personality[key]
     return chat_settings.normalize(settings)
 
 
-def split(settings: dict, own: dict, personality: dict):
+def split(settings: dict, own: dict, personality: dict, skipped=()):
     """(what to save as the chat's own settings, the overrides) from the settings it runs with."""
     new_own, overrides = dict(settings), []
-    for key in PERSONALITY_KEYS:
+    for key in followed_keys(skipped):
         if not _follows(key, personality):
             continue
         if settings[key] == personality[key]:
@@ -64,10 +77,11 @@ def load(name: str):
         return None
 
 
-def save(name: str, settings: dict) -> None:
-    """Save the personality's part of `settings`. The rest of the file keeps the defaults."""
-    data = chat_settings.defaults()
-    data.update({key: settings[key] for key in PERSONALITY_KEYS})
+def save(name: str, settings: dict, skipped=()) -> None:
+    """Save the personality's part of `settings`. The groups in `skipped` keep what it had saved."""
+    data = load(name) if skipped else None
+    data = data or chat_settings.defaults()
+    data.update({key: settings[key] for key in followed_keys(skipped)})
     _file(name).parent.mkdir(parents=True, exist_ok=True)
     chat_settings.export_file(data, _file(name))
 

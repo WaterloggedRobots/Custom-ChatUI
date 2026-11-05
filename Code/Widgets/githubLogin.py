@@ -1,4 +1,4 @@
-"""The GitHub sign-in window, opened from Chat Settings next to the Git tools.
+"""The GitHub sign-in window, opened from Settings > General.
 
 The work is in local_tools/github_login.py; git calls run on a thread so the
 window doesn't freeze while the browser sign-in waits for you.

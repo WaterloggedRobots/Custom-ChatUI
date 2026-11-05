@@ -6,25 +6,25 @@ model list is the same one the main window's quick model picker shows. The
 voice lists come from the server (GET /v1/audio/voices) the first time text
 to speech is switched on here, and the ComfyUI workflows (GET
 /v1/images/workflows) each time their list is opened. "3D model" turns the
-voice on with it and asks the 3D model what she can do (avatar.py). The Git
-row shows which GitHub account git is signed in with. Memory lists the chat's
-memory notes and opens their folder. Personality picks a saved personality for
-the chat to talk as (personalities.py) and saves new ones.
-"""
+voice on with it and asks the 3D model what she can do (avatar.py). Memory lists
+the chat's memory notes and opens their folder. Personality picks a saved
+personality for the chat to talk as (personalities.py) and saves new ones.
 
-import threading
+The same window edits a saved personality (open_for_personality), showing only what
+a personality holds; saving it reaches every chat speaking as it.
+"""
 
 import chat_links
 import chat_settings
 import paths
 import personalities
 import voice
-from local_tools import github_login, memory
+from local_tools import memory
 from Widgets.chatMain import LiveComboBox, WEB_LABELS, safe_file_name
 
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QComboBox, QInputDialog, QMessageBox, QScrollArea
 from PySide6.QtUiTools import QUiLoader
-from PySide6.QtCore import QFile, QSettings, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QFile, QSettings, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from pathlib import Path
 
@@ -32,8 +32,6 @@ IMAGE_MODE_LABELS = {"auto": "Auto: when a picture fits", "on": "With every repl
 
 
 class ChatSettings(QMainWindow):
-    _github_checked = Signal(object)    # the signed in user name or None, from the checking thread
-
     def __init__(self, chat_main):
         super().__init__()
         self.chat_main = chat_main
@@ -45,7 +43,7 @@ class ChatSettings(QMainWindow):
         self.voice_list = None         # from the server: {"engines": [...], "voices": [...]}
         self.image_workflow = ""       # the chosen workflow id; kept even if the server doesn't list it
         self.workflow_list = None      # from the server: [{"id", "name", "usable", "error"}]
-        self._github = None            # the GitHub sign-in window, made when first opened
+        self.editing = None            # the personality being edited; None = a chat
         self.preview = voice.Speaker(lambda: chat_main.client.base_url, paths.AUDIO_DIR, self)
         self.preview.changed.connect(self._show_preview_state)
         self.preview.failed.connect(lambda err: self.ui.ttsStatusLabel.setText(err))
@@ -114,13 +112,12 @@ class ChatSettings(QMainWindow):
         self.ui.ttsLanguageCombo.activated.connect(lambda _: self._fill_voices())
         self.ui.ttsVoiceCombo.activated.connect(self.on_voice_chosen)
         self.ui.ttsTestButton.clicked.connect(self.test_voice)
-        self.ui.githubButton.clicked.connect(self.github_login)
         self.ui.memoryButton.clicked.connect(self.open_memory_folder)
         self.ui.personalityCombo.activated.connect(self.on_personality_chosen)
+        for check, group in self._use_checks():
+            check.toggled.connect(lambda on, g=group: self.on_use_toggled(g, on))
         self.ui.savePersonalityButton.clicked.connect(self.save_personality)
         self.ui.updatePersonalityButton.clicked.connect(self.update_personality)
-        self.ui.githubUserLabel.setTextFormat(Qt.PlainText)
-        self._github_checked.connect(self._show_github_user)
         self.workflow_combo.activated.connect(self.on_workflow_chosen)
         self.ui.avatarCheck.toggled.connect(self.on_avatar_toggled)
         for check in (self.ui.ttsCheck, self.ui.avatarCheck):      # they open sections of the window
@@ -139,20 +136,48 @@ class ChatSettings(QMainWindow):
 
     def open_for(self, title: str, settings: dict, is_new: bool):
         """Fill the window with `settings` and show it."""
+        self._set_editing(None)
         self.is_new = is_new
         self.setWindowTitle("New Chat" if is_new else f"Chat Settings: {title}")
         self.ui.titleEdit.setText(title)
         self.show_settings(settings)
-        self._fill_personalities(None if is_new else self.chat_main.personality_name)
-        self.check_github()
+        self._fill_personalities(None if is_new else self.chat_main.personality_name,
+                                 () if is_new else self.chat_main.skipped)
         self._show_memory()
         self.show()
         self.raise_()
         self.activateWindow()
         QTimer.singleShot(0, self._fit_to_screen)     # sizes are only known once it's shown
 
+    def open_for_personality(self, name: str):
+        """Edit a saved personality; Save goes to ChatMain.save_personality."""
+        saved = personalities.load(name)
+        if saved is None:
+            return
+        self._set_editing(name)
+        self.is_new = False
+        self.setWindowTitle(f"Personality: {name}")
+        self.ui.titleEdit.setText(name)
+        self.show_settings(saved)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        QTimer.singleShot(0, self._fit_to_screen)
+
+    def _set_editing(self, name):
+        """Show everything for a chat, or only what a personality holds."""
+        self.editing = name
+        ui = self.ui
+        for widget in (ui.groupPersonality, ui.groupMemory, ui.groupPictures, ui.label_web, ui.webCombo, ui.label_think,
+                       ui.thinkCheck, ui.label_fileTools, ui.fileToolsCheck, ui.label_runTools, ui.runToolsCheck):
+            widget.setVisible(name is None)
+        ui.label_title.setText("Chat Title:" if name is None else "Personality:")
+        ui.titleEdit.setReadOnly(name is not None)
+        ui.titleEdit.setToolTip("" if name is None else "Rename it in the link graph")
+
     def _fit_to_screen(self):
         """Tall enough to show everything, if the screen has the room."""
+        self.ui.layout().activate()         # sections may have just been hidden or shown
         need = self.ui.minimumSizeHint().expandedTo(self.ui.sizeHint())
         room = self.screen().availableGeometry().height() - 60
         bar = self.centralWidget().verticalScrollBar().sizeHint().width()
@@ -228,23 +253,26 @@ class ChatSettings(QMainWindow):
         combo = self.model_combo
         combo.blockSignals(True)
         combo.clear()
+        if self.editing:
+            combo.addItem("Each chat picks its own", "")
         for mid, m in main.models.items():
             combo.addItem(main.model_label(m), mid)
         if self.model and self.model not in main.models:
             combo.addItem(f"   {self.model} (not on the server)", self.model)
         combo.setCurrentIndex(max(0, combo.findData(self.model)))
         combo.blockSignals(False)
-        if not self.model and combo.count():
+        if not self.model and combo.count() and not self.editing:
             self.model = combo.currentData()
         self._update_capabilities()
 
     def on_model_chosen(self, index):
-        self.model = self.model_combo.itemData(index) or self.model
+        chosen = self.model_combo.itemData(index)
+        self.model = chosen if self.editing else chosen or self.model
         self._update_capabilities()
 
     def on_main_model_changed(self, model):
         """The quick picker in the main window changed this chat's model."""
-        if self.isVisible() and not self.is_new:
+        if self.isVisible() and not self.is_new and not self.editing:
             self.model = model
             self.refresh_models()
 
@@ -274,25 +302,54 @@ class ChatSettings(QMainWindow):
         """The saved personality this chat talks as, or None for its own settings."""
         return self.ui.personalityCombo.currentData()
 
-    def _fill_personalities(self, chosen):
+    def skipped(self) -> list:
+        """The groups of the personality's settings this chat keeps to itself."""
+        return [group for check, group in self._use_checks() if not check.isChecked()]
+
+    def _use_checks(self):
+        return ((self.ui.useVoiceCheck, "Voice"), (self.ui.useAvatarCheck, "3D model"),
+                (self.ui.useModelCheck, "LLM model"))
+
+    def _own_values(self):
+        return chat_settings.defaults() if self.is_new else self.chat_main.own_settings
+
+    def _fill_personalities(self, chosen, skipped=()):
+        for check, group in self._use_checks():
+            self._quietly(check, check.setChecked, group not in skipped)
         combo = self.ui.personalityCombo
         combo.clear()
         combo.addItem("This chat's own settings", None)
         for name in self.chat_main.links["Personalities"]:
             combo.addItem(name, name)
         combo.setCurrentIndex(max(0, combo.findData(chosen)))
-        self.ui.updatePersonalityButton.setEnabled(chosen is not None)
+        self._show_personality_state()
+
+    def _show_personality_state(self):
+        name = self.personality()
+        self.ui.updatePersonalityButton.setEnabled(name is not None)
+        self.ui.personalityNote.setVisible(name is not None)
+        for check, _group in self._use_checks():
+            check.setVisible(name is not None)
+
+    def on_use_toggled(self, group, on):
+        """Show the personality's values for this group, or this chat's own."""
+        name = self.personality()
+        saved = personalities.load(name) if name else None
+        if saved:
+            source = saved if on else self._own_values()
+            keys = [k for k in personalities.OPTIONAL[group] if k != "Model" or source[k]]
+            self.show_settings({**self.settings(), **{k: source[k] for k in keys}})
 
     def on_personality_chosen(self, _index):
         name = self.personality()
-        self.ui.updatePersonalityButton.setEnabled(name is not None)
+        self._show_personality_state()
         current = self.settings()
         if name:
             saved = personalities.load(name)
             if saved:
-                self.show_settings(personalities.resolve(current, saved))
+                self.show_settings(personalities.resolve(current, saved, skipped=self.skipped()))
         else:
-            own = chat_settings.defaults() if self.is_new else self.chat_main.own_settings
+            own = self._own_values()
             self.show_settings({**current, **{k: own[k] for k in personalities.PERSONALITY_KEYS}})
 
     def save_personality(self):
@@ -313,8 +370,7 @@ class ChatSettings(QMainWindow):
     def update_personality(self):
         name = self.personality()
         if name:
-            personalities.save(name, self.settings())
-            self.chat_main.links_updated()
+            self.chat_main.save_personality(name, self.settings(), self.skipped())   # not this chat's own voice, say
 
     def _memory_folder(self):
         """The memory folder of the chat being edited; a new chat doesn't have one until it's saved."""
@@ -336,36 +392,6 @@ class ChatSettings(QMainWindow):
             folder.mkdir(parents=True, exist_ok=True)
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
             self._show_memory()
-
-    def github_login(self):
-        from Widgets.githubLogin import GitHubLogin
-        if self._github is None:
-            self._github = GitHubLogin(self)
-            self._github.user_changed.connect(self._show_github_user)
-        self._github.show()
-        self._github.raise_()
-        self._github.activateWindow()
-
-    def check_github(self):
-        """Show who git is signed in as. Asking git can take a while, so it runs on a thread."""
-        self.ui.githubUserLabel.setStyleSheet("color:#8a8a8a")
-        self.ui.githubUserLabel.setText("Checking GitHub…")
-
-        def job():
-            try:
-                user = github_login.signed_in_user()
-            except github_login.LoginError:
-                user = None
-            try:
-                self._github_checked.emit(user)
-            except RuntimeError:               # the window is gone
-                pass
-
-        threading.Thread(target=job, daemon=True).start()
-
-    def _show_github_user(self, user):
-        self.ui.githubUserLabel.setStyleSheet("color:#7fd88f" if user else "color:#8a8a8a")
-        self.ui.githubUserLabel.setText(f"✓ Connected as {user}" if user else "Not signed in")
 
     # ------------------------------------------------------------------
     # Pictures (ComfyUI workflows on the server)

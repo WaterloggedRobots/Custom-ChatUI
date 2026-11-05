@@ -55,8 +55,9 @@ def test_changing_personality_forgets_the_overrides(data):
     cl.add_link(data, A, KAI, cl.SPEAKS)
     assert cl.overrides_of(data, "a") == []
     cl.set_overrides(data, "a", ["Model"])
+    cl.set_skipped(data, "a", ["Voice"])
     cl.remove_hub(data, cl.PERSONALITY, "Kai")
-    assert cl.overrides_of(data, "a") == [] and cl.speaks_as(data, "a") is None
+    assert cl.overrides_of(data, "a") == [] and cl.skipped_of(data, "a") == [] and cl.speaks_as(data, "a") is None
 
 
 def test_a_floating_chat_reads_nothing(data):
@@ -175,6 +176,33 @@ def test_overrides_survive_edits_to_the_personality():
     assert run2["Character"] == "Mio 2" and run2["Temperature"] == 1.1
 
 
+def test_a_chat_can_keep_groups_to_itself_but_never_the_name_or_description():
+    own = settings(Character="Bot", Pretext="own", Model="m1", Temperature=0.9, **{"TTS": True, "TTS Voice": "mine"})
+    mio = settings(Character="Mio", Pretext="tsundere", Model="big", Temperature=0.3, Avatar=True,
+                   **{"TTS": True, "TTS Voice": "hers", "Avatar Notes": "smile"})
+    run = personalities.resolve(own, mio, skipped=["Voice", "LLM model"])
+    assert (run["Character"], run["Pretext"]) == ("Mio", "tsundere")
+    assert run["TTS Voice"] == "mine" and (run["Model"], run["Temperature"]) == ("m1", 0.9)
+    assert run["Avatar"] is True and run["Avatar Notes"] == "smile"
+    run = personalities.resolve(own, mio, skipped=["3D model"])
+    assert run["Avatar"] is False and run["TTS Voice"] == "hers"
+    assert personalities.resolve(own, mio, skipped=["Character", "Pretext"])["Pretext"] == "tsundere"
+
+    # What a chat keeps to itself is its own, not a change from the personality.
+    run = personalities.resolve(own, mio, skipped=["Voice"])
+    run["TTS Voice"] = "new"
+    new_own, overrides = personalities.split(run, own, mio, ["Voice"])
+    assert overrides == [] and new_own["TTS Voice"] == "new"
+
+
+def test_updating_a_personality_leaves_what_the_chat_doesnt_take(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "PERSONALITY_DIR", tmp_path)
+    personalities.save("Mio", settings(Pretext="old", **{"TTS Voice": "hers"}))
+    personalities.save("Mio", settings(Pretext="new", **{"TTS Voice": "mine"}), ["Voice"])
+    loaded = personalities.load("Mio")
+    assert loaded["Pretext"] == "new" and loaded["TTS Voice"] == "hers"
+
+
 def test_personality_files(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "PERSONALITY_DIR", tmp_path)
     personalities.save("Mio", settings(Character="Mio", Pretext="hi", **{"Tool Run": False}))
@@ -234,6 +262,26 @@ def box(tmp_path):
     return box
 
 
+def test_folders_and_repos_of_linked_chats_are_shared_as_paths(box, tmp_path):
+    box.set_groups(("files", "git"))
+    box.set_folders([tmp_path])
+    box.link_scope.folders = {str(tmp_path): "other", "D:/shared": "other"}
+    box.link_scope.repos = {"https://github.com/me/shared": "other"}
+    assert box.shared_folders() == {"D:/shared": "other"}      # not what it already has
+    note = box.system_note()
+    assert "D:/shared" in note and "https://github.com/me/shared" in note
+    assert box.folders == [tmp_path] and box.repos == []       # never saved as this chat's own
+    assert "D:/shared (other)" in box.run("list_linked_chats", {})
+
+    box.link_scope.folders = {f"D:/{i:02}": "other" for i in range(40)}
+    note = box.system_note()
+    assert "D:/14" in note and "D:/15" not in note and "and 25 more" in note
+    assert "D:/39" in box.run("list_linked_chats", {})
+
+    box.set_groups(())
+    assert "D:/00" not in box.system_note()
+
+
 def test_linked_tools_only_read_what_is_linked(box):
     names = {t.name for t in box.active()}
     assert {"list_linked_chats", "search_linked_chats", "read_linked_chat"} == names
@@ -278,5 +326,7 @@ def test_notes_come_nearest_first_and_the_chats_own_are_cut_last(tmp_path):
     note = box.memory_note()
     assert "OWN" in note and "MIO" not in note
 
-    box.memory_dir = None                         # memory off: no notes from anywhere
-    assert box.memory_note() == "" and "save_memory" not in {t.name for t in box.active()}
+    box.memory_dir = None                         # the chat's switch off: its own notes go, the shared ones stay
+    note = box.memory_note()
+    assert "OWN" not in note and "PROJECT" in note and "MIO" in note
+    assert "save_memory" not in {t.name for t in box.active()}

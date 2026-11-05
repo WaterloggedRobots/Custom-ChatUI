@@ -20,7 +20,7 @@ import graph_layout
 import paths
 import personalities
 
-from PySide6.QtCore import QLineF, QPointF, QRectF, QSettings, Qt, QTimer, QUrl
+from PySide6.QtCore import QLineF, QPointF, QRectF, QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (QBrush, QColor, QDesktopServices, QFont, QFontMetricsF, QPainter, QPainterPath,
                            QPainterPathStroker, QPen, QPixmap, QPolygonF)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QGraphicsItem, QGraphicsLineItem, QGraphicsPathItem,
@@ -333,6 +333,8 @@ class GraphView(QGraphicsView):
 
 
 class LinkGraph(QMainWindow):
+    edit_personality = Signal(str)      # main.py opens the settings window on it
+
     def __init__(self, chat_main):
         super().__init__()
         self.chat_main = chat_main
@@ -724,7 +726,7 @@ class LinkGraph(QMainWindow):
                             lambda: self.set_private(label, not private)))
         else:
             if kind == cl.PERSONALITY:
-                actions.append(("Edit description…", lambda: self.edit_description(label)))
+                actions.append(("Edit settings…", lambda: self.edit_personality.emit(label)))
             actions += [("Open memory folder", lambda: self.open_memory(kind, label)),
                         ("Rename…", lambda: self.rename_hub(kind, label)),
                         ("Delete…", lambda: self.delete_hub(kind, label))]
@@ -759,6 +761,11 @@ class LinkGraph(QMainWindow):
         cl.set_private(self.links, chat, private)
         self.chat_main.links_updated()
 
+    def set_followed(self, chat, group, on):
+        skipped = [g for g in cl.skipped_of(self.links, chat) if g != group] + ([] if on else [group])
+        cl.set_skipped(self.links, chat, skipped)
+        self.chat_main.links_updated()
+
     def unpin(self, name):
         self.layout.pinned.discard(name)
         self.layout.warm(0.4)
@@ -778,9 +785,6 @@ class LinkGraph(QMainWindow):
         name, ok = QInputDialog.getText(self, title, label, text=text)
         return cl.clean_name(name) if ok else ""
 
-    def _ask_text(self, title, label, text=""):
-        return QInputDialog.getMultiLineText(self, title, label, text)
-
     def _confirm(self, title, text) -> bool:
         return QMessageBox.question(self, title, text) == QMessageBox.Yes
 
@@ -795,16 +799,7 @@ class LinkGraph(QMainWindow):
             personalities.save(name, {**self.chat_main.settings, "Character": name, "Pretext": "", "Model": "",
                                       "TTS": False, "Avatar": False})
             self.chat_main.links_updated()
-
-    def edit_description(self, name):
-        saved = personalities.load(name)
-        if saved is None:
-            return
-        text, ok = self._ask_text(f"{name}: description", "Sent first, as the system message, in every chat "
-                                  "that speaks as this personality", saved["Pretext"])
-        if ok:
-            personalities.save(name, {**saved, "Pretext": text.strip()})
-            self.chat_main.links_updated()
+            self.edit_personality.emit(name)
 
     @staticmethod
     def _folder(kind, name):
@@ -923,6 +918,15 @@ class LinkGraph(QMainWindow):
             listing.addItems(rows)
             listing.setMaximumHeight(170)
             self.panel_layout.addWidget(listing)
+        personality = cl.speaks_as(self.links, label) if kind == cl.CHAT else None
+        if personality:
+            self._panel_label(f"Name, description and memory notes come from {personality}. Also take:", muted=True)
+            skipped = cl.skipped_of(self.links, label)
+            for group in personalities.OPTIONAL:
+                check = QCheckBox(group)
+                check.setChecked(group not in skipped)
+                check.toggled.connect(lambda on, c=label, g=group: self.set_followed(c, g, on))
+                self.panel_layout.addWidget(check)
         if kind == cl.CHAT:
             reach = cl.readable_chats(self.links, label)
             self._panel_label(f"Can read {len(reach)} other chat{'' if len(reach) == 1 else 's'}."

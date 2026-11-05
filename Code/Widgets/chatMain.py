@@ -7,7 +7,7 @@ import paths
 import personalities
 import voice
 from local_tools import github_login, repo_url
-from local_tools.linked import LinkedChat, LinkScope
+from local_tools.linked import LinkedChat, LinkScope, shared_by
 from Widgets.chatList import ChatList
 
 from PySide6.QtWidgets import (QInputDialog, QListWidget, QListWidgetItem, QMainWindow, QSizePolicy, QFileDialog,
@@ -193,6 +193,7 @@ class ChatMain(QMainWindow):
         self.own_settings = self.settings              # what's saved in the chat file
         self.personality = None                        # the settings of the personality it talks as, if any
         self.personality_name = None
+        self.skipped = []                              # the groups of its settings this chat doesn't take
         self.links = chat_links.load(paths.LINKS_FILE, self.all_chats())
         self.botName = self.settings["Character"]
         self.status_tools_tip = ""
@@ -501,8 +502,9 @@ class ChatMain(QMainWindow):
     def _fill_folder_menu(self):
         menu = self.folder_menu
         menu.clear()
-        folders = self.client.toolbox.folders
-        if not folders:
+        box = self.client.toolbox
+        folders, shared = box.folders, box.shared_folders()
+        if not folders and not shared:
             menu.addAction("No folders").setEnabled(False)
             return
         rows = []
@@ -511,7 +513,18 @@ class ChatMain(QMainWindow):
             label.setToolTip(str(folder))
             label.setStyleSheet("color:white")
             rows.append(self._menu_row(label, f"Unlink {folder}", lambda f=folder: self.remove_tools_folder(f)))
+        for folder, chat in shared.items():
+            rows.append(self._shared_row(html.escape(short_path(folder)), f"{folder}\nShared by the linked chat {chat}"))
         self._add_menu_rows(menu, rows)
+
+    @staticmethod
+    def _shared_row(text, tip):
+        """A row for what a linked chat shares: there's no x, as it's unlinked in that chat or the link graph."""
+        label = QLabel(f"🔗 {text}")
+        label.setToolTip(tip)
+        label.setOpenExternalLinks(True)
+        label.setStyleSheet(f"color:{MUTED};padding:4px 8px")
+        return label
 
     def _add_menu_rows(self, menu, rows):
         """Put rows in a menu, in a list that gets a scroll bar when it's too tall."""
@@ -585,7 +598,7 @@ class ChatMain(QMainWindow):
         else:
             self._own_repos = []
             self._repo_note = (f"⚠ {result}" if result else
-                               "Not signed in. Use GitHub… in Chat Settings to list your repositories")
+                               "Not signed in. Use Settings > General to list your repositories")
         self._fill_repo_picker()
         if self.repo_picker.isVisible():
             self._popup_repo_picker()          # it changed size: fit it on the screen again
@@ -650,8 +663,9 @@ class ChatMain(QMainWindow):
     def _fill_repo_menu(self):
         menu = self.repo_menu
         menu.clear()
-        repos = self.client.toolbox.repos
-        if not repos:
+        box = self.client.toolbox
+        repos, shared = box.repos, box.shared_repos()
+        if not repos and not shared:
             menu.addAction("No repositories").setEnabled(False)
             return
         rows = []
@@ -661,19 +675,28 @@ class ChatMain(QMainWindow):
             label.setToolTip(url)
             label.setOpenExternalLinks(True)
             rows.append(self._menu_row(label, f"Unlink {url}", lambda u=url: self.remove_repo(u)))
+        for url, chat in shared.items():
+            name = html.escape(url.removeprefix("https://github.com/"))
+            rows.append(self._shared_row(f'<a style="color:#7ab7ff" href="{html.escape(url)}">{name}</a>',
+                                         f"{url}\nShared by the linked chat {chat}"))
         self._add_menu_rows(menu, rows)
 
     def _show_tools_folder(self):
         box = self.client.toolbox
-        n = len(box.folders)
-        self.folder_list_button.setText(f"▾ {n}" if n else "▾")
+        n, shared = len(box.folders), len(box.shared_folders())
+        self.folder_list_button.setText(self._count_label(n, shared))
         tip = self.status_tools_tip
         self.folder_button.setToolTip(f"Link a folder for the tools ({n} linked)\n"
                                       f"Working folder now: {box.working_dir}" + (f"\n{tip}" if tip else ""))
-        n = len(box.repos)
-        self.repo_list_button.setText(f"▾ {n}" if n else "▾")
+        n, shared = len(box.repos), len(box.shared_repos())
+        self.repo_list_button.setText(self._count_label(n, shared))
         self.repo_button.setToolTip(f"Link one of your GitHub repositories, or another by its link ({n} linked)"
                                     + (f"\n{tip}" if tip else ""))
+
+    @staticmethod
+    def _count_label(own, shared):
+        """The ▾ button: how many are this chat's, and how many come from linked chats."""
+        return "▾" + (f" {own}" if own else "") + (f" +{shared}" if shared else "")
 
     def on_tool_event(self, ev):
         if ev["state"] == "running":
@@ -1399,7 +1422,8 @@ class ChatMain(QMainWindow):
         # counts as changed, so edits to the personality reach it and unlinking gives back its own.
         overrides = []
         if self.personality:
-            self.own_settings, overrides = personalities.split(self.settings, self.own_settings, self.personality)
+            self.own_settings, overrides = personalities.split(self.settings, self.own_settings, self.personality,
+                                                               self.skipped)
         else:
             self.own_settings = self.settings
         if chat_links.set_overrides(self.links, self.chat_name(), overrides):
@@ -1447,7 +1471,7 @@ class ChatMain(QMainWindow):
             return ""
         return avatar.system_note(info, self.settings["Avatar Personality"], self.settings["Avatar Notes"])
 
-    def apply_settings(self, title, settings, personality=None):
+    def apply_settings(self, title, settings, personality=None, skipped=()):
         """Save from the Chat Settings window for the open chat; a new title renames its file."""
         if self.client.busy:
             self.client.abort_generation()
@@ -1457,7 +1481,8 @@ class ChatMain(QMainWindow):
         old_tts = [self.settings[k] for k in tts_keys]
         if personality != self.personality_name:
             chat_links.set_speaks_as(self.links, self.chat_name(), personality)
-            self.save_links()
+        chat_links.set_skipped(self.links, self.chat_name(), skipped if personality else ())
+        self.save_links()
         self._load_personality()
         self.set_settings(settings)
         if [self.settings[k] for k in tts_keys] != old_tts:
@@ -1472,13 +1497,15 @@ class ChatMain(QMainWindow):
         self._rebuild_chat_ui()
         self.links_changed.emit()
 
-    def create_chat(self, title, settings, personality=None):
+    def create_chat(self, title, settings, personality=None, skipped=()):
         """A new, empty chat with these settings, opened straight away."""
         path = self._free_chat_path(title)
         saved = personalities.load(personality) if personality else None
         if saved:
             chat_links.set_speaks_as(self.links, path.stem, personality)
-            chat_links.set_overrides(self.links, path.stem, personalities.split(settings, settings, saved)[1])
+            chat_links.set_skipped(self.links, path.stem, skipped)
+            chat_links.set_overrides(self.links, path.stem,
+                                     personalities.split(settings, settings, saved, skipped)[1])
             self.save_links()
         data = {"Name": title, "Settings": chat_settings.normalize(settings), "Tools Folders": [], "Chat": []}
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1552,10 +1579,11 @@ class ChatMain(QMainWindow):
         name = chat_links.speaks_as(self.links, self.chat_name())
         self.personality = personalities.load(name) if name else None
         self.personality_name = name if self.personality else None
+        self.skipped = list(chat_links.skipped_of(self.links, self.chat_name()))
 
     def _running_settings(self):
         return personalities.resolve(self.own_settings, self.personality,
-                                     chat_links.overrides_of(self.links, self.chat_name()))
+                                     chat_links.overrides_of(self.links, self.chat_name()), self.skipped)
 
     def _link_scope(self):
         """What the open chat's links reach, for the model; replaced whole, as a reply may be reading it."""
@@ -1567,14 +1595,31 @@ class ChatMain(QMainWindow):
         for name, why in chat_links.readable_chats(self.links, chat).items():
             summary = self.links["Summaries"].get(name, {}).get("Text", "")
             chats[name] = LinkedChat(paths.CHAT_DIR / f"{name}.json", why, summary)
-        return LinkScope(chats=chats, places=places)
+        folders, repos = {}, {}
+        for name, chat in chats.items():
+            shared_folders, shared_repos = shared_by(chat.path)
+            for folder in shared_folders:
+                folders.setdefault(folder, name)
+            for url in shared_repos:
+                repos.setdefault(url, name)
+        return LinkScope(chats=chats, places=places, folders=folders, repos=repos)
+
+    def save_personality(self, name, settings, skipped=()):
+        """Save a personality. What changed reaches every chat speaking as it, even one that had changed it."""
+        before = personalities.load(name)
+        personalities.save(name, settings, skipped)
+        after = personalities.load(name)
+        if before and after:
+            changed = [k for k in personalities.PERSONALITY_KEYS if before[k] != after[k]]
+            chat_links.drop_overrides(self.links, name, changed)
+        self.links_updated()
 
     def links_updated(self):
         """The links or a personality changed: save, and let the open chat follow."""
         self.save_links()
-        before = (self.personality_name, self.personality)
+        before = (self.personality_name, self.personality, self.skipped)
         self._load_personality()
-        if (self.personality_name, self.personality) != before:
+        if (self.personality_name, self.personality, self.skipped) != before:
             if self.client.busy:
                 self.client.abort_generation()
                 self._end_response()

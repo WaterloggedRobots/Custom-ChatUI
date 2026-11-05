@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 import paths
 import chat_settings
-from Widgets import chatMain, chatSettings, linkGraph, warningWidget
+from Widgets import chatMain, chatSettings, generalSettings, linkGraph, warningWidget
 
 CHAT_KEYS = {"Name", "Chat"}
 def find_json_with_format(
@@ -87,6 +87,8 @@ class Main:
         mainChat.ui.actionSet_IP.triggered.connect(self.openIPSettings)
         mainChat.ui.actionCharacter_Settings.triggered.connect(self.openChatSettings)
         mainChat.ui.actionLink_Graph.triggered.connect(graphWindow.open)
+        mainChat.ui.actionGeneral_Settings.triggered.connect(settingsGeneral.open)
+        graphWindow.edit_personality.connect(settingsChat.open_for_personality)
 
         settingsChat.ui.cancelButton.clicked.connect(self.cancelChatSettings)
         settingsChat.ui.saveButton.clicked.connect(self.saveChatSettings)
@@ -98,17 +100,22 @@ class Main:
         settingsIP.ui.pushButton.clicked.connect(self.exitIPSettings)
 
     def cancelChatSettings(self):
-        if mainChat.chat_path is None:
+        if mainChat.chat_path is None and not settingsChat.editing:
             warningLeaveEmpty.show()
         else:
             settingsChat.close()
 
     def saveChatSettings(self):
+        if settingsChat.editing:
+            if settingsChat.editing in mainChat.links["Personalities"]:
+                mainChat.save_personality(settingsChat.editing, settingsChat.settings())
+            settingsChat.close()
+            return
         title, settings, personality = settingsChat.title(), settingsChat.settings(), settingsChat.personality()
         if settingsChat.is_new or mainChat.chat_path is None:
-            mainChat.create_chat(title, settings, personality)
+            mainChat.create_chat(title, settings, personality, settingsChat.skipped())
         else:
-            mainChat.apply_settings(title, settings, personality)
+            mainChat.apply_settings(title, settings, personality, settingsChat.skipped())
         settingsChat.close()
         if emptyStart.isVisible():
             emptyStart.close()
@@ -162,6 +169,7 @@ if __name__ == "__main__":
     emptyStart = warningWidget.EmptyStart()
     settingsChat = chatSettings.ChatSettings(mainChat)
     graphWindow = linkGraph.LinkGraph(mainChat)
+    settingsGeneral = generalSettings.GeneralSettings()
     warningLeaveEmpty = warningWidget.EmptyLeave()
     invalidChatSettings = warningWidget.InvalidChatSettings()
     messageEdit = chatMain.EditMessage()

@@ -24,6 +24,8 @@ class _Relay(QObject):
 
 
 class GitHubLogin(QDialog):
+    user_changed = Signal(object)       # the signed in user name, or None
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("GitHub sign-in for git")
@@ -132,6 +134,7 @@ class GitHubLogin(QDialog):
                 self.message.setText(f"⚠ {result}")
                 return
             user, gcm, (name, email) = result
+            self.user_changed.emit(user)
             self.status.setText(f"Signed in as {user}" if user else "Not signed in")
             self.browser_button.setEnabled(gcm)
             self.browser_button.setToolTip("Git Credential Manager opens GitHub's sign-in page" if gcm else

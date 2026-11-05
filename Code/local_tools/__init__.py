@@ -16,14 +16,15 @@ Each tool has a kind:
   write  changes files, folders or a repository. Asks you first.
   run    runs a program or shell command. Asks you first.
 
-ToolBox holds the state one chat needs: the folders you linked to the chat
-(the model is told about them; the first is where it starts), the working
-folder that relative paths start from, and the tools you chose to "always
+ToolBox holds the state one chat needs: the folders and GitHub repositories
+you linked to the chat (the model is told about them; the first folder is where
+it starts), the working folder that relative paths start from, and the tools you chose to "always
 allow" for this session.
 """
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
@@ -63,11 +64,26 @@ def clip(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     return text[:limit] + f"\n… [cut: {len(text) - limit:,} more characters. Ask for a smaller part.]"
 
 
+_REPO_PART = r"([\w.-]+)/([\w.-]+?)(?:\.git)?"
+_REPO_LINK = re.compile(r"(?:(?:https?://|ssh://git@|git@)(?:www\.)?)?github\.com[/:]" + _REPO_PART + r"(?:[/?#].*)?", re.I)
+_REPO_SHORT = re.compile(_REPO_PART)
+
+
+def repo_url(text: str) -> Optional[str]:
+    """https://github.com/owner/repo from a GitHub link or owner/repo, or None if it's neither."""
+    text = str(text).strip()
+    found = _REPO_LINK.fullmatch(text) or _REPO_SHORT.fullmatch(text)
+    if not found or {found[1], found[2]} & {".", ".."}:
+        return None
+    return f"https://github.com/{found[1]}/{found[2]}"
+
+
 class ToolBox:
     def __init__(self, working_dir: Optional[str] = None,
                  extract_text: Optional[Callable[[Path], str]] = None):
         self.working_dir = Path(working_dir).expanduser() if working_dir else Path.home()
         self.folders: List[Path] = []     # linked in the GUI
+        self.repos: List[str] = []        # GitHub repository links, linked in the GUI
         self.always_allow: set = set()
         # Turns a PDF or Word file into text (llmClient uses the server's /v1/files/extract).
         self.extract_text = extract_text
@@ -119,6 +135,21 @@ class ToolBox:
         self.set_folders(folders)
         if any(current == f or f in current.parents for f in self.folders):
             self.working_dir = current       # still inside a linked folder: stay there
+
+    def set_repos(self, repos) -> None:
+        self.repos = []
+        for text in repos:
+            self.add_repo(text)
+
+    def add_repo(self, text) -> Optional[str]:
+        """Link a repository; returns its link, or None if `text` isn't a GitHub repository."""
+        url = repo_url(text)
+        if url and url not in self.repos:
+            self.repos.append(url)
+        return url
+
+    def remove_repo(self, url) -> None:
+        self.repos = [r for r in self.repos if r != url]
 
     def set_working_dir(self, path: str) -> Path:
         p = self.resolve(path)
@@ -183,7 +214,11 @@ class ToolBox:
             + (f"The user turned off {' and '.join(names[g] for g in off)} for this chat; don't offer those. "
                if off and can else "")
             + (f"The user linked these folders for you to work in: {'; '.join(str(f) for f in self.folders)}. "
-               if self.folders else "") +
+               if self.folders else "")
+            + (f"The user linked these GitHub repositories to this chat: {'; '.join(self.repos)}. "
+               + ("Clone one with git_clone before working on it, unless it's already in a linked folder. "
+                  if "git" in self.groups else "You can't clone them while git is off. ")
+               if self.repos else "") +
             f"The working folder is {self.working_dir}; relative paths start there and "
             "change_directory moves it. Look before you change anything: list or read first"
             + (", and use edit_file for small changes instead of rewriting whole files" if "files" in self.groups else "")

@@ -318,3 +318,23 @@ def test_check_token_reads_the_user_from_github(monkeypatch):
     assert gh.check_token("ok") == "octo"
     with pytest.raises(gh.LoginError, match="doesn't accept"):
         gh.check_token("nope")
+
+
+def test_linked_repos(box):
+    from local_tools import repo_url
+    wanted = "https://github.com/WaterloggedRobots/Custom-ChatUI"
+    for text in ("https://github.com/WaterloggedRobots/Custom-ChatUI", " github.com/WaterloggedRobots/Custom-ChatUI.git ",
+                 "git@github.com:WaterloggedRobots/Custom-ChatUI.git", "WaterloggedRobots/Custom-ChatUI",
+                 "https://github.com/WaterloggedRobots/Custom-ChatUI/tree/animation"):
+        assert repo_url(text) == wanted
+    for text in ("https://gitlab.com/a/b", "not a repo", "just-a-name", "../..", ""):
+        assert repo_url(text) is None
+
+    box.set_repos([wanted, wanted + ".git", "https://gitlab.com/a/b"])
+    assert box.repos == [wanted]                                         # duplicate and non-GitHub dropped
+    box.set_groups(["git"])
+    assert wanted in box.system_note() and "git_clone" in box.system_note()
+    box.set_groups(["files"])
+    assert wanted in box.system_note() and "can't clone" in box.system_note()
+    box.remove_repo(wanted)
+    assert box.repos == [] and "repositories" not in box.system_note()

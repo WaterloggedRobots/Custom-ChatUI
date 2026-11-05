@@ -290,6 +290,13 @@ QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px}</string>
       <item row="3" column="1" alignment="Qt::AlignmentFlag::AlignRight">
        <layout class="QHBoxLayout" name="gitToolsLayout">
         <item>
+         <widget class="QLabel" name="githubUserLabel">
+          <property name="toolTip">
+           <string>The GitHub account git is signed in with</string>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QPushButton" name="githubButton">
           <property name="text">
            <string>GitHub…</string>

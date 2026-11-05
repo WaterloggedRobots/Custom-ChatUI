@@ -4,7 +4,7 @@ import llmClient
 import paths
 import voice
 
-from PySide6.QtWidgets import (QMainWindow, QSizePolicy, QFileDialog, QComboBox, QLabel, QMenu,
+from PySide6.QtWidgets import (QInputDialog, QMainWindow, QSizePolicy, QFileDialog, QComboBox, QLabel, QMenu,
                                QMessageBox, QPushButton, QToolButton, QWidget, QHBoxLayout, QWidgetAction,
                                QGraphicsScene, QGraphicsPixmapItem)
 from PySide6.QtUiTools import QUiLoader
@@ -24,7 +24,7 @@ IMAGE_HEIGHT = 240              # pictures in the chat; click one to open it ful
 CAP_ICONS = (("vision", "👁"), ("thinking", "💭"), ("tools", "🔧"))
 WEB_LABELS = {"auto": "Web: Auto", "on": "Web: Always", "off": "Web: Off"}
 TOOL_STATE_ICONS = {"ok": "✓", "error": "⚠", "declined": "✗ declined"}
-APP_VERSION = "0.14.0_Avatar"
+APP_VERSION = "0.14.1_Avatar"
 # Mic button languages: label, code sent to the server ("" = Whisper detects it)
 VOICE_LANGUAGES = (("Detect automatically", ""), ("English", "en"), ("中文 Chinese", "zh"),
                    ("粵語 Cantonese", "yue"), ("日本語 Japanese", "ja"))
@@ -305,6 +305,20 @@ class ChatMain(QMainWindow):
         self.folder_list_button.clicked.connect(self.show_folder_menu)
         bar.insertWidget(1, self.folder_button)
         bar.insertWidget(2, self.folder_list_button)
+        # 🐙 links a GitHub repository the same way, with its own ▾ list.
+        self.repo_button = QPushButton("🐙")
+        self.repo_button.setStyleSheet("background:rgb(57,57,57);color:white")
+        self.repo_button.setFixedWidth(max(self.repo_button.sizeHint().width() // 2, 24))
+        self.repo_button.clicked.connect(self.add_repo)
+        self.repo_list_button = QToolButton()
+        self.repo_list_button.setText("▾")
+        self.repo_list_button.setStyleSheet("background:rgb(57,57,57);color:white")
+        self.repo_list_button.setToolTip("Linked GitHub repositories")
+        self.repo_menu = QMenu(self)
+        self.repo_menu.setStyleSheet("QMenu{background:rgb(45,45,45);color:white}")
+        self.repo_list_button.clicked.connect(self.show_repo_menu)
+        bar.insertWidget(3, self.repo_button)
+        bar.insertWidget(4, self.repo_list_button)
         self._show_tools_folder()
 
         # Mic button between the input and Send. Click to talk, click again to stop;
@@ -449,24 +463,65 @@ class ChatMain(QMainWindow):
             menu.addAction("No folders").setEnabled(False)
             return
         for folder in folders:
-            row = QWidget()
-            lay = QHBoxLayout(row)
-            lay.setContentsMargins(8, 2, 4, 2)
             label = QLabel(short_path(folder))
             label.setToolTip(str(folder))
             label.setStyleSheet("color:white")
-            remove = QToolButton()
-            remove.setText("x")
-            remove.setToolTip(f"Unlink {folder}")
-            remove.setAutoRaise(True)
-            remove.setStyleSheet("color:#ff8a8a")
-            # Deferred: refilling the menu deletes this button, which must not happen inside its own click.
-            remove.clicked.connect(lambda _=False, f=folder: QTimer.singleShot(0, lambda: self.remove_tools_folder(f)))
-            lay.addWidget(label, 1)
-            lay.addWidget(remove)
-            action = QWidgetAction(menu)
-            action.setDefaultWidget(row)
-            menu.addAction(action)
+            self._add_menu_row(menu, label, f"Unlink {folder}", lambda f=folder: self.remove_tools_folder(f))
+
+    def _add_menu_row(self, menu, label, remove_tip, on_remove):
+        """A row in a linked folders or repositories menu: the label and an x to unlink it."""
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(8, 2, 4, 2)
+        remove = QToolButton()
+        remove.setText("x")
+        remove.setToolTip(remove_tip)
+        remove.setAutoRaise(True)
+        remove.setStyleSheet("color:#ff8a8a")
+        # Deferred: refilling the menu deletes this button, which must not happen inside its own click.
+        remove.clicked.connect(lambda: QTimer.singleShot(0, on_remove))
+        lay.addWidget(label, 1)
+        lay.addWidget(remove)
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(row)
+        menu.addAction(action)
+
+    def add_repo(self):
+        text, ok = QInputDialog.getText(self, "Link a GitHub repository",
+                                        "Repository link, e.g. https://github.com/owner/repo")
+        if not ok or not text.strip():
+            return
+        if not self.client.toolbox.add_repo(text):
+            self.status_label.setText(f"That isn't a GitHub repository link: {text.strip()}")
+            return
+        self._show_tools_folder()
+        self.save_chat()
+
+    def remove_repo(self, url):
+        self.client.toolbox.remove_repo(url)
+        self._show_tools_folder()
+        self.save_chat()
+        self._fill_repo_menu()
+        self.repo_menu.adjustSize()
+
+    def show_repo_menu(self):
+        self._fill_repo_menu()
+        btn = self.repo_list_button
+        self.repo_menu.popup(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _fill_repo_menu(self):
+        menu = self.repo_menu
+        menu.clear()
+        repos = self.client.toolbox.repos
+        if not repos:
+            menu.addAction("No repositories").setEnabled(False)
+            return
+        for url in repos:
+            name = url.removeprefix("https://github.com/")
+            label = QLabel(f'<a style="color:#7ab7ff" href="{html.escape(url)}">{html.escape(name)}</a>')
+            label.setToolTip(url)
+            label.setOpenExternalLinks(True)
+            self._add_menu_row(menu, label, f"Unlink {url}", lambda u=url: self.remove_repo(u))
 
     def _show_tools_folder(self):
         box = self.client.toolbox
@@ -475,6 +530,9 @@ class ChatMain(QMainWindow):
         tip = self.status_tools_tip
         self.folder_button.setToolTip(f"Link a folder for the tools ({n} linked)\n"
                                       f"Working folder now: {box.working_dir}" + (f"\n{tip}" if tip else ""))
+        n = len(box.repos)
+        self.repo_list_button.setText(f"▾ {n}" if n else "▾")
+        self.repo_button.setToolTip(f"Link a GitHub repository ({n} linked)" + (f"\n{tip}" if tip else ""))
 
     def on_tool_event(self, ev):
         if ev["state"] == "running":
@@ -728,6 +786,7 @@ class ChatMain(QMainWindow):
     def _append_message(self, msg, index):
         ts = msg.get("ts")
         time_str = f" <span style='color:{MUTED}'>[{self.format_ts(ts)}]</span>" if ts else ""
+        self.chat.moveCursor(QTextCursor.End)    # a click in the chat moves the cursor; insert at the end anyway
         if msg["role"] == "user":
             self.chat.append(f"<b>You</b>{time_str}:")
             self.chat.insertHtml(self.render_user(msg))
@@ -1171,6 +1230,7 @@ class ChatMain(QMainWindow):
             old = chatHist.get("Tools Folder")
             folders = [old] if old and Path(old) != Path.home() else []
         self.client.toolbox.set_folders(folders)
+        self.client.toolbox.set_repos(chatHist.get("Tools Repos") or [])
         self.set_settings(chat_settings.from_chat(chatHist))
         if not isinstance(chatHist.get("Settings"), dict):
             self.save_chat()         # move a pre-0.9 chat's settings into the chat file now
@@ -1192,6 +1252,7 @@ class ChatMain(QMainWindow):
             "Name": self.ui.lineEdit.text(),
             "Settings": self.settings,
             "Tools Folders": [str(f) for f in self.client.toolbox.folders],
+            "Tools Repos": self.client.toolbox.repos,
             "Chat": self.chat_markdown,
             "Summary": self.client.summary,
         }

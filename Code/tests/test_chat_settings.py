@@ -169,3 +169,70 @@ def test_folder_button_is_half_width(gui):
     full = QPushButton("📁")
     full.setStyleSheet(main.folder_button.styleSheet())
     assert main.folder_button.width() == max(full.sizeHint().width() // 2, 24)
+
+
+@pytest.mark.parametrize("select", [False, True])
+def test_message_stays_at_the_end_after_clicking_in_the_chat(gui, monkeypatch, select):
+    from PySide6.QtGui import QTextCursor
+    main, _, _ = gui
+    main.create_chat("Click", {**chat_settings.DEFAULTS, "Model": "m1"})
+    monkeypatch.setattr(main.client, "generate", lambda *a, **k: None)
+    main.input.setPlainText("first")
+    main.sendMessage()
+    main.on_done({"content": "Reasons:\n\n* one item\n* two item\n\nThe end"})
+
+    block = main.chat.document().begin()
+    while not block.textList():
+        block = block.next()
+    cursor = main.chat.textCursor()
+    cursor.setPosition(block.position() + 2)
+    if select:
+        cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+    main.chat.setTextCursor(cursor)
+
+    main.input.setPlainText("second")
+    main.sendMessage()
+    blocks = []
+    block = main.chat.document().begin()
+    while block.isValid():
+        blocks.append(block)
+        block = block.next()
+    you = next(b for b in reversed(blocks) if b.text().startswith("You"))
+    assert you.text().endswith("second") and not you.textList()
+    listed = [b.text().strip() for b in blocks if b.textList()]
+    assert listed == ["one item", "two item"]
+
+
+def test_repo_link_is_saved_with_the_chat_and_listed(gui, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+    main, _, _ = gui
+    main.create_chat("Repos", {**chat_settings.DEFAULTS, "Model": "m1"})
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a: ("not a repo", True))
+    main.add_repo()
+    assert main.client.toolbox.repos == [] and "isn't a GitHub" in main.status_label.text()
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a: ("github.com/owner/repo.git", True))
+    main.add_repo()
+    url = "https://github.com/owner/repo"
+    assert main.client.toolbox.repos == [url] and main.repo_list_button.text() == "▾ 1"
+    assert _saved(main)["Tools Repos"] == [url]
+    main._fill_repo_menu()
+    assert len(main.repo_menu.actions()) == 1
+
+    main.remove_repo(url)
+    assert _saved(main)["Tools Repos"] == [] and main.repo_list_button.text() == "▾"
+
+
+def test_settings_show_the_github_user(gui, monkeypatch):
+    from local_tools import github_login
+    from PySide6.QtWidgets import QApplication
+    import time
+    _, win, _ = gui
+    monkeypatch.setattr(github_login, "signed_in_user", lambda: "someone")
+    win.check_github()
+    deadline = time.monotonic() + 5
+    while win.ui.githubUserLabel.text() == "Checking GitHub…" and time.monotonic() < deadline:
+        QApplication.processEvents()
+    assert win.ui.githubUserLabel.text() == "✓ Connected as someone"
+    win._show_github_user(None)
+    assert win.ui.githubUserLabel.text() == "Not signed in"

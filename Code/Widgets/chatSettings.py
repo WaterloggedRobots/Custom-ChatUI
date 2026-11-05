@@ -6,23 +6,29 @@ model list is the same one the main window's quick model picker shows. The
 voice lists come from the server (GET /v1/audio/voices) the first time text
 to speech is switched on here, and the ComfyUI workflows (GET
 /v1/images/workflows) each time their list is opened. "3D model" turns the
-voice on with it and asks the 3D model what she can do (avatar.py).
+voice on with it and asks the 3D model what she can do (avatar.py). The Git
+row shows which GitHub account git is signed in with.
 """
+
+import threading
 
 import chat_settings
 import paths
 import voice
+from local_tools import github_login
 from Widgets.chatMain import LiveComboBox, WEB_LABELS, safe_file_name
 
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QComboBox, QMessageBox
 from PySide6.QtUiTools import QUiLoader
-from PySide6.QtCore import QFile, QSettings
+from PySide6.QtCore import QFile, QSettings, Qt, Signal
 from pathlib import Path
 
 IMAGE_MODE_LABELS = {"auto": "Auto: when a picture fits", "on": "With every reply"}
 
 
 class ChatSettings(QMainWindow):
+    _github_checked = Signal(object)    # the signed in user name or None, from the checking thread
+
     def __init__(self, chat_main):
         super().__init__()
         self.chat_main = chat_main
@@ -98,6 +104,8 @@ class ChatSettings(QMainWindow):
         self.ui.ttsVoiceCombo.activated.connect(self.on_voice_chosen)
         self.ui.ttsTestButton.clicked.connect(self.test_voice)
         self.ui.githubButton.clicked.connect(self.github_login)
+        self.ui.githubUserLabel.setTextFormat(Qt.PlainText)
+        self._github_checked.connect(self._show_github_user)
         self.workflow_combo.activated.connect(self.on_workflow_chosen)
         self.ui.avatarCheck.toggled.connect(self.on_avatar_toggled)
         self.ui.avatarCheckButton.clicked.connect(self.check_avatar)
@@ -118,6 +126,7 @@ class ChatSettings(QMainWindow):
         self.setWindowTitle("New Chat" if is_new else f"Chat Settings: {title}")
         self.ui.titleEdit.setText(title)
         self.show_settings(settings)
+        self.check_github()
         self.show()
         self.raise_()
         self.activateWindow()
@@ -232,9 +241,31 @@ class ChatSettings(QMainWindow):
         from Widgets.githubLogin import GitHubLogin
         if self._github is None:
             self._github = GitHubLogin(self)
+            self._github.user_changed.connect(self._show_github_user)
         self._github.show()
         self._github.raise_()
         self._github.activateWindow()
+
+    def check_github(self):
+        """Show who git is signed in as. Asking git can take a while, so it runs on a thread."""
+        self.ui.githubUserLabel.setStyleSheet("color:#8a8a8a")
+        self.ui.githubUserLabel.setText("Checking GitHub…")
+
+        def job():
+            try:
+                user = github_login.signed_in_user()
+            except github_login.LoginError:
+                user = None
+            try:
+                self._github_checked.emit(user)
+            except RuntimeError:               # the window is gone
+                pass
+
+        threading.Thread(target=job, daemon=True).start()
+
+    def _show_github_user(self, user):
+        self.ui.githubUserLabel.setStyleSheet("color:#7fd88f" if user else "color:#8a8a8a")
+        self.ui.githubUserLabel.setText(f"✓ Connected as {user}" if user else "Not signed in")
 
     # ------------------------------------------------------------------
     # Pictures (ComfyUI workflows on the server)

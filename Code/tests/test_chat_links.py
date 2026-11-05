@@ -330,3 +330,16 @@ def test_notes_come_nearest_first_and_the_chats_own_are_cut_last(tmp_path):
     note = box.memory_note()
     assert "OWN" not in note and "PROJECT" in note and "MIO" in note
     assert "save_memory" not in {t.name for t in box.active()}
+
+
+def test_the_personality_name_is_the_character_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "PERSONALITY_DIR", tmp_path)
+    personalities.save("Mio Mio", settings(Character="Something else", Pretext="desc"))
+    saved = personalities.load("Mio Mio")
+    assert saved["Character"] == "Mio Mio"
+    (tmp_path / "Mio Mio").rename(tmp_path / "Renamed")        # the link graph renames its folder
+    assert personalities.load("Renamed")["Character"] == "Renamed"
+    own = settings(Character="Own", Pretext="own")
+    assert personalities.resolve(own, saved, overrides=["Character"])["Character"] == "Mio Mio"
+    new_own, overrides = personalities.split({**saved, "Character": "Typed"}, own, saved)
+    assert new_own["Character"] == "Own" and "Character" not in overrides

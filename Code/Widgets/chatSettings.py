@@ -187,6 +187,8 @@ class ChatSettings(QMainWindow):
         ui.label_title.setText("Chat Title:" if name is None else "Personality:")
         ui.titleEdit.setReadOnly(name is not None)
         ui.titleEdit.setToolTip("" if name is None else "Rename it in the link graph")
+        ui.label_name.setVisible(name is None)          # its name is the character's name
+        ui.characterEdit.setVisible(name is None)
 
     def _fit_to_screen(self):
         """Tall enough to show everything, if the screen has the room."""
@@ -341,6 +343,8 @@ class ChatSettings(QMainWindow):
         name = self.personality()
         self.ui.updatePersonalityButton.setEnabled(name is not None)
         self.ui.personalityNote.setVisible(name is not None)
+        self.ui.characterEdit.setEnabled(name is None)
+        self.ui.characterEdit.setToolTip("" if name is None else "The personality's name; rename it in the link graph")
         for check, _group in self._use_checks():
             check.setVisible(name is not None)
 

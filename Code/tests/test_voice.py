@@ -436,3 +436,19 @@ def test_translated_reply_shows_what_was_spoken(gui, monkeypatch):
     calls.clear()
     main.speak(1)
     assert calls[0][-1] is None                                        # no translation
+
+
+@pytest.mark.parametrize("text, voice_id, wanted", [
+    ("Go eat something first.", "miomio|ja", True),
+    ("もう食べたの？", "miomio|ja", False),
+    ("今日予定", "miomio|ja", False),            # all kanji: could be Japanese
+    ("Fine, 了解 then.", "miomio|ja", True),      # mostly English
+    ("もう食べたの？", "miomio|en", True),
+    ("Go eat.", "miomio|en", False),
+    ("Go eat.", "miomio|zh-HK", True),
+    ("Go eat.", "en-US-AriaNeural", False),      # not picked per language: the checkbox decides
+    ("Go eat.", "", False),
+    ("123 ...", "miomio|ja", False),
+])
+def test_a_voice_picked_per_language_speaks_it(text, voice_id, wanted):
+    assert voice.needs_translating(text, voice_id) is wanted

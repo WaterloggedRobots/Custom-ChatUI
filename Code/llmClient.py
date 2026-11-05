@@ -35,6 +35,7 @@ import requests
 from PySide6.QtCore import QObject, Signal
 
 import avatar
+import chat_settings
 import paths
 from local_tools import ToolBox
 from local_tools.memory import MAX_NOTE_CHARS
@@ -83,6 +84,7 @@ class LLMClient(QObject):
         self.model_name = None
         self.temperature = 0.7
         self.preset = ""
+        self.character = ""            # the name in the chat's settings; the model is told it (name_note)
         self.think = True
         self.web_mode = "auto"
         self.image_workflow = ""       # ComfyUI workflow id on the server; "" = no pictures
@@ -216,8 +218,9 @@ class LLMClient(QObject):
     def build_messages(self, history, summary_text=None):
         _, recent = self._split_history(history)
         messages = []
-        if self.preset:
-            messages.append({"role": "system", "content": self.preset})
+        system = "\n\n".join(p for p in (self.preset, chat_settings.name_note(self.character, self.preset)) if p)
+        if system:
+            messages.append({"role": "system", "content": system})
         memory = self.toolbox.memory_note()
         if memory:
             messages.append({"role": "system", "content": memory})

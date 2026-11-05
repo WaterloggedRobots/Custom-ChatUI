@@ -61,6 +61,14 @@ def tool_groups(settings: dict) -> set:
     return {group for group, key in TOOL_KEYS.items() if settings.get(key)}
 
 
+def name_note(name: str, pretext: str) -> str:
+    """What tells the model its name, so the description doesn't have to and can't disagree.
+    Nothing if it's the default name, or the description already uses this one."""
+    if not name or name == DEFAULTS["Character"] or name.casefold() in (pretext or "").casefold():
+        return ""
+    return f"Your name is {name}."
+
+
 def defaults() -> dict:
     return dict(DEFAULTS)
 

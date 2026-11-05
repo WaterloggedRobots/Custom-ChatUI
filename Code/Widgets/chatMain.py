@@ -933,7 +933,7 @@ class ChatMain(QMainWindow):
             footer.append(f"{tokens} tokens")
         if msg.get("stopped"):
             footer.append("stopped")
-        spoken = msg.get("spoken") if self.settings["TTS"] and self.settings["TTS Translate"] else None
+        spoken = msg.get("spoken") if self.settings["TTS"] and self._translates(msg.get("content", "")) else None
         if self.settings["TTS"] and msg.get("content", "").strip():
             label = SPEAK_LABELS[self.speaker.state_of(index)]
             footer.append(f"<a href='speak:{index}' style='color:#7aa7ff;text-decoration:none;font-size:13px'>{label}</a>")
@@ -1013,9 +1013,13 @@ class ChatMain(QMainWindow):
         if s["Avatar"] and self.speaker.key != index:
             msg = self.chat_markdown[index]
             self.performer.prepare(index, msg.get("content", ""), msg.get("acts"), skip_first=reacted)
-        translate_model = (self.client.model_name or "") if s["TTS Translate"] else None
-        self.speaker.toggle(index, self.chat_markdown[index].get("content", ""),
+        text = self.chat_markdown[index].get("content", "")
+        translate_model = (self.client.model_name or "") if self._translates(text) else None
+        self.speaker.toggle(index, text,
                             s["TTS Engine"], s["TTS Voice"], s["TTS Speed"], translate_model)
+
+    def _translates(self, text: str) -> bool:
+        return self.settings["TTS Translate"] or voice.needs_translating(text, self.settings["TTS Voice"])
 
     def on_spoken(self, index, language, text):
         """A reply was translated for its voice: keep the translation with the message."""
@@ -1455,6 +1459,7 @@ class ChatMain(QMainWindow):
         s = self.settings
         self.botName = s["Character"]
         self.client.set_preset(s["Pretext"])
+        self.client.character = s["Character"]
         self.client.stage_note = self._stage_note if s["Avatar"] else None
         self.avatar_link.watch("chat", s["Avatar"])
         if s["Avatar"]:

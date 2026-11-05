@@ -607,7 +607,7 @@ QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px}</string>
          <item row="5" column="2">
           <widget class="QCheckBox" name="ttsTranslateCheck">
            <property name="toolTip">
-            <string>E.g. English replies read out in Japanese by a Japanese voice. The text in the chat stays as it is.</string>
+            <string>E.g. English replies read out in Japanese by a Japanese voice. The text in the chat stays as it is. Voices picked per language (GPT-SoVITS, Chatterbox) always do this.</string>
            </property>
           </widget>
          </item>

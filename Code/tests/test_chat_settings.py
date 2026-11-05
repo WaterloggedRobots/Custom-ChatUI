@@ -7,6 +7,7 @@ Run from Code/:  python -m pytest -q tests
 import json
 import os
 import sys
+import time
 
 import pytest
 
@@ -375,3 +376,24 @@ def test_settings_window_shows_the_3d_model_arriving(gui, monkeypatch):
     assert "Connected" in win.ui.avatarStatusLabel.text()
     win.hide()
     assert watching["settings"] is False
+
+
+def test_the_model_is_told_the_name_once():
+    assert chat_settings.name_note("Kit", "A calm helper.") == "Your name is Kit."
+    assert chat_settings.name_note("Kit", "You are kit, a helper.") == ""
+    assert chat_settings.name_note("Bot", "A calm helper.") == ""
+    assert chat_settings.name_note("", "A calm helper.") == ""
+
+
+def test_name_field_follows_the_personality(gui):
+    main, win, _ = gui
+    win.open_for("Chat", win.settings(), False)
+    assert win.ui.characterEdit.isEnabled() and win.ui.characterEdit.isVisibleTo(win.ui)
+    win.ui.personalityCombo.addItem("Mio", "Mio")
+    win.ui.personalityCombo.setCurrentIndex(win.ui.personalityCombo.findData("Mio"))
+    win._show_personality_state()
+    assert not win.ui.characterEdit.isEnabled()
+    win._set_editing("Mio")
+    assert not win.ui.characterEdit.isVisibleTo(win.ui)
+    win._set_editing(None)
+    assert win.ui.characterEdit.isVisibleTo(win.ui)

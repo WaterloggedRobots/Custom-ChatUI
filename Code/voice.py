@@ -242,6 +242,35 @@ def list_voices(base_url: str, engine: str = "") -> dict:
     return r.json()
 
 
+def text_language(text: str) -> str:
+    """The language most of `text`'s letters look like: "ja", "zh", "ko", "en", or "" with no letters."""
+    latin = kana = hangul = han = 0
+    for c in text:
+        if c.isascii():
+            latin += c.isalpha()
+        elif "\u3040" <= c <= "\u30ff":
+            kana += 1
+        elif "\uac00" <= c <= "\ud7af":
+            hangul += 1
+        elif "\u4e00" <= c <= "\u9fff":
+            han += 1
+    if not latin + kana + hangul + han:
+        return ""
+    if latin >= kana + hangul + han:
+        return "en"
+    return "ko" if hangul > kana + han else "ja" if kana else "zh"
+
+
+def needs_translating(text: str, voice_id: str) -> bool:
+    """A voice picked per language ("miomio|ja") speaks that language, whatever the reply is
+    written in; the other way to speak English is to pick "miomio|en"."""
+    wanted = (voice_id or "").partition("|")[2].split("-")[0]
+    written = text_language(text)
+    if not wanted or not written or written == wanted:
+        return False
+    return not (wanted == "ja" and written == "zh")      # all kanji can be Japanese too
+
+
 def clip_name(text: str, engine: str, voice: str, speed: float, translate: bool = False) -> str:
     """Cache file name (without extension) for one reading of one text."""
     tag = "|translated" if translate else ""

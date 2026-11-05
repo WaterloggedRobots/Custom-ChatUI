@@ -271,8 +271,8 @@ python api_v2.py -a 127.0.0.1 -p 9880 -c GPT_SoVITS/configs/tts_infer.yaml
 
 The voices show up in Chat Settings under GPT-SoVITS as `Mio (Japanese,
 trained)`, once per language in `TTS_SOVITS_LANGUAGES`. A voice can speak a
-language other than its clip's, e.g. a Japanese voice speaking English; with
-*Speak in the voice's language* the reply is translated first. The server
+language other than its clip's, e.g. a Japanese voice speaking English. The GUI
+has a reply in another language translated first, so `Mio|ja` always speaks Japanese. The server
 loads the voice's trained files into GPT-SoVITS when a chat switches voice
 (a few seconds), then keeps them loaded.
 

@@ -8,7 +8,8 @@ Save/Personalities/<name>/personality.json next to its memory folder.
 
 A chat that uses a personality always takes its name, description and whether its
 model may use git (REQUIRED).
-OPTIONAL holds what it can choose to keep to itself instead: the voice, the 3D
+The personality's name is the character's name: there's one name, and a chat can't
+change it while it talks as the personality. OPTIONAL holds what it can choose to keep to itself instead: the voice, the 3D
 model, and the LLM model. It also follows the personality except for "overrides":
 the keys the chat changed for itself. The chat's own values stay in its file, so
 unlinking the personality gives the chat back what it had.
@@ -46,7 +47,7 @@ def resolve(own: dict, personality, overrides=(), skipped=()) -> dict:
     settings = dict(own)
     if personality:
         for key in followed_keys(skipped):
-            if key not in overrides and _follows(key, personality):
+            if (key == "Character" or key not in overrides) and _follows(key, personality):
                 settings[key] = personality[key]
     return chat_settings.normalize(settings)
 
@@ -57,7 +58,7 @@ def split(settings: dict, own: dict, personality: dict, skipped=()):
     for key in followed_keys(skipped):
         if not _follows(key, personality):
             continue
-        if settings[key] == personality[key]:
+        if key == "Character" or settings[key] == personality[key]:
             new_own[key] = own[key]
         else:
             overrides.append(key)
@@ -71,7 +72,7 @@ def _file(name: str) -> Path:
 def load(name: str):
     """The personality's settings, or None if it has no readable file."""
     try:
-        return chat_settings.import_file(_file(name))
+        return {**chat_settings.import_file(_file(name)), "Character": name}
     except ValueError as e:
         print(f"Can't read personality {name}: {e}")
         return None
@@ -82,6 +83,7 @@ def save(name: str, settings: dict, skipped=()) -> None:
     data = load(name) if skipped else None
     data = data or chat_settings.defaults()
     data.update({key: settings[key] for key in followed_keys(skipped)})
+    data["Character"] = name
     _file(name).parent.mkdir(parents=True, exist_ok=True)
     chat_settings.export_file(data, _file(name))
 

@@ -37,6 +37,7 @@ from PySide6.QtCore import QObject, Signal
 import avatar
 import paths
 from local_tools import ToolBox
+from local_tools.memory import MAX_NOTE_CHARS
 
 DEFAULT_PORT = 8100
 
@@ -47,6 +48,8 @@ ATTACHMENT_TURNS = 2          # user turns whose attachments are re-sent in full
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+LINK_SUMMARY_MESSAGES = 30    # newest messages a linked chat's one-line summary is written from
+LINK_SUMMARY_TOKENS = 80
 MAX_TOOL_ROUNDS = 12          # tool calls the model may make in a row before it must answer
 TOOL_LOG_CHARS = 3000         # how much of each tool result is kept in the saved chat
 IMAGE_EXT_FOR = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
@@ -73,6 +76,7 @@ class LLMClient(QObject):
     approval_needed = Signal(dict)
     # A picture is ready: {"path", "prompt", "negative_prompt", "workflow"}, or {"error", "prompt", ...}
     image = Signal(dict)
+    chat_summarized = Signal(str, int, str)   # a linked chat's name, the messages covered and its one-line summary
 
     def __init__(self):
         super().__init__()
@@ -217,6 +221,9 @@ class LLMClient(QObject):
         memory = self.toolbox.memory_note()
         if memory:
             messages.append({"role": "system", "content": memory})
+        linked = self.toolbox.links_note(MAX_NOTE_CHARS - len(memory), self.tools_enabled)
+        if linked:
+            messages.append({"role": "system", "content": linked})
         stage = self.stage_note() if self.stage_note else ""
         if stage:
             messages.append({"role": "system", "content": stage})
@@ -272,6 +279,32 @@ class LLMClient(QObject):
         text = r.json()["choices"][0]["message"]["content"].strip()
         self.summary = {"upto": len(older), "text": text}
         return text
+
+    def summarize_chat(self, chat: str, history):
+        """Write the line other chats see about this one, in the background; a failure just waits for next time."""
+        model, count = self.model_name, len(history)
+        recent = [{"role": m["role"], "content": str(self._content(m, False))[:2000]}
+                  for m in history[-LINK_SUMMARY_MESSAGES:] if m.get("role") in ("user", "assistant")]
+        if not model or not recent:
+            return
+
+        def job():
+            prompt = [{"role": "system", "content": "Say what this conversation is about in one plain sentence of at "
+                                                    "most 25 words, so someone can tell whether it's worth reading."},
+                      {"role": "user", "content": json.dumps(recent, ensure_ascii=False)}]
+            try:
+                r = requests.post(f"{self.base_url}/v1/chat/completions", json={
+                    "model": model, "messages": prompt, "think": False, "temperature": 0.2,
+                    "max_tokens": LINK_SUMMARY_TOKENS, "stream": False}, timeout=300)
+                r.raise_for_status()
+                text = " ".join(r.json()["choices"][0]["message"]["content"].split())
+            except (requests.RequestException, ValueError, LookupError, TypeError) as e:
+                print(f"Could not summarise {chat}: {e}")
+                return
+            if text:
+                self.chat_summarized.emit(chat, count, text)
+
+        threading.Thread(target=job, daemon=True).start()
 
     # ------------------------------------------------------------- request
 

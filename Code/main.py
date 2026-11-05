@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 import paths
 import chat_settings
-from Widgets import chatMain, chatSettings, warningWidget
+from Widgets import chatMain, chatSettings, linkGraph, warningWidget
 
 CHAT_KEYS = {"Name", "Chat"}
 def find_json_with_format(
@@ -86,6 +86,7 @@ class Main:
         mainChat.ui.actionEdit_Message.triggered.connect(self.openEditMsg)
         mainChat.ui.actionSet_IP.triggered.connect(self.openIPSettings)
         mainChat.ui.actionCharacter_Settings.triggered.connect(self.openChatSettings)
+        mainChat.ui.actionLink_Graph.triggered.connect(graphWindow.open)
 
         settingsChat.ui.cancelButton.clicked.connect(self.cancelChatSettings)
         settingsChat.ui.saveButton.clicked.connect(self.saveChatSettings)
@@ -103,11 +104,11 @@ class Main:
             settingsChat.close()
 
     def saveChatSettings(self):
-        title, settings = settingsChat.title(), settingsChat.settings()
+        title, settings, personality = settingsChat.title(), settingsChat.settings(), settingsChat.personality()
         if settingsChat.is_new or mainChat.chat_path is None:
-            mainChat.create_chat(title, settings)
+            mainChat.create_chat(title, settings, personality)
         else:
-            mainChat.apply_settings(title, settings)
+            mainChat.apply_settings(title, settings, personality)
         settingsChat.close()
         if emptyStart.isVisible():
             emptyStart.close()
@@ -160,6 +161,7 @@ if __name__ == "__main__":
     mainChat = chatMain.ChatMain()
     emptyStart = warningWidget.EmptyStart()
     settingsChat = chatSettings.ChatSettings(mainChat)
+    graphWindow = linkGraph.LinkGraph(mainChat)
     warningLeaveEmpty = warningWidget.EmptyLeave()
     invalidChatSettings = warningWidget.InvalidChatSettings()
     messageEdit = chatMain.EditMessage()

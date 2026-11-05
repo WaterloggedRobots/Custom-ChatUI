@@ -53,11 +53,22 @@ CHAT_INDEX_FILE = SAVE_DIR / ".temp.json"     # last opened chat, recent-chats o
 USER_NETWORK_FILE = CLIENT_DATA_DIR / "network.json"   # your saved server address
 AUDIO_DIR = CLIENT_DATA_DIR / "Audio"         # replies read aloud by the server, kept for replays
 IMAGE_DIR = CLIENT_DATA_DIR / "Images"        # pictures ComfyUI drew for the chats
+LINKS_FILE = SAVE_DIR / "links.json"          # projects, personalities and what links to what (chat_links.py)
+PROJECT_DIR = SAVE_DIR / "Projects"           # one folder per project, for its memory notes
+PERSONALITY_DIR = SAVE_DIR / "Personalities"  # one folder per saved personality (personalities.py)
 
 
 def chat_memory_dir(chat_name: str) -> Path:
     """The folder of a chat's memory notes: CHAT_DIR/<chat name>/memory."""
     return CHAT_DIR / chat_name / "memory"
+
+
+def project_memory_dir(name: str) -> Path:
+    return PROJECT_DIR / name / "memory"
+
+
+def personality_memory_dir(name: str) -> Path:
+    return PERSONALITY_DIR / name / "memory"
 
 
 def ensure_data_dirs():

@@ -1,10 +1,13 @@
 import avatar
+import chat_links
 import chat_sections
 import chat_settings
 import llmClient
 import paths
+import personalities
 import voice
 from local_tools import github_login, repo_url
+from local_tools.linked import LinkedChat, LinkScope
 from Widgets.chatList import ChatList
 
 from PySide6.QtWidgets import (QInputDialog, QListWidget, QListWidgetItem, QMainWindow, QSizePolicy, QFileDialog,
@@ -27,7 +30,7 @@ IMAGE_HEIGHT = 240              # pictures in the chat; click one to open it ful
 CAP_ICONS = (("vision", "👁"), ("thinking", "💭"), ("tools", "🔧"))
 WEB_LABELS = {"auto": "Web: Auto", "on": "Web: Always", "off": "Web: Off"}
 TOOL_STATE_ICONS = {"ok": "✓", "error": "⚠", "declined": "✗ declined"}
-APP_VERSION = "0.15.0_Avatar"
+APP_VERSION = "0.16.0_Avatar"
 MENU_LIST_HEIGHT = 320          # a list in a menu scrolls beyond this
 MENU_STYLE = "QMenu{background:rgb(45,45,45);color:white}"
 REPO_LIST_STYLE = ("QListWidget{background:rgb(45,45,45);color:white;border:none}"
@@ -178,6 +181,7 @@ class ChatMain(QMainWindow):
     saved in the chat file and edited in the Chat Settings window.
     """
     model_changed = Signal(str)      # the quick model picker changed this chat's model
+    links_changed = Signal()           # links, personalities or the open chat changed
     _repos_fetched = Signal(object)  # your GitHub repositories, from the fetching thread
 
     def __init__(self):
@@ -185,7 +189,11 @@ class ChatMain(QMainWindow):
         self.isShowImgWindow = True
         self.isShowImgWindowLock = False
         self.isShowChatList = False
-        self.settings = chat_settings.defaults()
+        self.settings = chat_settings.defaults()      # what this chat runs with: own_settings under its personality
+        self.own_settings = self.settings              # what's saved in the chat file
+        self.personality = None                        # the settings of the personality it talks as, if any
+        self.personality_name = None
+        self.links = chat_links.load(paths.LINKS_FILE, self.all_chats())
         self.botName = self.settings["Character"]
         self.status_tools_tip = ""
         self.chat_markdown = []
@@ -211,6 +219,7 @@ class ChatMain(QMainWindow):
         self.client.tool_event.connect(self.on_tool_event)
         self.client.approval_needed.connect(self.on_approval_needed)
         self.client.image.connect(self.on_image)
+        self.client.chat_summarized.connect(self.on_chat_summarized)
         self.redrawer = Redrawer(self)
         self.redrawer.finished.connect(self.on_redrawn)
         self.redrawing = False
@@ -379,6 +388,7 @@ class ChatMain(QMainWindow):
         self.ui.actionNew_Chat.setShortcut("Ctrl+N")
         self.ui.actionLoad_Chat.setShortcut("Ctrl+O")
         self.ui.actionChat_Settings.setShortcut("Ctrl+E")
+        self.ui.actionLink_Graph.setShortcut("Ctrl+G")
 
         self.ui.pushButton_6.clicked.connect(self.regenerate_last_response) #regen
         self.ui.pushButton_7.clicked.connect(self.redraw_image)
@@ -455,7 +465,9 @@ class ChatMain(QMainWindow):
         groups = chat_settings.tool_groups(s)
         self.client.toolbox.set_groups(groups)
         self.client.toolbox.memory_dir = self.memory_folder() if s["Memory"] else None
-        self.client.tools_enabled = (bool(groups) or self.client.toolbox.memory_dir is not None) and can_call
+        self.client.toolbox.link_scope = self._link_scope()
+        self.client.tools_enabled = (bool(groups) or self.client.toolbox.memory_dir is not None
+                                     or self.client.toolbox.has_links()) and can_call
         if not groups:
             tip = "Tools are off for this chat (Character > Settings)"
         elif not can_call:
@@ -1111,6 +1123,9 @@ class ChatMain(QMainWindow):
         self.chat.moveCursor(QTextCursor.End)
         self._end_response()
         self.save_chat()
+        chat = self.chat_name()
+        if not result.get("aborted") and chat_links.summary_due(self.links, chat, len(self.chat_markdown)):
+            self.client.summarize_chat(chat, self.chat_markdown)
         if self._speak_redraw_pending:
             self._speak_redraw_pending = False
             self._rebuild_chat_ui()
@@ -1360,7 +1375,9 @@ class ChatMain(QMainWindow):
             folders = [old] if old and Path(old) != Path.home() else []
         self.client.toolbox.set_folders(folders)
         self.client.toolbox.set_repos(chatHist.get("Tools Repos") or [])
-        self.set_settings(chat_settings.from_chat(chatHist))
+        self.own_settings = chat_settings.from_chat(chatHist)
+        self._load_personality()
+        self.set_settings(self._running_settings())
         if not isinstance(chatHist.get("Settings"), dict):
             self.save_chat()         # move a pre-0.9 chat's settings into the chat file now
 
@@ -1372,14 +1389,25 @@ class ChatMain(QMainWindow):
         self.clear_attachments()
         self._rebuild_chat_ui()
         self.show_latest_image()
+        self.links_changed.emit()
 
     def save_chat(self):
         if not self.chat_path:
             return
 
+        # A chat keeps its own settings in its file, and only what it changed from its personality
+        # counts as changed, so edits to the personality reach it and unlinking gives back its own.
+        overrides = []
+        if self.personality:
+            self.own_settings, overrides = personalities.split(self.settings, self.own_settings, self.personality)
+        else:
+            self.own_settings = self.settings
+        if chat_links.set_overrides(self.links, self.chat_name(), overrides):
+            self.save_links()
+
         data = {
             "Name": self.ui.lineEdit.text(),
-            "Settings": self.settings,
+            "Settings": self.own_settings,
             "Tools Folders": [str(f) for f in self.client.toolbox.folders],
             "Tools Repos": self.client.toolbox.repos,
             "Chat": self.chat_markdown,
@@ -1419,7 +1447,7 @@ class ChatMain(QMainWindow):
             return ""
         return avatar.system_note(info, self.settings["Avatar Personality"], self.settings["Avatar Notes"])
 
-    def apply_settings(self, title, settings):
+    def apply_settings(self, title, settings, personality=None):
         """Save from the Chat Settings window for the open chat; a new title renames its file."""
         if self.client.busy:
             self.client.abort_generation()
@@ -1427,6 +1455,10 @@ class ChatMain(QMainWindow):
         old_model = self.client.model_name
         tts_keys = ("TTS", "TTS Engine", "TTS Voice", "TTS Speed", "TTS Translate")
         old_tts = [self.settings[k] for k in tts_keys]
+        if personality != self.personality_name:
+            chat_links.set_speaks_as(self.links, self.chat_name(), personality)
+            self.save_links()
+        self._load_personality()
         self.set_settings(settings)
         if [self.settings[k] for k in tts_keys] != old_tts:
             self.speaker.stop()                 # the voice changed or TTS is off: the next Play reads it anew
@@ -1438,10 +1470,16 @@ class ChatMain(QMainWindow):
             self._rename_chat_file(title)
         self.save_chat()
         self._rebuild_chat_ui()
+        self.links_changed.emit()
 
-    def create_chat(self, title, settings):
+    def create_chat(self, title, settings, personality=None):
         """A new, empty chat with these settings, opened straight away."""
         path = self._free_chat_path(title)
+        saved = personalities.load(personality) if personality else None
+        if saved:
+            chat_links.set_speaks_as(self.links, path.stem, personality)
+            chat_links.set_overrides(self.links, path.stem, personalities.split(settings, settings, saved)[1])
+            self.save_links()
         data = {"Name": title, "Settings": chat_settings.normalize(settings), "Tools Folders": [], "Chat": []}
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
@@ -1472,6 +1510,8 @@ class ChatMain(QMainWindow):
             print(f"Rename failed: {e}")
             return
         self.chat_path = str(new)
+        chat_links.rename_node(self.links, chat_links.CHAT, old.stem, new.stem)
+        self.save_links()
         self._apply_options()               # the memory folder moved with it
         logs = read_json_file(paths.CHAT_INDEX_FILE) or {"LastOpened": "", "ChatList": []}
         logs["ChatList"] = [new.stem if c == old.stem else c for c in logs.get("ChatList", [])]
@@ -1490,6 +1530,65 @@ class ChatMain(QMainWindow):
         logs["Sections"] = sections
         with open(paths.CHAT_INDEX_FILE, "w", encoding="utf-8") as f:
             json.dump(logs, f, indent=4)
+
+    # ------------------------------------------------------------------
+    # Links to other chats, projects and personalities (chat_links.py)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def all_chats():
+        return sorted(p.stem for p in paths.CHAT_DIR.glob("*.json"))
+
+    def chat_name(self):
+        return Path(self.chat_path).stem if self.chat_path else ""
+
+    def save_links(self):
+        try:
+            chat_links.save(self.links, paths.LINKS_FILE)
+        except OSError as e:
+            print(f"Saving links failed: {e}")
+
+    def _load_personality(self):
+        name = chat_links.speaks_as(self.links, self.chat_name())
+        self.personality = personalities.load(name) if name else None
+        self.personality_name = name if self.personality else None
+
+    def _running_settings(self):
+        return personalities.resolve(self.own_settings, self.personality,
+                                     chat_links.overrides_of(self.links, self.chat_name()))
+
+    def _link_scope(self):
+        """What the open chat's links reach, for the model; replaced whole, as a reply may be reading it."""
+        chat = self.chat_name()
+        places = {f"project:{p}": paths.project_memory_dir(p) for p in chat_links.projects_of(self.links, chat)}
+        if self.personality_name:
+            places[f"personality:{self.personality_name}"] = paths.personality_memory_dir(self.personality_name)
+        chats = {}
+        for name, why in chat_links.readable_chats(self.links, chat).items():
+            summary = self.links["Summaries"].get(name, {}).get("Text", "")
+            chats[name] = LinkedChat(paths.CHAT_DIR / f"{name}.json", why, summary)
+        return LinkScope(chats=chats, places=places)
+
+    def links_updated(self):
+        """The links or a personality changed: save, and let the open chat follow."""
+        self.save_links()
+        before = (self.personality_name, self.personality)
+        self._load_personality()
+        if (self.personality_name, self.personality) != before:
+            if self.client.busy:
+                self.client.abort_generation()
+                self._end_response()
+            self.set_settings(self._running_settings())
+            self._rebuild_chat_ui(keep_scroll=True)
+        else:
+            self._apply_options()
+        self.links_changed.emit()
+
+    def on_chat_summarized(self, chat, upto, text):
+        if chat in self.all_chats():
+            self.links["Summaries"][chat] = {"Upto": upto, "Text": text}
+            self.save_links()
+            self._apply_options()
 
     def memory_folder(self):
         """Where the open chat's memory notes go, or None with no chat open."""

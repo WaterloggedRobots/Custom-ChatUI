@@ -6,6 +6,7 @@ They come in three groups that each chat turns on separately (Chat Settings):
   run    run scripts, programs and shell commands    (terminal.py)
 change_directory belongs to all three, since each of them starts in the working folder.
 Memory notes (memory.py) have their own switch: their tools are on while the chat has a memory_dir.
+Reading linked chats (linked.py) is on while the chat's links reach any.
 
 They run here, in the client, because the files are on this PC and the LLM
 server is another machine. The server only passes the tool list to Ollama and
@@ -86,10 +87,11 @@ class ToolBox:
         self.folders: List[Path] = []     # linked in the GUI
         self.repos: List[str] = []        # GitHub repository links, linked in the GUI
         self.memory_dir: Optional[Path] = None   # this chat's memory notes; None = memory is off
+        self.link_scope = None            # what this chat's links reach (linked.LinkScope), replaced whole
         self.always_allow: set = set()
         # Turns a PDF or Word file into text (llmClient uses the server's /v1/files/extract).
         self.extract_text = extract_text
-        from . import files, git, memory, terminal
+        from . import files, git, linked, memory, terminal
         self.tools: Dict[str, Tool] = {}
         for group, module in zip(GROUPS, (files, git, terminal)):
             for t in module.TOOLS:
@@ -97,6 +99,9 @@ class ToolBox:
                 self.tools[t.name] = t
         for t in memory.TOOLS:
             t.group = "memory"
+            self.tools[t.name] = t
+        for t in linked.TOOLS:
+            t.group = "links"
             self.tools[t.name] = t
         self.groups: set = set(GROUPS)    # the groups this chat turned on
 
@@ -107,6 +112,8 @@ class ToolBox:
         tool = self.tools.get(name)
         if tool and tool.group == "memory":
             return self.memory_dir is not None
+        if tool and tool.group == "links":
+            return self.has_links()
         return bool(tool) and (tool.group in self.groups or (name in SHARED and bool(self.groups)))
 
     def active(self) -> List[Tool]:
@@ -207,10 +214,36 @@ class ToolBox:
         except Exception as e:
             return f"Error: {type(e).__name__}: {e}"
 
+    def has_links(self) -> bool:
+        return bool(self.link_scope and self.link_scope.chats)
+
+    def memory_places(self) -> Dict[str, Path]:
+        """The memory folders this chat uses, by the name the tools know them by; {} if memory is off."""
+        if not self.memory_dir:
+            return {}
+        return {"chat": self.memory_dir, **(self.link_scope.places if self.link_scope else {})}
+
     def memory_note(self) -> str:
-        """The chat's memory notes, for every model; "" if there are none or memory is off."""
+        """The notes of this chat, then its projects, then its personality, for every model.
+
+        They share one limit, so the chat's own are the last to be cut. "" if there are none or memory is off."""
         from . import memory
-        return memory.system_note(self.memory_dir) if self.memory_dir else ""
+        parts, room = [], memory.MAX_NOTE_CHARS
+        for place, folder in self.memory_places().items():
+            if room <= 0:
+                break
+            heading = {} if place == "chat" else {
+                "heading": f"Shared memory from {place}: context and rules saved earlier, for every chat linked to it."}
+            note = memory.system_note(folder, limit=room, **heading)
+            if note:
+                parts.append(note)
+                room -= len(note)
+        return "\n\n".join(parts)
+
+    def links_note(self, room: int, can_call: bool) -> str:
+        """The list of chats this one links to; it gets what's left after the notes, so it shrinks first."""
+        from . import linked
+        return linked.list_note(self.link_scope, room, can_call)
 
     def system_note(self) -> str:
         """Tells the model what it can do and where it is."""
@@ -221,6 +254,10 @@ class ToolBox:
                 "for lasting context and rules such as facts about the user, decisions and how they want things "
                 "done. You see them at the start of every reply in this chat; other chats don't. Save what will "
                 "still matter later, and update a note rather than starting another. The user approves each save.")
+            others = [place for place in self.memory_places() if place != "chat"]
+            if others:
+                note += (" Notes for more than this chat go in a shared place, named in save_memory's place argument: "
+                         f"{', '.join(others)}. Every chat linked to that place will read them.")
         return note
 
     def _pc_note(self) -> str:

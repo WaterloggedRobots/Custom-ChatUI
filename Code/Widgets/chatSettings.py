@@ -8,18 +8,21 @@ to speech is switched on here, and the ComfyUI workflows (GET
 /v1/images/workflows) each time their list is opened. "3D model" turns the
 voice on with it and asks the 3D model what she can do (avatar.py). The Git
 row shows which GitHub account git is signed in with. Memory lists the chat's
-memory notes and opens their folder.
+memory notes and opens their folder. Personality picks a saved personality for
+the chat to talk as (personalities.py) and saves new ones.
 """
 
 import threading
 
+import chat_links
 import chat_settings
 import paths
+import personalities
 import voice
 from local_tools import github_login, memory
 from Widgets.chatMain import LiveComboBox, WEB_LABELS, safe_file_name
 
-from PySide6.QtWidgets import QMainWindow, QFileDialog, QComboBox, QMessageBox, QScrollArea
+from PySide6.QtWidgets import QMainWindow, QFileDialog, QComboBox, QInputDialog, QMessageBox, QScrollArea
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -113,6 +116,9 @@ class ChatSettings(QMainWindow):
         self.ui.ttsTestButton.clicked.connect(self.test_voice)
         self.ui.githubButton.clicked.connect(self.github_login)
         self.ui.memoryButton.clicked.connect(self.open_memory_folder)
+        self.ui.personalityCombo.activated.connect(self.on_personality_chosen)
+        self.ui.savePersonalityButton.clicked.connect(self.save_personality)
+        self.ui.updatePersonalityButton.clicked.connect(self.update_personality)
         self.ui.githubUserLabel.setTextFormat(Qt.PlainText)
         self._github_checked.connect(self._show_github_user)
         self.workflow_combo.activated.connect(self.on_workflow_chosen)
@@ -137,6 +143,7 @@ class ChatSettings(QMainWindow):
         self.setWindowTitle("New Chat" if is_new else f"Chat Settings: {title}")
         self.ui.titleEdit.setText(title)
         self.show_settings(settings)
+        self._fill_personalities(None if is_new else self.chat_main.personality_name)
         self.check_github()
         self._show_memory()
         self.show()
@@ -258,6 +265,56 @@ class ChatSettings(QMainWindow):
         return [(ui.fileToolsCheck, chat_settings.TOOL_KEYS["files"]),
                 (ui.gitToolsCheck, chat_settings.TOOL_KEYS["git"]),
                 (ui.runToolsCheck, chat_settings.TOOL_KEYS["run"])]
+
+    # ------------------------------------------------------------------
+    # Personality
+    # ------------------------------------------------------------------
+
+    def personality(self):
+        """The saved personality this chat talks as, or None for its own settings."""
+        return self.ui.personalityCombo.currentData()
+
+    def _fill_personalities(self, chosen):
+        combo = self.ui.personalityCombo
+        combo.clear()
+        combo.addItem("This chat's own settings", None)
+        for name in self.chat_main.links["Personalities"]:
+            combo.addItem(name, name)
+        combo.setCurrentIndex(max(0, combo.findData(chosen)))
+        self.ui.updatePersonalityButton.setEnabled(chosen is not None)
+
+    def on_personality_chosen(self, _index):
+        name = self.personality()
+        self.ui.updatePersonalityButton.setEnabled(name is not None)
+        current = self.settings()
+        if name:
+            saved = personalities.load(name)
+            if saved:
+                self.show_settings(personalities.resolve(current, saved))
+        else:
+            own = chat_settings.defaults() if self.is_new else self.chat_main.own_settings
+            self.show_settings({**current, **{k: own[k] for k in personalities.PERSONALITY_KEYS}})
+
+    def save_personality(self):
+        name, ok = QInputDialog.getText(self, "Save as personality", "Name",
+                                        text=self.ui.characterEdit.text().strip())
+        name = chat_links.clean_name(name)
+        if not ok or not name:
+            return
+        links = self.chat_main.links
+        if name in links["Personalities"] and QMessageBox.question(
+                self, "Save as personality", f"Replace the personality {name}?") != QMessageBox.Yes:
+            return
+        personalities.save(name, self.settings())
+        chat_links.add_hub(links, chat_links.PERSONALITY, name)
+        self.chat_main.links_updated()
+        self._fill_personalities(name)
+
+    def update_personality(self):
+        name = self.personality()
+        if name:
+            personalities.save(name, self.settings())
+            self.chat_main.links_updated()
 
     def _memory_folder(self):
         """The memory folder of the chat being edited; a new chat doesn't have one until it's saved."""

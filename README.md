@@ -46,7 +46,7 @@ Chats from before 0.9 kept their character in a separate bot folder (`Save/Bot/<
 ![Chat Settings](Img/ChatSettings.png)
 
 # 2.4. Save Files
-All settings and logs are saved by the client. Each chat is one `.json` in `Save/Chat` holding its title, its settings, its linked tool folders, the conversation and the rolling summary. `.temp.json` keeps the last opened chat and the order of the chat list, so the list shows the most recently used chats first. It also keeps the **sections** of the chat list: *Create New Section [+]* adds one, and you drag chats onto a section to group them, or out of it to ungroup them. Dragging a section moves it up or down, and right-clicking renames or deletes one (its chats stay). Sections are only labels; the chats in one share nothing. Each request to the LLM is rebuilt from the conversation, the pretext and the summary; older messages are folded into the summary to keep the prompt short.
+All settings and logs are saved by the client. Each chat is one `.json` in `Save/Chat` holding its title, its settings, its linked tool folders, the conversation and the rolling summary. `.temp.json` keeps the last opened chat and the order of the chat list, so the list shows the most recently used chats first. `links.json` keeps projects, personalities, links and where each node sits in the link graph, and `Save/Projects` and `Save/Personalities` hold their folders. `.temp.json` also keeps the **sections** of the chat list: *Create New Section [+]* adds one, and you drag chats onto a section to group them, or out of it to ungroup them. Dragging a section moves it up or down, and right-clicking renames or deletes one (its chats stay). Sections are only labels; the chats in one share nothing. Each request to the LLM is rebuilt from the conversation, the pretext and the summary; older messages are folded into the summary to keep the prompt short.
 
 ![Chat Json](Img/ChatJson.png)
 
@@ -72,6 +72,30 @@ Reading never asks. Every change and every command opens an *Allow / Always allo
 
 ## 2.6.1. Memory (v0.15)
 Each chat has its own notes: Markdown files in `Save/Chat/<chat name>/memory`, which move with the chat if you rename it. Every `.md` there is sent to the model with each reply (up to 20,000 characters in all), as context and rules for that chat only. Models that can call tools (🔧) write them with `save_memory`, `read_memory` and `delete_memory`; saving and deleting ask you first, like every other change. The **Memory** section of Chat Settings lists the notes, turns them off for the chat and opens the folder, where you can add or edit notes yourself.
+
+## 2.6.2. Link graph (v0.16)
+**Chat > Link Graph** (Ctrl+G) connects chats to projects and personalities. Chats are chat bubbles, projects are squares and personalities are triangles. A chat with no links stays on its own and shares nothing, and only the open chat shows until you turn on **Show unlinked chats** or search for one.
+
+| To | Do this |
+|---|---|
+| Move a node | Drag it. It stays where you drop it (right-click > Unpin lets it go) |
+| See its details and actions | Click it |
+| Link two nodes | Double-click one, then click a lit node. Esc or empty space cancels |
+| See a node's direct links | Hover over it |
+| Remove a link | Click it and press Delete, or right-click it |
+| Zoom and move around | Scroll, and drag empty space |
+
+| Link | What it means |
+|---|---|
+| Chat to project (solid) | The chat is a session of the project. Sessions can read each other and get the project's memory notes |
+| Chat to personality, **speaks as** (thick) | The chat talks as that personality. A chat has one at most |
+| Chat or project to personality, **can read** (dashed arrow) | Chats speaking as that personality can read this chat, or every session of this project. Nothing comes back the other way |
+
+Linking two chats offers to make a project for them. **Keep private from personalities** stops every personality reading a chat, even a linked one; the other sessions of its own projects still can.
+
+**Personalities** are optional, so a chat without one keeps all its settings to itself. Chat Settings > Personality saves a character, voice and 3D model under a name with *Save as personality…*, and picks one under *Talks as*. A chat follows its personality except for what you change in that chat, and unlinking gives the chat its own settings back. *Update personality* saves the window's values for every chat that follows it. Tools, web search, pictures and memory always stay with the chat.
+
+**What the model gets**: each reply sends the chat's own notes, then those of its projects, then its personality's, then a one-line list of the chats it can read, all within 20,000 characters. The list shrinks first and the chat's own notes are cut last. Notes from other projects aren't sent. Models that can call tools (🔧) can look through linked chats with `list_linked_chats`, `search_linked_chats` and `read_linked_chat`, which only read and show in the chat like any other tool, and can save notes to a project or personality by naming it in `save_memory`. Each linked chat's line is a sentence the model writes after a few messages, refreshed every 10, which starts a small extra request to the server.
 
 ## 2.7. Voice input (v0.10)
 The 🎤 button between the message box and *Send* lets you speak instead of typing. Click it (or press Ctrl+M) and talk; the button turns red and counts the time, and the status line shows the microphone level. Click it again (or Ctrl+M) to stop, or press Esc to throw the recording away. The clip goes to the server, where Whisper writes it down, and the text lands in the message box at the cursor so you can fix it before sending. Right-click the button for:

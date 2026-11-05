@@ -408,6 +408,7 @@ color:rgb(255, 255, 255)</string>
     <addaction name="actionLoad_Chat"/>
     <addaction name="separator"/>
     <addaction name="actionChat_Settings"/>
+    <addaction name="actionLink_Graph"/>
    </widget>
    <widget class="QMenu" name="menuCharacter">
     <property name="title">
@@ -470,6 +471,14 @@ color:rgb(255, 255, 255)</string>
   <action name="actionChat_Settings">
    <property name="text">
     <string>Chat Settings</string>
+   </property>
+  </action>
+  <action name="actionLink_Graph">
+   <property name="text">
+    <string>Link Graph</string>
+   </property>
+   <property name="toolTip">
+    <string>Link chats to projects and personalities</string>
    </property>
   </action>
   <action name="actionCharacter_Settings">

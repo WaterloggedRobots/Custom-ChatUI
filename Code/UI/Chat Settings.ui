@@ -48,6 +48,53 @@ QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px}</string>
     </layout>
    </item>
    <item>
+    <widget class="QGroupBox" name="groupPersonality">
+     <property name="title">
+      <string>Personality</string>
+     </property>
+     <layout class="QGridLayout" name="gridLayout_personality" columnstretch="0,1">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_personality">
+        <property name="text">
+         <string>Talks as</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QComboBox" name="personalityCombo">
+        <property name="toolTip">
+         <string>A saved personality gives this chat its character, voice and 3D model. Change any of them here and only this chat keeps the change</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <layout class="QHBoxLayout" name="horizontalLayout_personality">
+        <item>
+         <widget class="QPushButton" name="savePersonalityButton">
+          <property name="text">
+           <string>Save as personality…</string>
+          </property>
+          <property name="toolTip">
+           <string>Keep this window's character, voice and 3D model to reuse them in other chats</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="updatePersonalityButton">
+          <property name="text">
+           <string>Update personality</string>
+          </property>
+          <property name="toolTip">
+           <string>Save this window's character, voice and 3D model to the personality, for every chat that follows it</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QGroupBox" name="groupCharacter">
      <property name="title">
       <string>Character</string>

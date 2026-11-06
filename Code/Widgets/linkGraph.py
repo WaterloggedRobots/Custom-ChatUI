@@ -151,7 +151,7 @@ class NodeItem(Fader, QGraphicsItem):
             painter.setOpacity(painter.opacity() * alpha)
             painter.setPen(QColor(TEXT))
             painter.setFont(graph.label_font)
-            text = graph.label_metrics.elidedText(self.label, Qt.ElideRight, 260)
+            text = graph.label_metrics.elidedText(graph.shown_name(self.name), Qt.ElideRight, 260)
             width = graph.label_metrics.horizontalAdvance(text)
             painter.drawText(QPointF(-width / 2, self.radius + 19), text)
 
@@ -362,10 +362,20 @@ class LinkGraph(QMainWindow):
         self.timer.timeout.connect(self.tick)
         self._build_window()
         chat_main.links_changed.connect(self.on_links_changed)
+        chat_main.chat_list.sections_changed.connect(self.on_sections_changed)
 
     @property
     def links(self):
         return self.chat_main.links
+
+    def shown_name(self, name) -> str:
+        """A node's label: a chat you sorted into a section of the chat list reads Section/Chat."""
+        kind, label = cl.split_node(name)
+        if kind == cl.CHAT:
+            section = next((s["Name"] for s in self.chat_main.chat_list.sections if label in s["Chats"]), None)
+            if section:
+                return f"{section}/{label}"
+        return label
 
     # ------------------------------------------------------------------
     # The window around the graph
@@ -428,6 +438,11 @@ class LinkGraph(QMainWindow):
         if self.isVisible():
             self.refresh()
 
+    def on_sections_changed(self, _sections):
+        if self.isVisible():
+            self.update_states()
+            self.show_panel()
+
     def on_unlinked_toggled(self, on):
         QSettings().setValue("graph/show_unlinked", on)
         self.refresh()
@@ -457,7 +472,7 @@ class LinkGraph(QMainWindow):
         shown += [cl.node(cl.PERSONALITY, p) for p in links["Personalities"]]
         for chat in self.chat_main.all_chats():
             if (self.unlinked_check.isChecked() or cl.is_linked(links, chat) or chat == self.chat_main.chat_name()
-                    or (query and query in chat.lower())):
+                    or (query and query in self.shown_name(cl.node(cl.CHAT, chat)).lower())):
                 shown.append(cl.node(cl.CHAT, chat))
         return shown
 
@@ -547,7 +562,7 @@ class LinkGraph(QMainWindow):
                     bright.update((edge.link["From"], edge.link["To"]))
                     bright_edges.add(id(edge))
         elif query:
-            bright = {n for n, item in self.nodes.items() if query in item.label.lower()}
+            bright = {n for n in self.nodes if query in self.shown_name(n).lower()}
             bright_edges = set()
         else:
             bright = None
@@ -910,7 +925,7 @@ class LinkGraph(QMainWindow):
 
     def _show_node_panel(self, name):
         kind, label = cl.split_node(name)
-        self._panel_label(label, bold=True)
+        self._panel_label(self.shown_name(name), bold=True)
         self._panel_label(TYPE_NAMES[kind], muted=True)
         rows = [self._link_row(name, link) for link in cl.links_of(self.links, name)]
         if rows:

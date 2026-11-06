@@ -99,6 +99,22 @@ def test_unlinked_chats_stay_hidden_unless_asked_except_the_open_one(graph):
     assert B not in graph.nodes
 
 
+def test_a_chat_in_a_section_reads_section_slash_chat(graph, main):
+    main.chat_list.fill(["a", "b", "c"], [{"Name": "Daily", "Chats": ["b"]}])
+    main.chat_list._changed()
+    assert graph.shown_name(B) == "Daily/b"
+    assert graph.shown_name(A) == "a"
+    assert graph.shown_name(WORK) == "Work"
+    graph.unlinked_check.setChecked(False)
+    graph.search.setText("daily")                  # the section finds its chats
+    assert B in graph.nodes
+    graph.search.setText("")
+    graph.unlinked_check.setChecked(True)
+    graph.fit_view()
+    click(graph, B)
+    assert graph.panel_layout.itemAt(0).widget().text() == "Daily/b"
+
+
 def test_click_selects_without_opening_and_double_click_links(graph, main):
     click(graph, B)
     assert graph.selected == B and main.chat_name() == "a"

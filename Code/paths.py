@@ -111,6 +111,18 @@ def save_server_address(ip: str, port: int):
     USER_NETWORK_FILE.write_text(json.dumps(user, indent=4), encoding="utf-8")
 
 
+def load_tool_token() -> str:
+    """The token the server's own tools (REA, Ubuntu files) ask for; "" if none is set."""
+    return str((load_network().get("server_tools") or {}).get("token") or "").strip()
+
+
+def save_tool_token(token: str):
+    user = _read(USER_NETWORK_FILE)
+    user["server_tools"] = {"token": token.strip()}
+    USER_NETWORK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    USER_NETWORK_FILE.write_text(json.dumps(user, indent=4), encoding="utf-8")
+
+
 def split_address(text: str, default_port: int):
     """'192.168.0.192:8100' or '192.168.0.192' -> (ip, port)."""
     text = text.strip().removeprefix("http://").rstrip("/")

@@ -6,6 +6,7 @@ Addresses at a glance:
                              the machine's LAN IP, e.g. 192.168.0.192:8100
   Ollama                     OLLAMA_URL, normally on this same machine
   NAS                        NAS_IP / NAS_MOUNT, recorded here; nothing uses them yet
+  REA and Ubuntu tools       /v1/rea/*, /v1/ubuntu/*: only with TOOL_TOKEN, inside TOOL_ROOTS
 """
 
 import os
@@ -133,3 +134,28 @@ class Config:
 
     # Optional extras (the experimental tool-calling endpoints)
     ENABLE_EXTRAS = os.getenv("ENABLE_EXTRAS", "1") not in ("0", "false", "no")
+
+    # ---- Tools that act on this machine (server_tools.py, rea.py, ubuntu.py) ----
+    # Every /v1/rea/* and /v1/ubuntu/* request must carry this token in the X-ChatUI-Token
+    # header. TOOL_TOKEN wins; otherwise the first line of TOOL_TOKEN_FILE. No token = refused.
+    TOOL_TOKEN = os.getenv("TOOL_TOKEN", "")
+    TOOL_TOKEN_FILE = os.getenv("TOOL_TOKEN_FILE") or str(Path.home() / ".config" / "chatui" / "tool_token")
+    # Folders the tools may touch, separated by ":"; everything else is refused.
+    TOOL_ROOTS = os.getenv("TOOL_ROOTS") or f"{Path.home()}:/mnt/nas/REA"
+    # Never read or written even inside a root (secrets), separated by ":".
+    TOOL_DENY = os.getenv("TOOL_DENY") or ":".join(str(Path.home() / p) for p in (
+        ".ssh", ".gnupg", ".aws", ".netrc", ".git-credentials", ".config/gh", ".config/chatui",
+        ".docker/config.json", ".claude.json", ".claude/.credentials.json")) + f":{ENV_FILE}"
+    # Read-only inside a root: the game copies REA must not change.
+    TOOL_READ_ONLY = os.getenv("TOOL_READ_ONLY") or "/mnt/nas/REA/Game File Copy"
+    TOOL_OUTPUT_CHARS = _int("TOOL_OUTPUT_CHARS", 20000)     # what one result may send back
+    TOOL_RUN_MAX_TIMEOUT = _int("TOOL_RUN_MAX_TIMEOUT", 1800)  # seconds a command may run at most
+
+    # REA (Reverse Engineer Anything), one long-lived MCP server process (rea.py)
+    REA_HOME = os.getenv("REA_HOME") or str(Path.home() / "snap" / "gitpeach-desktop" / "13" / "GitHub" / "REA")
+    REA_COMMAND = os.getenv("REA_COMMAND") or "npx -y rea-agents@6.5.0 mcp"
+    REA_ASSETS = os.getenv("REA_ASSETS") or "/mnt/nas/REA"
+    REA_GAME_COPIES = os.getenv("REA_GAME_COPIES") or f"{REA_ASSETS}/Game File Copy"
+    REA_TIMEOUT = float(os.getenv("REA_TIMEOUT", "1200"))       # seconds one call may take (first analysis is slow)
+    REA_START_TIMEOUT = float(os.getenv("REA_START_TIMEOUT", "180"))  # npx may download the package first
+    REA_EXPORT_TIMEOUT = float(os.getenv("REA_EXPORT_TIMEOUT", "3600"))

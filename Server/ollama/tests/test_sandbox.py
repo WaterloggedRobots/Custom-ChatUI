@@ -24,6 +24,9 @@ from chat_server.app import create_app  # noqa: E402
 from chat_server.config import Config  # noqa: E402
 
 
+TOKEN = "test-token"
+
+
 class FakeDocker:
     """Answers the docker calls sandbox.py makes, and records them."""
 
@@ -54,6 +57,7 @@ class FakeDocker:
 @pytest.fixture
 def fake(monkeypatch):
     monkeypatch.setattr(Config, "SANDBOX_ENABLED", True)
+    monkeypatch.setattr(Config, "TOOL_TOKEN", TOKEN)
     monkeypatch.setattr(sandbox, "docker_installed", lambda: True)
     monkeypatch.setattr(sandbox, "SANDBOXES", sandbox.Sandboxes())
     d = FakeDocker()
@@ -61,8 +65,17 @@ def fake(monkeypatch):
     return d
 
 
-def client():
-    return TestClient(create_app())
+def client(token=TOKEN):
+    return TestClient(create_app(), headers={"X-ChatUI-Token": token} if token else {})
+
+
+def test_every_endpoint_needs_the_token(fake):
+    with client(token=None) as c:
+        assert c.get("/v1/sandbox/status").status_code == 401
+        assert c.post("/v1/sandbox/run", json={"session": "a", "code": "1"}).status_code == 401
+    with client(token="wrong") as c:
+        assert c.post("/v1/sandbox/reset", json={"session": "a"}).status_code == 401
+    assert not fake.named("run") and not fake.named("exec")     # only the start-up clean-up touched Docker
 
 
 def test_status_reports_off_and_missing_docker(monkeypatch):
@@ -71,9 +84,10 @@ def test_status_reports_off_and_missing_docker(monkeypatch):
     monkeypatch.setattr(Config, "SANDBOX_ENABLED", True)
     monkeypatch.setattr(sandbox, "docker_installed", lambda: False)
     assert "Docker" in sandbox.status()["reason"]
-    with TestClient(create_app()) as c:
+    monkeypatch.setattr(Config, "TOOL_TOKEN", TOKEN)
+    with client() as c:
         r = c.post("/v1/sandbox/run", json={"session": "s1", "code": "print(1)"})
-    assert r.status_code == 503
+    assert r.status_code == 503 and "Docker" in r.json()["error"]["message"]
 
 
 def test_python_code_starts_a_locked_down_container_and_runs(fake):

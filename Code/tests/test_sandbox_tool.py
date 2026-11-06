@@ -23,12 +23,14 @@ from local_tools import sandbox  # noqa: E402
 class FakeServer:
     def __init__(self, status=200, reply=None):
         self.requests = []
+        self.tokens = []
         outer = self
 
         class H(BaseHTTPRequestHandler):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 outer.requests.append((self.path, body))
+                outer.tokens.append(self.headers.get("X-ChatUI-Token"))
                 data = json.dumps(reply if reply is not None else {
                     "exit_code": 0, "output": "hi\n", "timed_out": False, "truncated": False, "seconds": 0.4,
                     "command": "python3 main.py", "timeout": 60}).encode()
@@ -59,8 +61,9 @@ def project(tmp_path):
     return tmp_path
 
 
-def make_box(tmp_path, server):
-    box = ToolBox(working_dir=str(tmp_path), server_url=lambda: server.url)
+def make_box(tmp_path, server, token="tok"):
+    box = ToolBox(working_dir=str(tmp_path))
+    box.server = lambda: (server.url, token)
     box.set_groups(["run"])
     return box
 
@@ -75,6 +78,9 @@ def test_sandbox_tools_are_in_the_run_group_and_need_no_approval(tmp_path):
     box.set_groups(["run"])
     assert "run_in_sandbox" in {s["function"]["name"] for s in box.schemas()}
     assert "run_in_sandbox" in box.system_note()
+    box.set_groups(["ubuntu_run"])                  # the server's Run switch alone turns it on too
+    assert box.enabled("run_in_sandbox") and not box.enabled("run_command")
+    assert "run_in_sandbox" in box.system_note()
 
 
 def test_run_sends_code_with_this_chats_session(project):
@@ -85,6 +91,7 @@ def test_run_sends_code_with_this_chats_session(project):
     path, body = server.requests[0]
     assert path == "/v1/sandbox/run"
     assert body["session"] == box.sandbox_session and body["code"] == "print('hi')"
+    assert server.tokens == ["tok"]
     assert "archive" not in body
     assert ToolBox().sandbox_session != box.sandbox_session      # each chat its own container
 
@@ -117,6 +124,12 @@ def test_timeouts_and_server_errors_reach_the_model(project):
     server = FakeServer(status=503, reply={"error": {"message": "sandbox not available: Docker isn't installed"}})
     out = make_box(project, server).run("run_in_sandbox", {"code": "1"})
     assert out == "Error: sandbox: sandbox not available: Docker isn't installed"
+
+
+def test_no_token_says_where_to_set_it(project):
+    server = FakeServer()
+    out = make_box(project, server, token="").run("run_in_sandbox", {"code": "1"})
+    assert "Settings > General" in out and not server.requests
 
 
 def test_reset(project):

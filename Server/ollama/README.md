@@ -110,6 +110,10 @@ keep tokens there. All addresses are summarised at the top of
 | POST | `/v1/sandbox/reset` | `{"session"}` throws that chat's container away |
 | GET | `/v1/sandbox/status` | whether the sandbox can run, its image, network and limits |
 | GET | `/health` | Ollama reachability and optional features |
+| GET | `/v1/rea/tools` | REA's allowed tools in OpenAI `tools` form, plus `meta` (each one's kind and group). Needs `X-ChatUI-Token` |
+| POST | `/v1/rea/call` | `{"name", "arguments"}` → `{"name", "output"}`, output clipped to 20,000 characters. Needs the token |
+| GET | `/v1/rea/status` | whether REA is running, how often it was started, its last error. Needs the token |
+| GET, POST | `/v1/ubuntu/tools`, `/v1/ubuntu/call` | the same for the Ubuntu file and run tools; `tools` also returns the allowed folders (`roots`) |
 | | `/v1/tools/*` | unchanged extras; function calling is to be reworked later |
 
 ### Chat request
@@ -370,8 +374,10 @@ How it is locked down (chat_server/sandbox.py):
 - nothing from this machine is mounted into it
 - each run has a time limit (`timeout -k`), and only 12,000 characters of output are kept
 
-Anyone who can reach this server's port can run code in a container this way, as
-with the rest of the API, so keep the server on your own network.
+Like the REA and Ubuntu tools, every `/v1/sandbox/*` request needs the shared
+token in `X-ChatUI-Token` (see below), so only clients that have it can run code.
+The sandbox is on in a chat while **Run** or **Ubuntu Run** is, and the model is
+told to try new code there before running it on the PC or with `ubuntu_run_command`.
 
 Setup, once (Docker must be installed and your user in the `docker` group):
 
@@ -383,6 +389,78 @@ curl -s -X POST localhost:8100/v1/sandbox/run -H 'Content-Type: application/json
 ```
 
 Windows isn't covered yet; a Windows VM over SSH could sit behind the same API later.
+
+## Reverse engineering, Ubuntu files and run (for the client's model)
+
+Three groups of tools run on this machine for the chat model on the Windows
+client, each switched on per chat in the client (*Reverse engineering*,
+*Ubuntu files*, *Ubuntu run*). The client asks the user before every change, as it does
+for its own tools; reads run straight away.
+
+- **REA** (`chat_server/rea.py`). One long-lived REA MCP server
+  (`npx -y rea-agents@6.5.0 mcp`, `REA_COMMAND`) started on the first call,
+  through the Python `mcp` client. Calls go one at a time; REA is started again
+  if it dies, or if a call takes longer than `REA_TIMEOUT` (20 minutes: the
+  first Ghidra analysis of a big binary is slow). Only 16 read-only tools are
+  offered: `binary_overview`, `open_binary`, `binary_session`, `close_binary`,
+  `list_procedures`, `search_procedures`, `procedure_pseudo_code`,
+  `procedure_callers`, `procedure_callees`, `procedure_info`, `xrefs`,
+  `search_strings`, `list_strings`, `inspect_managed_artifact`,
+  `inspect_managed_members`, `trace_feature`. No debugger, Frida, rizin,
+  Cutter, adb, capture or annotation tool is ever exposed. Three helpers come
+  with them: `list_targets`, `copy_to_targets` (from
+  `/mnt/nas/REA/Game File Copy/...` into `REA/targets/`) and `export_assets`
+  (`REA/scripts/export-assets.sh`, to `/mnt/nas/REA/<destination>`).
+  `open_binary` refuses the NAS game copies, so REA always works on a copy.
+  Results start with a line saying they are target data, not instructions.
+  REA's own output goes to `logs/rea.log`.
+- **Ubuntu files** (`chat_server/ubuntu.py`): `ubuntu_list_directory`,
+  `ubuntu_read_file`, `ubuntu_find_files`, `ubuntu_search_in_files`,
+  `ubuntu_write_file`, `ubuntu_edit_file`, `ubuntu_create_folder`,
+  `ubuntu_move_path`, `ubuntu_copy_path` and `ubuntu_delete_path`, which moves
+  to a `.chatui-trash` folder at the top of the allowed folder (`~/.chatui-trash`,
+  `/mnt/nas/REA/.chatui-trash`) instead of deleting.
+- **Ubuntu run** (`ubuntu_run_command` in the same file): one bash command
+  (`bash -lc`) in a folder inside the allowed ones, with its output and exit
+  code. It runs as the server's user, in its own process group: a timeout
+  (60 s by default, at most `TOOL_RUN_MAX_TIMEOUT`) stops everything it
+  started. The folder rules below only pick where it starts; what the command
+  touches is up to you, which is why the client asks before every one.
+  `TOOL_TOKEN` is taken out of its environment.
+
+**Setup.** Port 8100 is open to the LAN, so all three groups need a shared token,
+and refuse everything until one is set:
+
+```bash
+.venv/bin/pip install -r requirements.txt       # adds the mcp package
+mkdir -p ~/.config/chatui && openssl rand -hex 24 > ~/.config/chatui/tool_token
+chmod 600 ~/.config/chatui/tool_token
+cat ~/.config/chatui/tool_token                   # paste this into the client
+```
+
+(or set `TOOL_TOKEN` in `.env`). Restart the server, then paste the token in
+the client under **Settings > General > Ubuntu server** and press *Test*. REA
+also needs Node (for `npx`), Java 21 and Ghidra; the server finds them through
+`JAVA_HOME` and `GHIDRA_INSTALL_DIR`, or under `REA_HOME/tools/ghidra_*` and
+`/usr/lib/jvm/java-21-openjdk-*` when those aren't set.
+
+**Which folders.** Every path must resolve (symlinks followed) inside
+`TOOL_ROOTS` (default: the home folder and `/mnt/nas/REA`). Inside them,
+`TOOL_DENY` is never touched (`~/.ssh`, `~/.gnupg`, `~/.aws`, git and GitHub
+credentials, `~/.config/chatui`, `~/.claude.json`, this folder's `.env`), and
+`TOOL_READ_ONLY` (`/mnt/nas/REA/Game File Copy`) is only read. Paths are
+Ubuntu paths (`/home/...`, `~/...`); Windows paths are refused with a reason.
+
+| Setting | Default | |
+|---|---|---|
+| `TOOL_TOKEN` / `TOOL_TOKEN_FILE` | `~/.config/chatui/tool_token` | the shared token; none = the tools are off |
+| `TOOL_ROOTS` | `~:/mnt/nas/REA` | folders the tools may use, `:`-separated |
+| `TOOL_DENY`, `TOOL_READ_ONLY` | see above | never touched; only read |
+| `TOOL_OUTPUT_CHARS` | 20000 | what one result may send back |
+| `TOOL_RUN_MAX_TIMEOUT` | 1800 | seconds one command may run at most |
+| `REA_HOME` | `~/snap/gitpeach-desktop/13/GitHub/REA` | the REA repository (its `targets/` and `scripts/`) |
+| `REA_COMMAND` | `npx -y rea-agents@6.5.0 mcp` | keep in step with `REA_VERSION` in REA's `scripts/setup-rea.sh` |
+| `REA_TIMEOUT`, `REA_START_TIMEOUT`, `REA_EXPORT_TIMEOUT` | 1200, 180, 3600 | seconds |
 
 ## Why Python and not C++
 
@@ -406,5 +484,7 @@ python -m pytest -q tests
 ```
 
 The tests run the server against a fake Ollama, a fake web, a fake ComfyUI and
-a fake Docker, so they need none of them nor network access. One more test runs
-real code in the sandbox when the `chatui-sandbox` image is built.
+a fake Docker, so they need none of them nor network access. REA is stood in for by
+`tests/fake_rea_server.py`, a small MCP server the bridge starts and talks to
+over stdio like the real one. One more test runs real code in the sandbox when
+the `chatui-sandbox` image is built.

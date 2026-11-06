@@ -3,9 +3,14 @@
 They come in three groups that each chat turns on separately (Chat Settings):
   files  browse, read and edit files and folders   (files.py)
   git    git in the user's repositories              (git.py; github_login.py signs in)
-  run    run scripts, programs and shell commands    (terminal.py), and test code in an
-         Ubuntu sandbox on the LLM server               (sandbox.py)
+  run    run scripts, programs and shell commands    (terminal.py)
 change_directory belongs to all three, since each of them starts in the working folder.
+Two more groups run on the Ubuntu server, not here (remote.py lists and calls them):
+  rea           reverse engineering with REA           (rea.py)
+  ubuntu_files  files and folders on the server        (ubuntu.py)
+  ubuntu_run    bash commands on the server            (ubuntu.py)
+The sandbox tools (sandbox.py) test code in a throwaway container on the server; they are on
+while either run or ubuntu_run is.
 Memory notes (memory.py) have their own switch: their tools are on while the chat has a memory_dir.
 Reading linked chats (linked.py) is on while the chat's links reach any.
 
@@ -36,8 +41,10 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 MAX_OUTPUT_CHARS = 20000      # what one tool result may add to the conversation
 GROUPS = ("files", "git", "run")
+SERVER_GROUPS = ("rea", "ubuntu_files", "ubuntu_run")   # their tools come from the server (remote.py)
 SHARED_LISTED = 15            # folders or repositories from linked chats named in the note, of each
 SHARED = {"change_directory"}  # in every group
+SANDBOX_WITH = {"run", "ubuntu_run"}   # the sandbox tools are on with either
 
 
 @dataclass
@@ -86,8 +93,7 @@ def repo_url(text: str) -> Optional[str]:
 
 class ToolBox:
     def __init__(self, working_dir: Optional[str] = None,
-                 extract_text: Optional[Callable[[Path], str]] = None,
-                 server_url: Optional[Callable[[], str]] = None):
+                 extract_text: Optional[Callable[[Path], str]] = None):
         self.working_dir = Path(working_dir).expanduser() if working_dir else Path.home()
         self.folders: List[Path] = []     # linked in the GUI
         self.repos: List[str] = []        # GitHub repository links, linked in the GUI
@@ -96,16 +102,20 @@ class ToolBox:
         self.always_allow: set = set()
         # Turns a PDF or Word file into text (llmClient uses the server's /v1/files/extract).
         self.extract_text = extract_text
-        # The LLM server's address, for the sandbox; this chat's container there is sandbox_session.
-        self.server_url = server_url
-        self.sandbox_session = uuid.uuid4().hex[:16]
+        # The chat server's address and the tool token, for the server's tool groups: () -> (url, token).
+        self.server: Optional[Callable[[], tuple]] = None
+        self.sandbox_session = uuid.uuid4().hex[:16]   # this chat's container in the server's sandbox
         self.sandbox_skipped: List[str] = []
-        from . import files, git, linked, memory, sandbox, terminal
+        from . import files, git, linked, memory, rea, sandbox, terminal, ubuntu
+        self.remotes = {"rea": rea.remote(), "ubuntu": ubuntu.remote()}   # each lists one or more groups
         self.tools: Dict[str, Tool] = {}
-        for group, modules in zip(GROUPS, ((files,), (git,), (terminal, sandbox))):
-            for t in (t for module in modules for t in module.TOOLS):
+        for group, module in zip(GROUPS, (files, git, terminal)):
+            for t in module.TOOLS:
                 t.group = group
                 self.tools[t.name] = t
+        for t in sandbox.TOOLS:
+            t.group = "sandbox"
+            self.tools[t.name] = t
         for t in memory.TOOLS:
             t.group = "memory"
             self.tools[t.name] = t
@@ -115,7 +125,28 @@ class ToolBox:
         self.groups: set = set(GROUPS)    # the groups this chat turned on
 
     def set_groups(self, groups: Iterable[str]) -> None:
-        self.groups = {g for g in groups if g in GROUPS}
+        self.groups = {g for g in groups if g in GROUPS or g in SERVER_GROUPS}
+
+    def refresh_server_tools(self) -> None:
+        """Fetch the tool lists of the server groups that are on (network: call it from the worker thread)."""
+        for remote in self.remotes.values():
+            groups = set(remote.groups.values())
+            if not groups & self.groups:
+                continue
+            if not self.server:
+                remote.error = "this chat isn't connected to a server"
+                continue
+            url, token = self.server()
+            if not token:
+                remote.tools, remote.error = [], "no server tool token is set (Settings > General > Ubuntu server)"
+                remote._key = None
+            elif not remote.load(url, token):
+                continue
+            for name in [n for n, t in self.tools.items() if t.group in groups]:
+                del self.tools[name]
+            for t in remote.tools:
+                if t.name not in self.tools:       # a PC tool of the same name wins
+                    self.tools[t.name] = t
 
     def enabled(self, name: str) -> bool:
         tool = self.tools.get(name)
@@ -123,7 +154,9 @@ class ToolBox:
             return self.memory_dir is not None
         if tool and tool.group == "links":
             return self.has_links()
-        return bool(tool) and (tool.group in self.groups or (name in SHARED and bool(self.groups)))
+        if tool and tool.group == "sandbox":
+            return bool(self.groups & SANDBOX_WITH)
+        return bool(tool) and (tool.group in self.groups or (name in SHARED and bool(self.groups & set(GROUPS))))
 
     def active(self) -> List[Tool]:
         return [t for t in self.tools.values() if self.enabled(t.name)]
@@ -184,6 +217,7 @@ class ToolBox:
     # ---------------------------------------------------------------- calls
 
     def schemas(self) -> List[Dict[str, Any]]:
+        self.refresh_server_tools()
         return [t.schema() for t in self.active()]
 
     def kind(self, name: str) -> str:
@@ -268,7 +302,15 @@ class ToolBox:
 
     def system_note(self) -> str:
         """Tells the model what it can do and where it is."""
-        note = self._pc_note() if self.groups else ""
+        note = self._pc_note() if self.groups & set(GROUPS) else ""
+        server = self._server_note()
+        if server:
+            note += (" " if note else "") + server
+        if self.groups & SANDBOX_WITH:
+            note += (" " if note else "") + (
+                "Before giving the user code to run, or running new code on their PC or the Ubuntu server, test it "
+                "with run_in_sandbox (a throwaway Linux container, no approval needed) when it isn't Windows-only, "
+                "and fix what fails.")
         if self.memory_dir:
             note += (" " if note else "") + (
                 "You can keep memory notes for this chat with save_memory: short Markdown files, one per topic, "
@@ -280,6 +322,31 @@ class ToolBox:
                 note += (" Notes for more than this chat go in a shared place, named in save_memory's place argument: "
                          f"{', '.join(others)}. Every chat linked to that place will read them.")
         return note
+
+    def _server_note(self) -> str:
+        """What the server's tools are for, or why they're missing. "" if none is on."""
+        from . import rea, ubuntu
+        on = [g for g in SERVER_GROUPS if g in self.groups]
+        if not on:
+            return ""
+        self.refresh_server_tools()
+        parts = ["The user's Ubuntu server is another machine than this Windows PC; some of your tools run there."]
+        for remote in self.remotes.values():
+            mine = [g for g in on if g in remote.groups.values()]
+            if not mine:
+                continue
+            if not remote.tools:
+                parts.append(f"The {remote.label} are unavailable right now ({remote.error}); tell the user "
+                             "if they ask for them.")
+            elif remote.prefix == "rea":
+                parts.append(rea.NOTE)
+            else:
+                parts.append(ubuntu.note(remote.info.get("roots") or [],
+                                         files="ubuntu_files" in mine, run="ubuntu_run" in mine))
+        if not self.groups & set(GROUPS):
+            parts.append("The user approves every change on the server, and may decline; if so, don't retry the "
+                         "same thing. After using tools, tell the user briefly what you did and what you found.")
+        return " ".join(parts)
 
     def _shared_note(self) -> str:
         """Paths only, as the model opens them when it needs them; a very long list stops at SHARED_LISTED."""
@@ -319,8 +386,4 @@ class ToolBox:
             "change_directory moves it. Look before you change anything: list or read first"
             + (", and use edit_file for small changes instead of rewriting whole files" if "files" in self.groups else "")
             + ". The user is asked to approve every change and command, and may decline; if so, don't retry "
-            "the same thing. "
-            + ("Before giving the user code to run or running it on their PC, test it with run_in_sandbox "
-               "(a Linux container on the server, no approval needed) when it isn't Windows-only, and fix what "
-               "fails. " if "run" in self.groups else "") +
-            "After using tools, tell the user briefly what you did and what you found.")
+            "the same thing. After using tools, tell the user briefly what you did and what you found.")

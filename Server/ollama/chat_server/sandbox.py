@@ -14,6 +14,8 @@ are more than SANDBOX_MAX_SESSIONS, and all of them when the server stops.
 
 The client's run_in_sandbox tool (Code/local_tools/sandbox.py) calls this; the
 model never reaches Docker itself. Nothing is ever mounted from the server.
+Like the other tools that act on this machine, every request needs the shared
+token (X-ChatUI-Token, see server_tools.py).
 
   POST /v1/sandbox/run    {session, language?, code?, files?, archive?, command?, timeout?}
   POST /v1/sandbox/reset  {session}
@@ -30,13 +32,14 @@ import shutil
 import time
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from . import server_tools
 from .config import Config
 
 log = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(server_tools.require_token)])
 
 LABEL = "chatui-sandbox"
 NAME_PREFIX = "chatui-sandbox-"

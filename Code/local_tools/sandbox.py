@@ -4,7 +4,8 @@ The server keeps one container per chat (Server/ollama/chat_server/sandbox.py), 
 files written in one run are still there in the next until reset_sandbox. It has
 no network by default and is thrown away after a while, so these tools change
 nothing here and don't ask first. Files and folders from this PC can be copied in
-(copy_from_pc); nothing comes back out.
+(copy_from_pc); nothing comes back out. Like the server's other tools they need
+the token from Settings > General, and they are on while the chat has Run or Ubuntu Run on.
 """
 
 import base64
@@ -15,6 +16,7 @@ import requests
 
 from . import Tool, ToolError, params
 from .files import SKIP_DIRS
+from .remote import TOKEN_HEADER
 
 MAX_FILE_BYTES = 5 * 1024 * 1024        # bigger files are left out of a copy
 MAX_COPY_BYTES = 50 * 1024 * 1024       # all copied files together, before compression
@@ -49,10 +51,13 @@ def pack(box, paths) -> bytes:
 
 
 def _post(box, path, body, timeout):
-    if not box.server_url:
-        raise ToolError("the sandbox needs the LLM server, and none is set")
+    if not box.server:
+        raise ToolError("the sandbox needs the LLM server, and this chat isn't connected to one")
+    url, token = box.server()
+    if not token:
+        raise ToolError("the sandbox needs the server tool token (Settings > General > Ubuntu server)")
     try:
-        r = requests.post(f"{box.server_url()}{path}", json=body, timeout=timeout)
+        r = requests.post(f"{url}{path}", json=body, headers={TOKEN_HEADER: token}, timeout=timeout)
     except requests.RequestException as e:
         raise ToolError(f"can't reach the LLM server for the sandbox: {e}")
     if r.status_code != 200:

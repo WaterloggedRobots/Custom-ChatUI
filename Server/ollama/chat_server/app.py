@@ -16,9 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import comfy
 from . import sandbox
+from . import rea
 from . import search as web
 from . import speech
 from . import tts
+from . import ubuntu
 from .config import Config
 from .documents import AttachmentError, load_attachment
 from .ollama import Ollama, OllamaError
@@ -29,8 +31,11 @@ log = logging.getLogger("chat_server")
 
 def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
                web_transport: Optional[httpx.AsyncBaseTransport] = None,
-               comfy_transport: Optional[httpx.AsyncBaseTransport] = None) -> FastAPI:
-    """Transports are injectable so the tests can stand in for Ollama, the web and ComfyUI."""
+               comfy_transport: Optional[httpx.AsyncBaseTransport] = None,
+               rea_connect=None) -> FastAPI:
+    """Transports are injectable so the tests can stand in for Ollama, the web and ComfyUI;
+    rea_connect for REA (see rea.ReaBridge)."""
+    rea_bridge = rea.ReaBridge(rea_connect or rea.stdio_session)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -58,6 +63,7 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
         await app.state.ollama.close()
         await app.state.http.aclose()
         await app.state.comfy.aclose()
+        await rea_bridge.close()
 
     app = FastAPI(title="ChatUI server", version="3.0.0", lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -86,6 +92,8 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
     app.include_router(tts.router)
     app.include_router(comfy.router)
     app.include_router(sandbox.router)
+    app.include_router(rea.make_router(rea_bridge))     # these two need the tool token
+    app.include_router(ubuntu.router)
     if Config.ENABLE_EXTRAS:
         from . import extras
         app.include_router(extras.router)
@@ -114,6 +122,8 @@ def create_app(ollama_transport: Optional[httpx.AsyncBaseTransport] = None,
                            "POST /v1/sandbox/reset {session}; GET /v1/sandbox/status",
                 "text_to_speech": "POST /v1/audio/speech {input, model: edge|piper, voice, speed}; GET /v1/audio/voices",
                 "speech_to_text": "POST /v1/audio/transcriptions (multipart: file, language); GET /v1/audio/stt",
+                "reverse_engineering": "GET /v1/rea/tools; POST /v1/rea/call {name, arguments} (X-ChatUI-Token)",
+                "ubuntu_files": "GET /v1/ubuntu/tools; POST /v1/ubuntu/call {name, arguments} (X-ChatUI-Token)",
                 "health": "GET /health",
             },
         }

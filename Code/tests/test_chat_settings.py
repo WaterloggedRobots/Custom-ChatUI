@@ -397,3 +397,23 @@ def test_name_field_follows_the_personality(gui):
     assert not win.ui.characterEdit.isVisibleTo(win.ui)
     win._set_editing(None)
     assert win.ui.characterEdit.isVisibleTo(win.ui)
+
+
+def test_server_tool_switches_and_token(gui, monkeypatch, tmp_path):
+    main, win, _ = gui
+    import paths
+    from Widgets.generalSettings import GeneralSettings
+    win.open_for("Server tools", chat_settings.defaults(), is_new=True)
+    assert not win.ui.reaToolsCheck.isChecked() and not win.ui.ubuntuFilesToolsCheck.isChecked()
+    win.ui.reaToolsCheck.setChecked(True)
+    s = win.settings()
+    assert s["Tool REA"] is True and s["Tool Ubuntu Files"] is False
+    assert not win.ui.ubuntuRunToolsCheck.isChecked() and s["Tool Ubuntu Run"] is False
+    assert "rea" in chat_settings.tool_groups(s)
+
+    monkeypatch.setattr(paths, "USER_NETWORK_FILE", tmp_path / "network.json")
+    general = GeneralSettings()
+    general.token_edit.setText("tok")
+    general.save_token()
+    assert paths.load_tool_token() == "tok"
+    assert main.client.toolbox.server()[1] == "tok"       # the client reads the saved token

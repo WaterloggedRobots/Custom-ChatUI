@@ -3,7 +3,8 @@
 They come in three groups that each chat turns on separately (Chat Settings):
   files  browse, read and edit files and folders   (files.py)
   git    git in the user's repositories              (git.py; github_login.py signs in)
-  run    run scripts, programs and shell commands    (terminal.py)
+  run    run scripts, programs and shell commands    (terminal.py), and test code in an
+         Ubuntu sandbox on the LLM server               (sandbox.py)
 change_directory belongs to all three, since each of them starts in the working folder.
 Memory notes (memory.py) have their own switch: their tools are on while the chat has a memory_dir.
 Reading linked chats (linked.py) is on while the chat's links reach any.
@@ -17,6 +18,7 @@ Each tool has a kind:
   read   looks at something and changes nothing. Runs without asking.
   write  changes files, folders or a repository. Asks you first.
   run    runs a program or shell command. Asks you first.
+  sandbox  runs code in the server's throwaway container, not on this PC. Runs without asking.
 
 ToolBox holds the state one chat needs: the folders and GitHub repositories
 you linked to the chat (the model is told about them; the first folder is where
@@ -27,6 +29,7 @@ allow" for this session.
 import json
 import os
 import re
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
@@ -43,7 +46,7 @@ class Tool:
     description: str
     parameters: Dict[str, Any]       # JSON schema of the arguments
     func: Callable[..., str]         # func(ctx, **args) -> text for the model
-    kind: str = "read"               # read | write | run
+    kind: str = "read"               # read | write | run | sandbox
     summary: Optional[Callable[[Dict[str, Any]], str]] = None   # one line for the approval prompt
     group: str = ""                  # one of GROUPS; set by ToolBox
 
@@ -83,7 +86,8 @@ def repo_url(text: str) -> Optional[str]:
 
 class ToolBox:
     def __init__(self, working_dir: Optional[str] = None,
-                 extract_text: Optional[Callable[[Path], str]] = None):
+                 extract_text: Optional[Callable[[Path], str]] = None,
+                 server_url: Optional[Callable[[], str]] = None):
         self.working_dir = Path(working_dir).expanduser() if working_dir else Path.home()
         self.folders: List[Path] = []     # linked in the GUI
         self.repos: List[str] = []        # GitHub repository links, linked in the GUI
@@ -92,10 +96,14 @@ class ToolBox:
         self.always_allow: set = set()
         # Turns a PDF or Word file into text (llmClient uses the server's /v1/files/extract).
         self.extract_text = extract_text
-        from . import files, git, linked, memory, terminal
+        # The LLM server's address, for the sandbox; this chat's container there is sandbox_session.
+        self.server_url = server_url
+        self.sandbox_session = uuid.uuid4().hex[:16]
+        self.sandbox_skipped: List[str] = []
+        from . import files, git, linked, memory, sandbox, terminal
         self.tools: Dict[str, Tool] = {}
-        for group, module in zip(GROUPS, (files, git, terminal)):
-            for t in module.TOOLS:
+        for group, modules in zip(GROUPS, ((files,), (git,), (terminal, sandbox))):
+            for t in (t for module in modules for t in module.TOOLS):
                 t.group = group
                 self.tools[t.name] = t
         for t in memory.TOOLS:
@@ -183,7 +191,7 @@ class ToolBox:
         return tool.kind if tool else "read"
 
     def needs_approval(self, name: str) -> bool:
-        return self.kind(name) != "read" and name not in self.always_allow
+        return self.kind(name) not in ("read", "sandbox") and name not in self.always_allow
 
     def describe(self, name: str, args: Dict[str, Any]) -> str:
         """One readable line for the approval prompt and the chat log."""
@@ -311,4 +319,8 @@ class ToolBox:
             "change_directory moves it. Look before you change anything: list or read first"
             + (", and use edit_file for small changes instead of rewriting whole files" if "files" in self.groups else "")
             + ". The user is asked to approve every change and command, and may decline; if so, don't retry "
-            "the same thing. After using tools, tell the user briefly what you did and what you found.")
+            "the same thing. "
+            + ("Before giving the user code to run or running it on their PC, test it with run_in_sandbox "
+               "(a Linux container on the server, no approval needed) when it isn't Windows-only, and fix what "
+               "fails. " if "run" in self.groups else "") +
+            "After using tools, tell the user briefly what you did and what you found.")

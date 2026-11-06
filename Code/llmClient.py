@@ -102,7 +102,7 @@ class LLMClient(QObject):
         self._response = None
 
         self.tools_enabled = True
-        self.toolbox = ToolBox(extract_text=self._extract_text)
+        self.toolbox = ToolBox(extract_text=self._extract_text, server_url=lambda: self.base_url)
         self._approval = threading.Event()
         self._approval_answer = "deny"
 

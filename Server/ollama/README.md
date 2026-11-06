@@ -23,6 +23,9 @@ OpenAI-style client, such as Futu-Network later) one chat endpoint that adds:
   chat's engine, voice and speed and play the audio that comes back: Microsoft
   Edge's online voices, or Kokoro, Chatterbox or Piper running on this machine. See
   [Text to speech](#text-to-speech).
+- **Code sandbox.** The model tests code in a throwaway Ubuntu container on
+  this machine before the user runs it for real: one locked-down Docker
+  container per chat, with no network. See [Code sandbox](#code-sandbox).
 
 ## Setup (Ubuntu 24.04)
 
@@ -78,6 +81,12 @@ keep tokens there. All addresses are summarised at the top of
 | `TTS_SOVITS_LANGUAGES` | `ja,zh,en,zh-HK,ko` | languages each GPT-SoVITS voice is offered in |
 | `TTS_PRELOAD` | `kokoro` | engines loaded at start-up (`kokoro,chatterbox`, or empty) |
 | `TTS_TRANSLATE_MODEL` | (the chat's model) | Ollama model that translates replies for "speak in the voice's language" |
+| `SANDBOX_ENABLED` / `SANDBOX_IMAGE` | `1` / `chatui-sandbox` | the code sandbox, and the Docker image it runs |
+| `SANDBOX_NETWORK` | `none` | `bridge` lets code in the sandbox reach the internet (pip, npm) |
+| `SANDBOX_MEMORY` / `SANDBOX_CPUS` / `SANDBOX_PIDS` / `SANDBOX_DISK` | `2g` / `2` / `256` / `1g` | limits for each chat's container (`/work` is kept in memory) |
+| `SANDBOX_TIMEOUT` / `SANDBOX_MAX_TIMEOUT` | `60` / `300` | seconds one run gets, and the most the model may ask for |
+| `SANDBOX_OUTPUT_CHARS` | `12000` | output kept from one run (its start and end) |
+| `SANDBOX_IDLE_MINUTES` / `SANDBOX_MAX_SESSIONS` | `30` / `4` | an unused chat's container is removed; containers at once |
 | `ENABLE_EXTRAS` | `1` | the tool-calling test routes |
 
 ## Endpoints
@@ -97,6 +106,9 @@ keep tokens there. All addresses are summarised at the top of
 | POST | `/v1/audio/voices/download` | `{"voice": "en_US-lessac-medium"}` fetches a Piper voice |
 | POST | `/v1/images/generations` | `{"prompt", "negative_prompt", "workflow", "seed"}` → `{"data": [{"b64_json", "mime", "filename", ...}]}`, drawn by ComfyUI |
 | GET | `/v1/images/workflows` | the workflows in `workflows/` `{"data": [{"id", "name", "usable", "error"}], "comfyui": true\|false}` |
+| POST | `/v1/sandbox/run` | `{"session", "language", "code", "files", "archive", "command", "timeout"}` → `{"exit_code", "output", "timed_out", "truncated", "seconds", "command"}`; see [Code sandbox](#code-sandbox) |
+| POST | `/v1/sandbox/reset` | `{"session"}` throws that chat's container away |
+| GET | `/v1/sandbox/status` | whether the sandbox can run, its image, network and limits |
 | GET | `/health` | Ollama reachability and optional features |
 | | `/v1/tools/*` | unchanged extras; function calling is to be reworked later |
 
@@ -333,6 +345,45 @@ curl -X POST localhost:8100/v1/images/generations -H 'Content-Type: application/
      -d '{"prompt": "a red fox in snow", "workflow": "sd15-basic"}' | head -c 200
 ```
 
+## Code sandbox
+
+With **Run** turned on in Chat Settings, the model gets a `run_in_sandbox` tool
+(Code/local_tools/sandbox.py). It runs code in an Ubuntu 24.04 container on this
+machine, not on the user's PC, so it isn't asked for approval, and the model is
+told to test code there before handing it over. The container has python3 (with
+pytest, numpy and requests), node, gcc/g++, make and git. The model can send:
+
+- `code` + `language` (python, bash, javascript, c, cpp): saved as `main.<ext>` in `/work` and run
+- `command`: any bash command in `/work`, such as `pytest -q`
+- `files`: more files to write first
+- `copy_from_pc`: files or folders from the user's PC, copied in (without `.git`, `node_modules`, venvs, build output)
+
+Each chat has its own container, started on its first run and kept between runs,
+so files stay in `/work` until `reset_sandbox`, 30 idle minutes, or a server
+restart. Nothing comes back out to the PC.
+
+How it is locked down (chat_server/sandbox.py):
+
+- no network (`SANDBOX_NETWORK=none`); set `bridge` if the model should `pip install`
+- 2 GB of memory, 2 CPUs, 256 processes; no Linux capabilities, `no-new-privileges`, a normal user
+- a read-only system; `/work`, `/tmp` and the home folder are in memory, so nothing lands on this disk
+- nothing from this machine is mounted into it
+- each run has a time limit (`timeout -k`), and only 12,000 characters of output are kept
+
+Anyone who can reach this server's port can run code in a container this way, as
+with the rest of the API, so keep the server on your own network.
+
+Setup, once (Docker must be installed and your user in the `docker` group):
+
+```bash
+docker build -t chatui-sandbox sandbox          # from Server/ollama; again after changing sandbox/Dockerfile
+curl -s localhost:8100/v1/sandbox/status
+curl -s -X POST localhost:8100/v1/sandbox/run -H 'Content-Type: application/json' \
+     -d '{"session": "try", "language": "python", "code": "print(2 + 2)"}'
+```
+
+Windows isn't covered yet; a Windows VM over SSH could sit behind the same API later.
+
 ## Why Python and not C++
 
 The time per request is spent in model inference on the GPU and in waiting on
@@ -354,5 +405,6 @@ cd Server/ollama
 python -m pytest -q tests
 ```
 
-The tests run the server against a fake Ollama, a fake web and a fake ComfyUI,
-so they need none of them nor network access.
+The tests run the server against a fake Ollama, a fake web, a fake ComfyUI and
+a fake Docker, so they need none of them nor network access. One more test runs
+real code in the sandbox when the `chatui-sandbox` image is built.

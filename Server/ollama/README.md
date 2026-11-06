@@ -101,7 +101,7 @@ keep tokens there. All addresses are summarised at the top of
 | GET | `/v1/rea/tools` | REA's allowed tools in OpenAI `tools` form, plus `meta` (each one's kind and group). Needs `X-ChatUI-Token` |
 | POST | `/v1/rea/call` | `{"name", "arguments"}` → `{"name", "output"}`, output clipped to 20,000 characters. Needs the token |
 | GET | `/v1/rea/status` | whether REA is running, how often it was started, its last error. Needs the token |
-| GET, POST | `/v1/ubuntu/tools`, `/v1/ubuntu/call` | the same for the Ubuntu file tools; `tools` also returns the allowed folders (`roots`) |
+| GET, POST | `/v1/ubuntu/tools`, `/v1/ubuntu/call` | the same for the Ubuntu file and run tools; `tools` also returns the allowed folders (`roots`) |
 | | `/v1/tools/*` | unchanged extras; function calling is to be reworked later |
 
 ### Chat request
@@ -337,11 +337,11 @@ curl -X POST localhost:8100/v1/images/generations -H 'Content-Type: application/
      -d '{"prompt": "a red fox in snow", "workflow": "sd15-basic"}' | head -c 200
 ```
 
-## Reverse engineering and Ubuntu files (for the client's model)
+## Reverse engineering, Ubuntu files and run (for the client's model)
 
-Two groups of tools run on this machine for the chat model on the Windows
+Three groups of tools run on this machine for the chat model on the Windows
 client, each switched on per chat in the client (*Reverse engineering*,
-*Ubuntu files*). The client asks the user before every change, as it does
+*Ubuntu files*, *Ubuntu run*). The client asks the user before every change, as it does
 for its own tools; reads run straight away.
 
 - **REA** (`chat_server/rea.py`). One long-lived REA MCP server
@@ -367,8 +367,15 @@ for its own tools; reads run straight away.
   `ubuntu_move_path`, `ubuntu_copy_path` and `ubuntu_delete_path`, which moves
   to a `.chatui-trash` folder at the top of the allowed folder (`~/.chatui-trash`,
   `/mnt/nas/REA/.chatui-trash`) instead of deleting.
+- **Ubuntu run** (`ubuntu_run_command` in the same file): one bash command
+  (`bash -lc`) in a folder inside the allowed ones, with its output and exit
+  code. It runs as the server's user, in its own process group: a timeout
+  (60 s by default, at most `TOOL_RUN_MAX_TIMEOUT`) stops everything it
+  started. The folder rules below only pick where it starts; what the command
+  touches is up to you, which is why the client asks before every one.
+  `TOOL_TOKEN` is taken out of its environment.
 
-**Setup.** Port 8100 is open to the LAN, so both groups need a shared token,
+**Setup.** Port 8100 is open to the LAN, so all three groups need a shared token,
 and refuse everything until one is set:
 
 ```bash
@@ -397,6 +404,7 @@ Ubuntu paths (`/home/...`, `~/...`); Windows paths are refused with a reason.
 | `TOOL_ROOTS` | `~:/mnt/nas/REA` | folders the tools may use, `:`-separated |
 | `TOOL_DENY`, `TOOL_READ_ONLY` | see above | never touched; only read |
 | `TOOL_OUTPUT_CHARS` | 20000 | what one result may send back |
+| `TOOL_RUN_MAX_TIMEOUT` | 1800 | seconds one command may run at most |
 | `REA_HOME` | `~/snap/gitpeach-desktop/13/GitHub/REA` | the REA repository (its `targets/` and `scripts/`) |
 | `REA_COMMAND` | `npx -y rea-agents@6.5.0 mcp` | keep in step with `REA_VERSION` in REA's `scripts/setup-rea.sh` |
 | `REA_TIMEOUT`, `REA_START_TIMEOUT`, `REA_EXPORT_TIMEOUT` | 1200, 180, 3600 | seconds |

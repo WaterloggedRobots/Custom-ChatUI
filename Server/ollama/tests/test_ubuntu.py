@@ -1,4 +1,4 @@
-"""The Ubuntu file tools and the folders they may use (ubuntu.py, server_tools.resolve).
+"""The Ubuntu file and run tools and the folders they may use (ubuntu.py, server_tools.resolve).
 
 Run from Server/ollama:  python -m pytest -q tests
 """
@@ -99,6 +99,25 @@ def test_delete_goes_to_the_trash(root):
             ubuntu.delete_path(str(refused), recursive=True)
 
 
+def test_run_command(root, monkeypatch):
+    out = ubuntu.run_command("pwd; echo $TOOL_TOKEN; exit 3", cwd=str(root / "sub"))
+    assert out.startswith(f"exit code 3  (in {root / 'sub'})") and str(root / "sub") in out
+    assert TOKEN not in out                       # the token doesn't reach the command
+    monkeypatch.setenv("TOOL_TOKEN", TOKEN)
+    assert TOKEN not in ubuntu.run_command("echo $TOOL_TOKEN", cwd=str(root))
+    with pytest.raises(ToolError, match="outside the folders"):
+        ubuntu.run_command("ls", cwd="/etc")
+    with pytest.raises(ToolError, match="empty command"):
+        ubuntu.run_command("  ", cwd=str(root))
+    marker = root / "after-timeout"
+    with pytest.raises(ToolError, match="stopped after 1s") as e:
+        ubuntu.run_command(f"echo started; (sleep 3; touch {marker}) & sleep 30", cwd=str(root), timeout=1)
+    assert "started" in str(e.value)
+    import time
+    time.sleep(3.5)
+    assert not marker.exists()                    # the whole process group was stopped
+
+
 def test_endpoints(root):
     app = create_app(ollama_transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"models": []})))
     with TestClient(app) as c:
@@ -108,6 +127,7 @@ def test_endpoints(root):
         assert "ubuntu_read_file" in names and "ubuntu_delete_path" in names
         assert body["meta"]["ubuntu_read_file"] == {"kind": "read", "group": "files"}
         assert body["meta"]["ubuntu_write_file"]["kind"] == "write"
+        assert body["meta"]["ubuntu_run_command"] == {"kind": "run", "group": "run"}
         assert body["roots"][0] == str(root)
 
         def call(name, **arguments):
@@ -117,3 +137,4 @@ def test_endpoints(root):
         assert call("ubuntu_read_file", path="/etc/passwd").startswith("Error: /etc/passwd is outside")
         assert call("ubuntu_read_file", path=str(root / "notes.txt"), bogus=1).startswith("Error: bad arguments")
         assert call("rm_rf").startswith("Error: there is no tool called rm_rf")
+        assert call("ubuntu_run_command", command="echo hi", cwd=str(root)).endswith("\nhi")

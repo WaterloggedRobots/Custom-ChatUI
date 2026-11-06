@@ -422,6 +422,20 @@ QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px}</string>
         </property>
        </widget>
       </item>
+      <item row="7" column="0">
+       <widget class="QLabel" name="label_ubuntuRunTools">
+        <property name="text">
+         <string>Ubuntu run: let the model run bash commands on the Ubuntu server</string>
+        </property>
+       </widget>
+      </item>
+      <item row="7" column="1" alignment="Qt::AlignmentFlag::AlignRight">
+       <widget class="QCheckBox" name="ubuntuRunToolsCheck">
+        <property name="toolTip">
+         <string>Needs the server tool token under Settings &gt; General. It asks you before every command</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>

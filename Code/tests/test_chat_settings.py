@@ -408,6 +408,7 @@ def test_server_tool_switches_and_token(gui, monkeypatch, tmp_path):
     win.ui.reaToolsCheck.setChecked(True)
     s = win.settings()
     assert s["Tool REA"] is True and s["Tool Ubuntu Files"] is False
+    assert not win.ui.ubuntuRunToolsCheck.isChecked() and s["Tool Ubuntu Run"] is False
     assert "rea" in chat_settings.tool_groups(s)
 
     monkeypatch.setattr(paths, "USER_NETWORK_FILE", tmp_path / "network.json")

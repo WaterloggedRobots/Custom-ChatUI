@@ -28,9 +28,10 @@ REA_TOOLS = {"tools": [{"type": "function", "function": {"name": n, "description
                       "copy_to_targets": {"kind": "write", "group": "rea"}}}
 UBUNTU_TOOLS = {"tools": [{"type": "function", "function": {"name": n, "description": n,
                                                             "parameters": {"type": "object", "properties": {}}}}
-                          for n in ("ubuntu_read_file", "ubuntu_delete_path", "ubuntu_mystery")],
+                          for n in ("ubuntu_read_file", "ubuntu_delete_path", "ubuntu_mystery", "ubuntu_run_command")],
                 "meta": {"ubuntu_read_file": {"kind": "read", "group": "files"},
-                         "ubuntu_delete_path": {"kind": "write", "group": "files"}},
+                         "ubuntu_delete_path": {"kind": "write", "group": "files"},
+                         "ubuntu_run_command": {"kind": "run", "group": "run"}},
                 "roots": ["/home/me", "/mnt/nas/REA"]}
 
 
@@ -125,9 +126,10 @@ def test_server_tools_are_off_by_default_and_for_old_chats():
     assert s["Tool REA"] is False and s["Tool Ubuntu Files"] is False
     assert chat_settings.tool_groups(chat_settings.normalize({"Tools": True})) == {"files", "git", "run"}
     assert chat_settings.tool_groups(chat_settings.from_chat({"Model": "m", "Tools": True})) == {"files", "git", "run"}
-    on = chat_settings.normalize({"Tool REA": True, "Tool Ubuntu Files": True, "Tool Files": False,
-                                  "Tool Git": False, "Tool Run": False})
-    assert chat_settings.tool_groups(on) == {"rea", "ubuntu_files"}
+    assert s["Tool Ubuntu Run"] is False
+    on = chat_settings.normalize({"Tool REA": True, "Tool Ubuntu Files": True, "Tool Ubuntu Run": True,
+                                  "Tool Files": False, "Tool Git": False, "Tool Run": False})
+    assert chat_settings.tool_groups(on) == {"rea", "ubuntu_files", "ubuntu_run"}
     assert chat_settings.normalize({"Tool REA": "yes"})["Tool REA"] is False
 
 
@@ -158,6 +160,21 @@ def test_server_tools_come_from_the_server_with_their_kinds(server):
         "On the Ubuntu server: delete /home/me/x and everything in it (to its trash folder)"
     assert box.describe("copy_to_targets", {"source": "COM3D2"}).startswith("On the Ubuntu server: copy COM3D2")
     assert box.describe("procedure_pseudo_code", {"procedure": "main"}) == "On the Ubuntu server: procedure_pseudo_code"
+
+
+def test_ubuntu_run_is_its_own_switch(server):
+    box = make_box(server)
+    assert "ubuntu_run_command" not in names(box) and "ubuntu_read_file" in names(box)
+    assert "run bash commands" not in box.system_note()
+    box.set_groups(["ubuntu_run"])
+    assert names(box) == {"ubuntu_run_command"}
+    assert box.needs_approval("ubuntu_run_command") and box.kind("ubuntu_run_command") == "run"
+    assert box.describe("ubuntu_run_command", {"command": "ls -la", "cwd": "/mnt/nas/REA"}) == \
+        "On the Ubuntu server: run in bash in /mnt/nas/REA:\nls -la"
+    note = box.system_note()
+    assert "run bash commands" in note and "browse, read and edit" not in note
+    box.always_allow.add("ubuntu_run_command")
+    assert not box.needs_approval("ubuntu_run_command")
 
 
 def test_calls_are_forwarded_with_the_token(server):

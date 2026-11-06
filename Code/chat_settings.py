@@ -24,7 +24,8 @@ IMAGE_MODES = ("auto", "on")           # auto: the model decides when to draw; o
 AVATAR_PERSONALITIES = ("Any", "Tsundere", "Kuudere")   # the 3D model's ExpressionLibrary.Personality
 AVATAR_NOTES_LIMIT = 2000
 TOOL_KEYS = {"files": "Tool Files", "git": "Tool Git", "run": "Tool Run"}   # local_tools group -> setting
-SERVER_TOOL_KEYS = {"rea": "Tool REA", "ubuntu_files": "Tool Ubuntu Files"}   # groups that run on the server
+SERVER_TOOL_KEYS = {"rea": "Tool REA", "ubuntu_files": "Tool Ubuntu Files",   # groups that run on the server
+                    "ubuntu_run": "Tool Ubuntu Run"}
 EXPORT_TAG = "ChatUI Settings"        # marks an exported file; the value is the format version
 EXPORT_VERSION = 1
 
@@ -42,6 +43,7 @@ DEFAULTS = {
     # Tools on the Ubuntu server (0.17). Off unless a chat turns them on; they need the token (General Settings).
     "Tool REA": False,                # reverse engineering with REA
     "Tool Ubuntu Files": False,       # browse, read and edit files and folders on the server
+    "Tool Ubuntu Run": False,         # run bash commands on the server
     "Memory": True,                   # send the chat's memory notes to the model, and let it write them
     # Text to speech, done by the server (Server/ollama/chat_server/tts.py)
     "TTS": False,                     # off: no Play buttons and no voice settings shown

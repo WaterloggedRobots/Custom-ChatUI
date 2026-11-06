@@ -8,6 +8,7 @@ change_directory belongs to all three, since each of them starts in the working 
 Two more groups run on the Ubuntu server, not here (remote.py lists and calls them):
   rea           reverse engineering with REA           (rea.py)
   ubuntu_files  files and folders on the server        (ubuntu.py)
+  ubuntu_run    bash commands on the server            (ubuntu.py)
 Memory notes (memory.py) have their own switch: their tools are on while the chat has a memory_dir.
 Reading linked chats (linked.py) is on while the chat's links reach any.
 
@@ -36,7 +37,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 MAX_OUTPUT_CHARS = 20000      # what one tool result may add to the conversation
 GROUPS = ("files", "git", "run")
-SERVER_GROUPS = ("rea", "ubuntu_files")     # their tools come from the server (remote.py)
+SERVER_GROUPS = ("rea", "ubuntu_files", "ubuntu_run")   # their tools come from the server (remote.py)
 SHARED_LISTED = 15            # folders or repositories from linked chats named in the note, of each
 SHARED = {"change_directory"}  # in every group
 
@@ -99,7 +100,7 @@ class ToolBox:
         # The chat server's address and the tool token, for the server's tool groups: () -> (url, token).
         self.server: Optional[Callable[[], tuple]] = None
         from . import files, git, linked, memory, rea, terminal, ubuntu
-        self.remotes = {"rea": rea.remote(), "ubuntu_files": ubuntu.remote()}
+        self.remotes = {"rea": rea.remote(), "ubuntu": ubuntu.remote()}   # each lists one or more groups
         self.tools: Dict[str, Tool] = {}
         for group, module in zip(GROUPS, (files, git, terminal)):
             for t in module.TOOLS:
@@ -118,8 +119,9 @@ class ToolBox:
 
     def refresh_server_tools(self) -> None:
         """Fetch the tool lists of the server groups that are on (network: call it from the worker thread)."""
-        for group, remote in self.remotes.items():
-            if group not in self.groups:
+        for remote in self.remotes.values():
+            groups = set(remote.groups.values())
+            if not groups & self.groups:
                 continue
             if not self.server:
                 remote.error = "this chat isn't connected to a server"
@@ -130,7 +132,7 @@ class ToolBox:
                 remote._key = None
             elif not remote.load(url, token):
                 continue
-            for name in [n for n, t in self.tools.items() if t.group == group]:
+            for name in [n for n, t in self.tools.items() if t.group in groups]:
                 del self.tools[name]
             for t in remote.tools:
                 if t.name not in self.tools:       # a PC tool of the same name wins
@@ -312,15 +314,18 @@ class ToolBox:
             return ""
         self.refresh_server_tools()
         parts = ["The user's Ubuntu server is another machine than this Windows PC; some of your tools run there."]
-        for group in on:
-            remote = self.remotes[group]
+        for remote in self.remotes.values():
+            mine = [g for g in on if g in remote.groups.values()]
+            if not mine:
+                continue
             if not remote.tools:
-                parts.append(f"The {remote.label} tools are unavailable right now ({remote.error}); tell the user "
+                parts.append(f"The {remote.label} are unavailable right now ({remote.error}); tell the user "
                              "if they ask for them.")
-            elif group == "rea":
+            elif remote.prefix == "rea":
                 parts.append(rea.NOTE)
             else:
-                parts.append(ubuntu.note(remote.info.get("roots") or []))
+                parts.append(ubuntu.note(remote.info.get("roots") or [],
+                                         files="ubuntu_files" in mine, run="ubuntu_run" in mine))
         if not self.groups & set(GROUPS):
             parts.append("The user approves every change on the server, and may decline; if so, don't retry the "
                          "same thing. After using tools, tell the user briefly what you did and what you found.")

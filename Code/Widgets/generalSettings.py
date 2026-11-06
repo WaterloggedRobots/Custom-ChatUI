@@ -4,8 +4,8 @@ The GitHub sign-in: there's one login on this PC, shared by every chat. Whether
 a chat's model may use git is still its own choice, under Git in the settings
 window of the chat or its personality.
 
-The Ubuntu server's tool token: reverse engineering and the Ubuntu file tools
-run on the server, which refuses them without it (Server/ollama/README.md says
+The Ubuntu server's tool token: reverse engineering and the Ubuntu file and run
+tools run on the server, which refuses them without it (Server/ollama/README.md says
 where to find it). It's kept in the saved network settings (paths.py); each
 chat still turns those tools on for itself.
 """
@@ -71,8 +71,8 @@ class GeneralSettings(QMainWindow):
         token_row = QHBoxLayout()
         token_row.addWidget(self.token_edit, 1)
         token_row.addWidget(self.token_button)
-        token_note = QLabel("Reverse engineering and the Ubuntu file tools run on the server, which needs this token. "
-                            "Each chat turns them on in its own settings.")
+        token_note = QLabel("Reverse engineering and the Ubuntu file and run tools run on the server, which needs "
+                            "this token. Each chat turns them on in its own settings.")
         token_note.setWordWrap(True)
         token_note.setStyleSheet("color:#8a8a8a;font-weight:400")
         token_group = QVBoxLayout()

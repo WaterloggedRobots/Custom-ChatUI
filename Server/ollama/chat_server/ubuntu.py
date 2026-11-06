@@ -1,20 +1,24 @@
-"""Files and folders on this Ubuntu machine, for the chat model on a Windows client.
+"""Files, folders and commands on this Ubuntu machine, for the chat model on a Windows client.
 
-The same tools the client has for its own PC (Code/local_tools/files.py), run
-here. Paths are Ubuntu paths, absolute or starting with ~, and must be inside
-Config.TOOL_ROOTS (see server_tools.resolve). There is no working folder: each
+The same tools the client has for its own PC (Code/local_tools/files.py and
+terminal.py), run here. Paths are Ubuntu paths, absolute or starting with ~,
+and must be inside Config.TOOL_ROOTS (see server_tools.resolve). There is no working folder: each
 call names its paths. Deleting moves to a .chatui-trash folder at the top of
 the root the path is in (same disk, so it's quick and can be undone); nothing
-is deleted for good.
+is deleted for good. ubuntu_run_command runs bash in a folder inside the roots;
+what the command itself then touches is up to the user, who approves each one.
 
 Endpoints (token required):
-  GET  /v1/ubuntu/tools   OpenAI `tools`, plus each one's kind and group
+  GET  /v1/ubuntu/tools   OpenAI `tools`, plus each one's kind and group (files | run)
   POST /v1/ubuntu/call    {name, arguments} -> {"name", "output"}
 """
 
 import fnmatch
+import os
 import re
 import shutil
+import signal
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
@@ -23,6 +27,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from . import server_tools
+from .config import Config
 from .server_tools import ServerTool, ToolError, params, resolve
 
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", ".idea", ".cache", ".chatui-trash"}
@@ -255,6 +260,34 @@ def delete_path(path, recursive=False):
     return f"Moved {p} to the trash: {where}"
 
 
+# ------------------------------------------------------------------ run tool
+
+def run_command(command, cwd="~", timeout=60):
+    if not str(command).strip():
+        raise ToolError("empty command")
+    folder = resolve(cwd)
+    if not folder.is_dir():
+        raise ToolError(f"{folder} is not a folder")
+    timeout = max(1, min(int(timeout), Config.TOOL_RUN_MAX_TIMEOUT))
+    env = {k: v for k, v in os.environ.items() if k != "TOOL_TOKEN"}
+    env.update(PYTHONIOENCODING="utf-8", TERM="dumb")
+    # Its own process group, so a timeout stops everything it started and nothing else.
+    proc = subprocess.Popen(["bash", "-lc", command], cwd=str(folder), stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, start_new_session=True)
+    try:
+        out, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        out, _ = proc.communicate()
+        raise ToolError(f"stopped after {timeout}s without finishing. Output so far:\n"
+                        f"{out.decode('utf-8', errors='replace')}")
+    text = out.decode("utf-8", errors="replace").rstrip()
+    return f"exit code {proc.returncode}  (in {folder})\n{text or '(no output)'}"
+
+
 # --------------------------------------------------------------- the list
 
 PATH = {"type": "string", "description": "Ubuntu path on the server: /home/... or ~/... (not a Windows path)"}
@@ -300,6 +333,13 @@ TOOLS = [
                                      "folder, so it can be restored). Folders with files need recursive=true.",
                params(["path"], path=PATH, recursive={"type": "boolean"}),
                delete_path, kind="write", group="files"),
+    ServerTool("ubuntu_run_command", "Run a bash command on the Ubuntu server and return its output and exit code. "
+                                     "Not interactive: commands that wait for input fail. Starts in cwd (default ~).",
+               params(["command"], command={"type": "string"},
+                      cwd={"type": "string", "description": "Ubuntu folder to run in"},
+                      timeout={"type": "integer",
+                               "description": f"Seconds, default 60, at most {Config.TOOL_RUN_MAX_TIMEOUT}"}),
+               run_command, kind="run", group="run"),
 ]
 
 

@@ -12,7 +12,7 @@ from .remote import Remote
 
 def remote() -> Remote:
     return Remote(
-        "rea", {"rea": "rea"}, "reverse engineering (REA)",
+        "rea", {"rea": "rea"}, "reverse engineering (REA) tools",
         {
             "copy_to_targets": lambda a: f"copy {a.get('source')} from the NAS game copies into REA's targets/"
                                          f"{' as ' + a['name'] if a.get('name') else ''}",

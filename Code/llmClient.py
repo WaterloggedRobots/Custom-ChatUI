@@ -15,7 +15,8 @@ builds its message list from it here:
   (local_tools/). The server streams the model's tool calls back; they run
   here (changes and commands only after you allow them in the GUI), and the
   results go back to the model in the next request, for up to
-  MAX_TOOL_ROUNDS rounds per answer;
+  MAX_TOOL_ROUNDS rounds per answer. Reverse engineering and the Ubuntu
+  file tools are asked of the server instead (local_tools/remote.py);
 - with a ComfyUI workflow picked for the chat, the model can ask for
   pictures in its reply; the server draws them and streams them back, and
   they are saved in CLIENT_DATA_DIR/Images and kept with the reply;
@@ -103,6 +104,8 @@ class LLMClient(QObject):
 
         self.tools_enabled = True
         self.toolbox = ToolBox(extract_text=self._extract_text)
+        # The server's tools (REA, Ubuntu files) need its address and the token from General Settings.
+        self.toolbox.server = lambda: (self.base_url, paths.load_tool_token())
         self._approval = threading.Event()
         self._approval_answer = "deny"
 

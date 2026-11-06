@@ -5,6 +5,9 @@ They come in three groups that each chat turns on separately (Chat Settings):
   git    git in the user's repositories              (git.py; github_login.py signs in)
   run    run scripts, programs and shell commands    (terminal.py)
 change_directory belongs to all three, since each of them starts in the working folder.
+Two more groups run on the Ubuntu server, not here (remote.py lists and calls them):
+  rea           reverse engineering with REA           (rea.py)
+  ubuntu_files  files and folders on the server        (ubuntu.py)
 Memory notes (memory.py) have their own switch: their tools are on while the chat has a memory_dir.
 Reading linked chats (linked.py) is on while the chat's links reach any.
 
@@ -33,6 +36,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 MAX_OUTPUT_CHARS = 20000      # what one tool result may add to the conversation
 GROUPS = ("files", "git", "run")
+SERVER_GROUPS = ("rea", "ubuntu_files")     # their tools come from the server (remote.py)
 SHARED_LISTED = 15            # folders or repositories from linked chats named in the note, of each
 SHARED = {"change_directory"}  # in every group
 
@@ -92,7 +96,10 @@ class ToolBox:
         self.always_allow: set = set()
         # Turns a PDF or Word file into text (llmClient uses the server's /v1/files/extract).
         self.extract_text = extract_text
-        from . import files, git, linked, memory, terminal
+        # The chat server's address and the tool token, for the server's tool groups: () -> (url, token).
+        self.server: Optional[Callable[[], tuple]] = None
+        from . import files, git, linked, memory, rea, terminal, ubuntu
+        self.remotes = {"rea": rea.remote(), "ubuntu_files": ubuntu.remote()}
         self.tools: Dict[str, Tool] = {}
         for group, module in zip(GROUPS, (files, git, terminal)):
             for t in module.TOOLS:
@@ -107,7 +114,27 @@ class ToolBox:
         self.groups: set = set(GROUPS)    # the groups this chat turned on
 
     def set_groups(self, groups: Iterable[str]) -> None:
-        self.groups = {g for g in groups if g in GROUPS}
+        self.groups = {g for g in groups if g in GROUPS or g in SERVER_GROUPS}
+
+    def refresh_server_tools(self) -> None:
+        """Fetch the tool lists of the server groups that are on (network: call it from the worker thread)."""
+        for group, remote in self.remotes.items():
+            if group not in self.groups:
+                continue
+            if not self.server:
+                remote.error = "this chat isn't connected to a server"
+                continue
+            url, token = self.server()
+            if not token:
+                remote.tools, remote.error = [], "no server tool token is set (Settings > General > Ubuntu server)"
+                remote._key = None
+            elif not remote.load(url, token):
+                continue
+            for name in [n for n, t in self.tools.items() if t.group == group]:
+                del self.tools[name]
+            for t in remote.tools:
+                if t.name not in self.tools:       # a PC tool of the same name wins
+                    self.tools[t.name] = t
 
     def enabled(self, name: str) -> bool:
         tool = self.tools.get(name)
@@ -115,7 +142,7 @@ class ToolBox:
             return self.memory_dir is not None
         if tool and tool.group == "links":
             return self.has_links()
-        return bool(tool) and (tool.group in self.groups or (name in SHARED and bool(self.groups)))
+        return bool(tool) and (tool.group in self.groups or (name in SHARED and bool(self.groups & set(GROUPS))))
 
     def active(self) -> List[Tool]:
         return [t for t in self.tools.values() if self.enabled(t.name)]
@@ -176,6 +203,7 @@ class ToolBox:
     # ---------------------------------------------------------------- calls
 
     def schemas(self) -> List[Dict[str, Any]]:
+        self.refresh_server_tools()
         return [t.schema() for t in self.active()]
 
     def kind(self, name: str) -> str:
@@ -260,7 +288,10 @@ class ToolBox:
 
     def system_note(self) -> str:
         """Tells the model what it can do and where it is."""
-        note = self._pc_note() if self.groups else ""
+        note = self._pc_note() if self.groups & set(GROUPS) else ""
+        server = self._server_note()
+        if server:
+            note += (" " if note else "") + server
         if self.memory_dir:
             note += (" " if note else "") + (
                 "You can keep memory notes for this chat with save_memory: short Markdown files, one per topic, "
@@ -272,6 +303,28 @@ class ToolBox:
                 note += (" Notes for more than this chat go in a shared place, named in save_memory's place argument: "
                          f"{', '.join(others)}. Every chat linked to that place will read them.")
         return note
+
+    def _server_note(self) -> str:
+        """What the server's tools are for, or why they're missing. "" if none is on."""
+        from . import rea, ubuntu
+        on = [g for g in SERVER_GROUPS if g in self.groups]
+        if not on:
+            return ""
+        self.refresh_server_tools()
+        parts = ["The user's Ubuntu server is another machine than this Windows PC; some of your tools run there."]
+        for group in on:
+            remote = self.remotes[group]
+            if not remote.tools:
+                parts.append(f"The {remote.label} tools are unavailable right now ({remote.error}); tell the user "
+                             "if they ask for them.")
+            elif group == "rea":
+                parts.append(rea.NOTE)
+            else:
+                parts.append(ubuntu.note(remote.info.get("roots") or []))
+        if not self.groups & set(GROUPS):
+            parts.append("The user approves every change on the server, and may decline; if so, don't retry the "
+                         "same thing. After using tools, tell the user briefly what you did and what you found.")
+        return " ".join(parts)
 
     def _shared_note(self) -> str:
         """Paths only, as the model opens them when it needs them; a very long list stops at SHARED_LISTED."""

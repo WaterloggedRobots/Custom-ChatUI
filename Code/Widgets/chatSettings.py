@@ -182,7 +182,8 @@ class ChatSettings(QMainWindow):
         self.editing = name
         ui = self.ui
         for widget in (ui.groupPersonality, ui.groupMemory, ui.groupPictures, ui.label_web, ui.webCombo, ui.label_think,
-                       ui.thinkCheck, ui.label_fileTools, ui.fileToolsCheck, ui.label_runTools, ui.runToolsCheck):
+                       ui.thinkCheck, ui.label_fileTools, ui.fileToolsCheck, ui.label_runTools, ui.runToolsCheck,
+                       ui.label_reaTools, ui.reaToolsCheck, ui.label_ubuntuFilesTools, ui.ubuntuFilesToolsCheck):
             widget.setVisible(name is None)
         ui.label_title.setText("Chat Title:" if name is None else "Personality:")
         ui.titleEdit.setReadOnly(name is not None)
@@ -307,7 +308,9 @@ class ChatSettings(QMainWindow):
         ui = self.ui
         return [(ui.fileToolsCheck, chat_settings.TOOL_KEYS["files"]),
                 (ui.gitToolsCheck, chat_settings.TOOL_KEYS["git"]),
-                (ui.runToolsCheck, chat_settings.TOOL_KEYS["run"])]
+                (ui.runToolsCheck, chat_settings.TOOL_KEYS["run"]),
+                (ui.reaToolsCheck, chat_settings.SERVER_TOOL_KEYS["rea"]),
+                (ui.ubuntuFilesToolsCheck, chat_settings.SERVER_TOOL_KEYS["ubuntu_files"])]
 
     # ------------------------------------------------------------------
     # Personality

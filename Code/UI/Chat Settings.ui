@@ -394,6 +394,34 @@ QGroupBox::title{subcontrol-origin:margin;left:8px;padding:0 4px}</string>
         </property>
        </widget>
       </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="label_reaTools">
+        <property name="text">
+         <string>Reverse engineering: let the model use REA (Ghidra) on the Ubuntu server</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1" alignment="Qt::AlignmentFlag::AlignRight">
+       <widget class="QCheckBox" name="reaToolsCheck">
+        <property name="toolTip">
+         <string>Needs the server tool token under Settings &gt; General. Looking is free; copying a game into REA&apos;s targets and exporting to the NAS ask you first</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="0">
+       <widget class="QLabel" name="label_ubuntuFilesTools">
+        <property name="text">
+         <string>Ubuntu files: let the model browse, read and edit files on the Ubuntu server</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="1" alignment="Qt::AlignmentFlag::AlignRight">
+       <widget class="QCheckBox" name="ubuntuFilesToolsCheck">
+        <property name="toolTip">
+         <string>Needs the server tool token under Settings &gt; General. Only the folders the server allows. Reading is free; it asks you before any change</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>

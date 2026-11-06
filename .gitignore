@@ -15,3 +15,6 @@ Server/ollama/=*
 
 # Piper text-to-speech voices (downloaded on the server)
 Server/ollama/voices/
+
+# Server logs (REA's output, rea.py)
+Server/ollama/logs/

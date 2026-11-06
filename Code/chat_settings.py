@@ -24,6 +24,7 @@ IMAGE_MODES = ("auto", "on")           # auto: the model decides when to draw; o
 AVATAR_PERSONALITIES = ("Any", "Tsundere", "Kuudere")   # the 3D model's ExpressionLibrary.Personality
 AVATAR_NOTES_LIMIT = 2000
 TOOL_KEYS = {"files": "Tool Files", "git": "Tool Git", "run": "Tool Run"}   # local_tools group -> setting
+SERVER_TOOL_KEYS = {"rea": "Tool REA", "ubuntu_files": "Tool Ubuntu Files"}   # groups that run on the server
 EXPORT_TAG = "ChatUI Settings"        # marks an exported file; the value is the format version
 EXPORT_VERSION = 1
 
@@ -38,6 +39,9 @@ DEFAULTS = {
     "Tool Files": True,               # browse, read and edit files and folders
     "Tool Git": True,                 # git in the user's repositories
     "Tool Run": True,                 # run scripts, programs and terminal commands
+    # Tools on the Ubuntu server (0.17). Off unless a chat turns them on; they need the token (General Settings).
+    "Tool REA": False,                # reverse engineering with REA
+    "Tool Ubuntu Files": False,       # browse, read and edit files and folders on the server
     "Memory": True,                   # send the chat's memory notes to the model, and let it write them
     # Text to speech, done by the server (Server/ollama/chat_server/tts.py)
     "TTS": False,                     # off: no Play buttons and no voice settings shown
@@ -58,7 +62,7 @@ DEFAULTS = {
 
 def tool_groups(settings: dict) -> set:
     """The local_tools groups these settings turn on."""
-    return {group for group, key in TOOL_KEYS.items() if settings.get(key)}
+    return {group for group, key in {**TOOL_KEYS, **SERVER_TOOL_KEYS}.items() if settings.get(key)}
 
 
 def name_note(name: str, pretext: str) -> str:
@@ -101,7 +105,8 @@ def normalize(data) -> dict:
     if isinstance(data.get("Tools"), bool):          # the old single switch
         for key in TOOL_KEYS.values():
             s[key] = data["Tools"]
-    for key in ("Think", *TOOL_KEYS.values(), "Memory", "TTS", "TTS Auto Play", "TTS Translate", "Avatar"):
+    for key in ("Think", *TOOL_KEYS.values(), *SERVER_TOOL_KEYS.values(), "Memory", "TTS", "TTS Auto Play",
+                "TTS Translate", "Avatar"):
         if isinstance(data.get(key), bool):
             s[key] = data[key]
     if data.get("Web Search") in WEB_MODES:

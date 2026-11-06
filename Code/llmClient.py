@@ -104,7 +104,7 @@ class LLMClient(QObject):
 
         self.tools_enabled = True
         self.toolbox = ToolBox(extract_text=self._extract_text)
-        # The server's tools (REA, Ubuntu files) need its address and the token from General Settings.
+        # The server's tools (REA, Ubuntu files, the sandbox) need its address and the token from General Settings.
         self.toolbox.server = lambda: (self.base_url, paths.load_tool_token())
         self._approval = threading.Event()
         self._approval_answer = "deny"

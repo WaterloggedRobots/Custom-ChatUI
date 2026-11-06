@@ -167,7 +167,7 @@ def test_ubuntu_run_is_its_own_switch(server):
     assert "ubuntu_run_command" not in names(box) and "ubuntu_read_file" in names(box)
     assert "run bash commands" not in box.system_note()
     box.set_groups(["ubuntu_run"])
-    assert names(box) == {"ubuntu_run_command"}
+    assert names(box) == {"ubuntu_run_command", "run_in_sandbox", "reset_sandbox"}   # the sandbox comes with it
     assert box.needs_approval("ubuntu_run_command") and box.kind("ubuntu_run_command") == "run"
     assert box.describe("ubuntu_run_command", {"command": "ls -la", "cwd": "/mnt/nas/REA"}) == \
         "On the Ubuntu server: run in bash in /mnt/nas/REA:\nls -la"

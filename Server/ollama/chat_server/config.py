@@ -117,6 +117,21 @@ class Config:
     # 1 = ask ComfyUI to free its models and VRAM after each picture (slower next picture)
     COMFYUI_FREE_AFTER = os.getenv("COMFYUI_FREE_AFTER", "0") not in ("0", "false", "no")
 
+    # Ubuntu sandbox the model tests code in: one Docker container per chat (sandbox.py)
+    SANDBOX_ENABLED = os.getenv("SANDBOX_ENABLED", "1") not in ("0", "false", "no")
+    SANDBOX_IMAGE = os.getenv("SANDBOX_IMAGE") or "chatui-sandbox"      # built from Server/ollama/sandbox
+    SANDBOX_NETWORK = os.getenv("SANDBOX_NETWORK") or "none"           # none | bridge (lets pip/npm download)
+    SANDBOX_MEMORY = os.getenv("SANDBOX_MEMORY") or "2g"
+    SANDBOX_CPUS = float(os.getenv("SANDBOX_CPUS", "2"))
+    SANDBOX_PIDS = _int("SANDBOX_PIDS", 256)                           # processes; stops fork bombs
+    SANDBOX_DISK = os.getenv("SANDBOX_DISK") or "1g"                   # /work, kept in memory
+    SANDBOX_TIMEOUT = _int("SANDBOX_TIMEOUT", 60)                      # seconds per run unless the model asks
+    SANDBOX_MAX_TIMEOUT = _int("SANDBOX_MAX_TIMEOUT", 300)
+    SANDBOX_OUTPUT_CHARS = _int("SANDBOX_OUTPUT_CHARS", 12000)         # output kept per run (start and end)
+    SANDBOX_IDLE_MINUTES = _int("SANDBOX_IDLE_MINUTES", 30)            # an unused chat's container is removed
+    SANDBOX_MAX_SESSIONS = _int("SANDBOX_MAX_SESSIONS", 4)             # containers at once
+    SANDBOX_MAX_UPLOAD = _int("SANDBOX_MAX_UPLOAD", 25 * 1024 * 1024)  # files copied in, compressed
+
     # Optional extras (the experimental tool-calling endpoints)
     ENABLE_EXTRAS = os.getenv("ENABLE_EXTRAS", "1") not in ("0", "false", "no")
 

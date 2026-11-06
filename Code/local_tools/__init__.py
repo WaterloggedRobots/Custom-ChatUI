@@ -9,6 +9,8 @@ Two more groups run on the Ubuntu server, not here (remote.py lists and calls th
   rea           reverse engineering with REA           (rea.py)
   ubuntu_files  files and folders on the server        (ubuntu.py)
   ubuntu_run    bash commands on the server            (ubuntu.py)
+The sandbox tools (sandbox.py) test code in a throwaway container on the server; they are on
+while either run or ubuntu_run is.
 Memory notes (memory.py) have their own switch: their tools are on while the chat has a memory_dir.
 Reading linked chats (linked.py) is on while the chat's links reach any.
 
@@ -21,6 +23,7 @@ Each tool has a kind:
   read   looks at something and changes nothing. Runs without asking.
   write  changes files, folders or a repository. Asks you first.
   run    runs a program or shell command. Asks you first.
+  sandbox  runs code in the server's throwaway container, not on this PC. Runs without asking.
 
 ToolBox holds the state one chat needs: the folders and GitHub repositories
 you linked to the chat (the model is told about them; the first folder is where
@@ -31,6 +34,7 @@ allow" for this session.
 import json
 import os
 import re
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
@@ -40,6 +44,7 @@ GROUPS = ("files", "git", "run")
 SERVER_GROUPS = ("rea", "ubuntu_files", "ubuntu_run")   # their tools come from the server (remote.py)
 SHARED_LISTED = 15            # folders or repositories from linked chats named in the note, of each
 SHARED = {"change_directory"}  # in every group
+SANDBOX_WITH = {"run", "ubuntu_run"}   # the sandbox tools are on with either
 
 
 @dataclass
@@ -48,7 +53,7 @@ class Tool:
     description: str
     parameters: Dict[str, Any]       # JSON schema of the arguments
     func: Callable[..., str]         # func(ctx, **args) -> text for the model
-    kind: str = "read"               # read | write | run
+    kind: str = "read"               # read | write | run | sandbox
     summary: Optional[Callable[[Dict[str, Any]], str]] = None   # one line for the approval prompt
     group: str = ""                  # one of GROUPS; set by ToolBox
 
@@ -99,13 +104,18 @@ class ToolBox:
         self.extract_text = extract_text
         # The chat server's address and the tool token, for the server's tool groups: () -> (url, token).
         self.server: Optional[Callable[[], tuple]] = None
-        from . import files, git, linked, memory, rea, terminal, ubuntu
+        self.sandbox_session = uuid.uuid4().hex[:16]   # this chat's container in the server's sandbox
+        self.sandbox_skipped: List[str] = []
+        from . import files, git, linked, memory, rea, sandbox, terminal, ubuntu
         self.remotes = {"rea": rea.remote(), "ubuntu": ubuntu.remote()}   # each lists one or more groups
         self.tools: Dict[str, Tool] = {}
         for group, module in zip(GROUPS, (files, git, terminal)):
             for t in module.TOOLS:
                 t.group = group
                 self.tools[t.name] = t
+        for t in sandbox.TOOLS:
+            t.group = "sandbox"
+            self.tools[t.name] = t
         for t in memory.TOOLS:
             t.group = "memory"
             self.tools[t.name] = t
@@ -144,6 +154,8 @@ class ToolBox:
             return self.memory_dir is not None
         if tool and tool.group == "links":
             return self.has_links()
+        if tool and tool.group == "sandbox":
+            return bool(self.groups & SANDBOX_WITH)
         return bool(tool) and (tool.group in self.groups or (name in SHARED and bool(self.groups & set(GROUPS))))
 
     def active(self) -> List[Tool]:
@@ -213,7 +225,7 @@ class ToolBox:
         return tool.kind if tool else "read"
 
     def needs_approval(self, name: str) -> bool:
-        return self.kind(name) != "read" and name not in self.always_allow
+        return self.kind(name) not in ("read", "sandbox") and name not in self.always_allow
 
     def describe(self, name: str, args: Dict[str, Any]) -> str:
         """One readable line for the approval prompt and the chat log."""
@@ -294,6 +306,11 @@ class ToolBox:
         server = self._server_note()
         if server:
             note += (" " if note else "") + server
+        if self.groups & SANDBOX_WITH:
+            note += (" " if note else "") + (
+                "Before giving the user code to run, or running new code on their PC or the Ubuntu server, test it "
+                "with run_in_sandbox (a throwaway Linux container, no approval needed) when it isn't Windows-only, "
+                "and fix what fails.")
         if self.memory_dir:
             note += (" " if note else "") + (
                 "You can keep memory notes for this chat with save_memory: short Markdown files, one per topic, "

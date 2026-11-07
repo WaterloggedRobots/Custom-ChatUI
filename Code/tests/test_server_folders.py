@@ -42,6 +42,8 @@ def server():
             else:
                 code, body = 200, {"path": path, "folders": [{"name": p if path is None else p.rsplit("/", 1)[1],
                                                               "path": p} for p in TREE[path]]}
+                if path is None:
+                    body["quick"] = [{"name": "proj", "path": "/home/me/proj"}]
             data = json.dumps(body).encode()
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
@@ -83,8 +85,12 @@ def wait_for(app, done, timeout=5.0):
 def test_picker_loads_lazily_and_returns_the_chosen_folder(app, server):
     picker = ServerFolderPicker(server, TOKEN, linked=["/home/me/notes"])
     tree = picker.tree
-    wait_for(app, lambda: tree.topLevelItemCount() == 2)
-    home = tree.topLevelItem(0)
+    wait_for(app, lambda: tree.topLevelItemCount() == 3)
+    quick = tree.topLevelItem(0)                 # quick access first, then the roots
+    assert quick.text(0) == "★ proj" and "Quick access" in quick.toolTip(0)
+    quick.setExpanded(True)                      # the same folder as /home/me/proj below, loaded on its own
+    wait_for(app, lambda: quick.child(0) is None or quick.childCount() == 0)
+    home = tree.topLevelItem(1)
     assert home.text(0) == "/home/me" and home.child(0).text(0) == "Loading…"
     home.setExpanded(True)
     wait_for(app, lambda: home.childCount() == 2 and home.child(0).text(0) == "proj")

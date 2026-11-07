@@ -458,12 +458,15 @@ the PC) and links the one you pick to the chat, and its ▾ lists them. The link
 folders go with every `ubuntu_*` call, and the server keeps the tools inside
 them (`server_tools.LINKED`): other paths are refused, and a call without a
 path starts in the first one. A chat with none linked may use all of
-`TOOL_ROOTS`, as before. REA isn't narrowed by them.
+`TOOL_ROOTS`, as before. REA isn't narrowed by them. Folders in
+`TOOL_QUICK_FOLDERS` (default: `~/snap/gitpeach-desktop/13/GitHub`, the GitHub
+clones) are shown first in the picker as ★ shortcuts, when they're inside a root.
 
 | Setting | Default | |
 |---|---|---|
 | `TOOL_TOKEN` / `TOOL_TOKEN_FILE` | `~/.config/chatui/tool_token` | the shared token; none = the tools are off |
 | `TOOL_ROOTS` | `~:/mnt/nas/REA` | folders the tools may use, `:`-separated; each chat can link some of them |
+| `TOOL_QUICK_FOLDERS` | `~/snap/gitpeach-desktop/13/GitHub` | ★ shortcuts at the top of the client's server folder picker, `:`-separated |
 | `TOOL_DENY`, `TOOL_READ_ONLY` | see above | never touched; only read |
 | `TOOL_OUTPUT_CHARS` | 20000 | what one result may send back |
 | `TOOL_RUN_MAX_TIMEOUT` | 1800 | seconds one command may run at most |

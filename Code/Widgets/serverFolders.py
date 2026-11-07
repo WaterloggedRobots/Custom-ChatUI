@@ -3,8 +3,9 @@
 The server shows only what its tools may use (TOOL_ROOTS, without TOOL_DENY;
 see Server/ollama/chat_server/ubuntu.py, GET /v1/ubuntu/folders), so nothing is
 mounted on this PC: the tree is loaded from the server a folder at a time, as
-it's opened. The chat keeps the folders it links, and the server keeps that
-chat's ubuntu_* tools inside them.
+it's opened. Quick access folders (the server's TOOL_QUICK_FOLDERS, such as the
+GitHub clones) come first, then the allowed folders. The chat keeps the folders
+it links, and the server keeps that chat's ubuntu_* tools inside them.
 """
 
 import threading
@@ -44,7 +45,7 @@ def fetch_folders(url: str, token: str, path=None) -> dict:
 
 
 class ServerFolderPicker(QDialog):
-    _loaded = Signal(object, object, str)   # the path asked for (None = roots), the answer, an error
+    _loaded = Signal(object, object, str)   # the item asked for (None = the top), the answer, an error
 
     def __init__(self, url: str, token: str, linked=(), parent=None):
         super().__init__(parent)
@@ -53,7 +54,6 @@ class ServerFolderPicker(QDialog):
         self.resize(520, 460)
         self.url, self.token, self.linked = url, token, set(linked)
         self.chosen = None
-        self._items = {}                    # path -> its item, for answers that come back later
 
         note = QLabel("Folders the server lets its tools use. The chat's ubuntu_* tools will stay inside "
                       "the folders you link.")
@@ -83,7 +83,9 @@ class ServerFolderPicker(QDialog):
 
     # ------------------------------------------------------------ loading
 
-    def _load(self, path):
+    def _load(self, item):
+        """Ask for an item's subfolders (None: the top level); the answer is filled in when it comes."""
+        path = item.data(0, PATH_ROLE) if item else None
         self.status.setText("Asking the server…")
 
         def job():
@@ -92,41 +94,44 @@ class ServerFolderPicker(QDialog):
             except RuntimeError as e:
                 body, error = None, str(e)
             try:
-                self._loaded.emit(path, body, error)
+                self._loaded.emit(item, body, error)
             except RuntimeError:            # the window is gone
                 pass
 
         threading.Thread(target=job, daemon=True).start()
 
-    def _fill(self, path, body, error):
-        parent = self._items.get(path) if path else self.tree.invisibleRootItem()
-        if parent is None:
-            return
+    def _fill(self, item, body, error):
+        parent = item or self.tree.invisibleRootItem()
         for i in reversed(range(parent.childCount())):
             if parent.child(i).data(0, PATH_ROLE) is None:      # the Loading… placeholder
                 parent.removeChild(parent.child(i))
         if error:
             self.status.setText(error)
-            if path:
-                parent.setData(0, Qt.UserRole + 1, False)        # let it be tried again
+            if item:
+                item.setData(0, Qt.UserRole + 1, False)          # let it be tried again
             return
-        self.status.setText("" if body["folders"] or path else "The server allows no folders (TOOL_ROOTS).")
+        self.status.setText("" if body["folders"] or item else "The server allows no folders (TOOL_ROOTS).")
+        if item is None:
+            for f in body.get("quick") or []:
+                self._add(parent, f, f"★ {f['name']}", f"Quick access: {f['path']}")
         for f in body["folders"]:
-            linked = f["path"] in self.linked
-            item = QTreeWidgetItem([f["name"] + ("   (linked)" if linked else "")])
-            item.setData(0, PATH_ROLE, f["path"])
-            item.setToolTip(0, f["path"])
-            if linked:
-                item.setForeground(0, Qt.gray)
-            QTreeWidgetItem(item, [LOADING])                      # shows the arrow until it's opened
-            parent.addChild(item)
-            self._items[f["path"]] = item
+            self._add(parent, f, f["name"], f["path"])
+
+    def _add(self, parent, folder, text, tip):
+        linked = folder["path"] in self.linked
+        child = QTreeWidgetItem([text + ("   (linked)" if linked else "")])
+        child.setData(0, PATH_ROLE, folder["path"])
+        child.setToolTip(0, tip)
+        if linked:
+            child.setForeground(0, Qt.gray)
+        QTreeWidgetItem(child, [LOADING])                         # shows the arrow until it's opened
+        parent.addChild(child)
 
     def _expand(self, item):
         if item.data(0, Qt.UserRole + 1):
             return
         item.setData(0, Qt.UserRole + 1, True)
-        self._load(item.data(0, PATH_ROLE))
+        self._load(item)
 
     # ------------------------------------------------------------ choosing
 

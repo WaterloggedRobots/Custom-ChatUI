@@ -41,6 +41,7 @@ class FakeServer:
     def __init__(self, chat_calls=()):
         self.seen = []                  # (method, path, token)
         self.calls = []                 # (prefix, name, arguments) the server was asked to run
+        self.bodies = []                # the whole call bodies, for the linked server folders
         self.chat_calls = list(chat_calls)
         self.chat_requests = []
         outer = self
@@ -78,6 +79,7 @@ class FakeServer:
                     if self._authorized():
                         prefix = self.path.split("/")[2]
                         outer.calls.append((prefix, body["name"], body["arguments"]))
+                        outer.bodies.append(body)
                         self._send(200, {"name": body["name"], "output": f"{prefix} ran {body['name']}"})
                     return
                 outer.chat_requests.append(body)
@@ -279,3 +281,26 @@ def test_client_asks_before_deleting_on_the_server():
         server.httpd.shutdown()
     assert len(asked) == 1 and asked[0]["summary"] == "On the Ubuntu server: delete /home/me/old (to its trash folder)"
     assert out["tools"][0]["state"] == "declined" and server.calls == []
+
+
+def test_linked_server_folders_go_with_ubuntu_calls_only(server):
+    box = make_box(server)
+    assert "ubuntu_read_file" in names(box)                     # the chat fetches the server's tools first
+    box.run("ubuntu_read_file", {"path": "/home/me/x"})
+    assert "folders" not in server.bodies[-1]                  # none linked: the server's roots
+    assert "these folders only: /home/me; /mnt/nas/REA" in box.system_note()
+
+    box.set_server_folders(["/home/me/proj/", "C:/nope", "/mnt/nas/REA/work", "/home/me/proj"])
+    assert box.server_folders == ["/home/me/proj", "/mnt/nas/REA/work"]   # Ubuntu paths, once each
+    box.run("ubuntu_read_file", {"path": "/home/me/proj/a.py"})
+    assert server.bodies[-1]["folders"] == ["/home/me/proj", "/mnt/nas/REA/work"]
+    note = box.system_note()
+    assert "linked to this chat, and only there: /home/me/proj; /mnt/nas/REA/work" in note
+    assert "/mnt/nas/REA;" not in note
+
+    box.run("open_binary", {})                                  # REA isn't narrowed by them
+    assert "folders" not in server.bodies[-1]
+
+    box.remove_server_folder("/home/me/proj")
+    box.run("ubuntu_read_file", {"path": "/mnt/nas/REA/work/b"})
+    assert server.bodies[-1]["folders"] == ["/mnt/nas/REA/work"]

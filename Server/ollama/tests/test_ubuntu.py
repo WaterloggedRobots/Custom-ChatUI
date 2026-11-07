@@ -138,3 +138,45 @@ def test_endpoints(root):
         assert call("ubuntu_read_file", path=str(root / "notes.txt"), bogus=1).startswith("Error: bad arguments")
         assert call("rm_rf").startswith("Error: there is no tool called rm_rf")
         assert call("ubuntu_run_command", command="echo hi", cwd=str(root)).endswith("\nhi")
+
+
+def test_linked_server_folders_narrow_every_tool(root):
+    app = create_app(ollama_transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"models": []})))
+    sub, nas = root / "sub", root.parent / "nas"
+    with TestClient(app) as c:
+        auth = {"X-ChatUI-Token": TOKEN}
+
+        def call(name, folders, **arguments):
+            return c.post("/v1/ubuntu/call", json={"name": name, "arguments": arguments, "folders": folders},
+                          headers=auth).json()["output"]
+
+        assert "apples" in call("ubuntu_read_file", [str(sub)], path=str(sub / "code.py"))
+        out = call("ubuntu_read_file", [str(sub)], path=str(root / "notes.txt"))
+        assert out.startswith("Error:") and "outside the server folders linked to this chat" in out
+        assert "code.py" in call("ubuntu_list_directory", [str(sub)])          # ~ means the first linked folder
+        assert call("ubuntu_run_command", [str(sub)], command="pwd").endswith(f"\n{sub}")
+        assert "outside the server folders" in call("ubuntu_run_command", [str(sub)], command="pwd", cwd=str(root))
+        # several folders; none linked = all the roots, as before
+        assert "notes.txt" in call("ubuntu_list_directory", [str(sub), str(root)], path=str(root))
+        assert "two apples" in call("ubuntu_read_file", None, path=str(root / "notes.txt"))
+        # a linked folder must itself be allowed
+        assert "outside the folders" in call("ubuntu_list_directory", ["/etc"], path="/etc")
+        assert "private keys" in call("ubuntu_list_directory", [str(root / ".ssh")], path=str(root / ".ssh"))
+        # and it doesn't stick to later calls
+        assert "two apples" in call("ubuntu_read_file", [], path=str(root / "notes.txt"))
+
+
+def test_folder_picker_lists_roots_and_subfolders(root):
+    app = create_app(ollama_transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"models": []})))
+    with TestClient(app) as c:
+        auth = {"X-ChatUI-Token": TOKEN}
+        top = c.get("/v1/ubuntu/folders", headers=auth).json()
+        assert [f["path"] for f in top["folders"]] == [str(root), str(root.parent / "nas")]
+        inside = c.get("/v1/ubuntu/folders", params={"path": str(root)}, headers=auth).json()
+        assert [f["name"] for f in inside["folders"]] == ["sub"]           # .ssh is denied, files aren't folders
+        assert inside["parent"] is None
+        sub = c.get("/v1/ubuntu/folders", params={"path": str(root / "sub")}, headers=auth).json()
+        assert sub["parent"] == str(root) and sub["folders"] == []
+        bad = c.get("/v1/ubuntu/folders", params={"path": "/etc"}, headers=auth)
+        assert bad.status_code == 400 and "outside" in bad.json()["error"]["message"]
+        assert c.get("/v1/ubuntu/folders").status_code == 401

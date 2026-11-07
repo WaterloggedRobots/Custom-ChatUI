@@ -9,6 +9,7 @@ import voice
 from local_tools import github_login, repo_url
 from local_tools.linked import LinkedChat, LinkScope, shared_by
 from Widgets.chatList import ChatList
+from Widgets.serverFolders import ServerFolderPicker
 
 from PySide6.QtWidgets import (QInputDialog, QListWidget, QListWidgetItem, QMainWindow, QSizePolicy, QFileDialog,
                                QComboBox, QLabel, QMenu, QMessageBox, QPushButton, QScrollArea, QToolButton, QWidget,
@@ -360,6 +361,21 @@ class ChatMain(QMainWindow):
         self.repo_list_button.clicked.connect(self.show_repo_menu)
         bar.insertWidget(3, self.repo_button)
         bar.insertWidget(4, self.repo_list_button)
+        # 🖥 links a folder on the Ubuntu server for the ubuntu_* tools, picked from what the server allows
+        # (nothing is mounted here); its ▾ lists them. Shown while the chat has Ubuntu Files or Ubuntu Run on.
+        self.server_folder_button = QPushButton("🖥")
+        self.server_folder_button.setStyleSheet("background:rgb(57,57,57);color:white")
+        self.server_folder_button.setFixedWidth(max(self.server_folder_button.sizeHint().width() // 2, 24))
+        self.server_folder_button.clicked.connect(self.add_server_folder)
+        self.server_folder_list_button = QToolButton()
+        self.server_folder_list_button.setText("▾")
+        self.server_folder_list_button.setStyleSheet("background:rgb(57,57,57);color:white")
+        self.server_folder_list_button.setToolTip("Linked server folders")
+        self.server_folder_menu = QMenu(self)
+        self.server_folder_menu.setStyleSheet(MENU_STYLE)
+        self.server_folder_list_button.clicked.connect(self.show_server_folder_menu)
+        bar.insertWidget(5, self.server_folder_button)
+        bar.insertWidget(6, self.server_folder_list_button)
         self._show_tools_folder()
 
         # Mic button between the input and Send. Click to talk, click again to stop;
@@ -494,6 +510,42 @@ class ChatMain(QMainWindow):
         self.save_chat()
         self._fill_folder_menu()
         self.folder_menu.adjustSize()
+
+    def add_server_folder(self):
+        box = self.client.toolbox
+        url, token = box.server() if box.server else (self.client.base_url, "")
+        picker = ServerFolderPicker(url, token, box.server_folders, self)
+        if picker.exec() and picker.chosen:
+            box.add_server_folder(picker.chosen)
+            self._show_tools_folder()
+            self.save_chat()
+
+    def remove_server_folder(self, folder):
+        self.client.toolbox.remove_server_folder(folder)
+        self._show_tools_folder()
+        self.save_chat()
+        self._fill_server_folder_menu()
+        self.server_folder_menu.adjustSize()
+
+    def show_server_folder_menu(self):
+        self._fill_server_folder_menu()
+        btn = self.server_folder_list_button
+        self.server_folder_menu.popup(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _fill_server_folder_menu(self):
+        menu = self.server_folder_menu
+        menu.clear()
+        folders = self.client.toolbox.server_folders
+        if not folders:
+            menu.addAction("None linked: the tools may use every folder the server allows").setEnabled(False)
+            return
+        rows = []
+        for folder in folders:
+            label = QLabel(folder)
+            label.setToolTip(f"{folder} on the Ubuntu server")
+            label.setStyleSheet("color:white")
+            rows.append(self._menu_row(label, f"Unlink {folder}", lambda f=folder: self.remove_server_folder(f)))
+        self._add_menu_rows(menu, rows)
 
     def show_folder_menu(self):
         self._fill_folder_menu()
@@ -693,6 +745,14 @@ class ChatMain(QMainWindow):
         self.repo_list_button.setText(self._count_label(n, shared))
         self.repo_button.setToolTip(f"Link one of your GitHub repositories, or another by its link ({n} linked)"
                                     + (f"\n{tip}" if tip else ""))
+        on = bool(box.groups & {"ubuntu_files", "ubuntu_run"})
+        self.server_folder_button.setVisible(on)
+        self.server_folder_list_button.setVisible(on)
+        n = len(box.server_folders)
+        self.server_folder_list_button.setText(self._count_label(n, 0))
+        self.server_folder_button.setToolTip(
+            "Link a folder on the Ubuntu server for its file and run tools "
+            + (f"({n} linked; the tools stay inside them)" if n else "(none linked: every folder the server allows)"))
 
     @staticmethod
     def _count_label(own, shared):
@@ -1403,6 +1463,7 @@ class ChatMain(QMainWindow):
             folders = [old] if old and Path(old) != Path.home() else []
         self.client.toolbox.set_folders(folders)
         self.client.toolbox.set_repos(chatHist.get("Tools Repos") or [])
+        self.client.toolbox.set_server_folders(chatHist.get("Server Folders") or [])
         self.own_settings = chat_settings.from_chat(chatHist)
         self._load_personality()
         self.set_settings(self._running_settings())
@@ -1439,6 +1500,7 @@ class ChatMain(QMainWindow):
             "Settings": self.own_settings,
             "Tools Folders": [str(f) for f in self.client.toolbox.folders],
             "Tools Repos": self.client.toolbox.repos,
+            "Server Folders": self.client.toolbox.server_folders,
             "Chat": self.chat_markdown,
             "Summary": self.client.summary,
         }

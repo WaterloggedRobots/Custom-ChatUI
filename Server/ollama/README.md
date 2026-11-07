@@ -451,10 +451,19 @@ credentials, `~/.config/chatui`, `~/.claude.json`, this folder's `.env`), and
 `TOOL_READ_ONLY` (`/mnt/nas/REA/Game File Copy`) is only read. Paths are
 Ubuntu paths (`/home/...`, `~/...`); Windows paths are refused with a reason.
 
+**Per chat.** `TOOL_ROOTS` is what you open up; each chat then picks from it.
+With *Ubuntu files* or *Ubuntu run* on, the chat window shows 🖥: it browses the
+allowed folders on the server (`GET /v1/ubuntu/folders`, nothing is mounted on
+the PC) and links the one you pick to the chat, and its ▾ lists them. The linked
+folders go with every `ubuntu_*` call, and the server keeps the tools inside
+them (`server_tools.LINKED`): other paths are refused, and a call without a
+path starts in the first one. A chat with none linked may use all of
+`TOOL_ROOTS`, as before. REA isn't narrowed by them.
+
 | Setting | Default | |
 |---|---|---|
 | `TOOL_TOKEN` / `TOOL_TOKEN_FILE` | `~/.config/chatui/tool_token` | the shared token; none = the tools are off |
-| `TOOL_ROOTS` | `~:/mnt/nas/REA` | folders the tools may use, `:`-separated |
+| `TOOL_ROOTS` | `~:/mnt/nas/REA` | folders the tools may use, `:`-separated; each chat can link some of them |
 | `TOOL_DENY`, `TOOL_READ_ONLY` | see above | never touched; only read |
 | `TOOL_OUTPUT_CHARS` | 20000 | what one result may send back |
 | `TOOL_RUN_MAX_TIMEOUT` | 1800 | seconds one command may run at most |

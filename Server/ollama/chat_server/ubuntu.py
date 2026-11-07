@@ -8,11 +8,16 @@ the root the path is in (same disk, so it's quick and can be undone); nothing
 is deleted for good. ubuntu_run_command runs bash in a folder inside the roots;
 what the command itself then touches is up to the user, who approves each one.
 
+The client can link server folders to a chat (picked with /v1/ubuntu/folders);
+they come with each call, and the tools then stay inside them (server_tools.LINKED).
+
 Endpoints (token required):
-  GET  /v1/ubuntu/tools   OpenAI `tools`, plus each one's kind and group (files | run)
-  POST /v1/ubuntu/call    {name, arguments} -> {"name", "output"}
+  GET  /v1/ubuntu/tools          OpenAI `tools`, plus each one's kind and group (files | run)
+  POST /v1/ubuntu/call           {name, arguments, folders?} -> {"name", "output"}
+  GET  /v1/ubuntu/folders?path=  the subfolders of path, or the roots without one, for the client's picker
 """
 
+import asyncio
 import fnmatch
 import os
 import re
@@ -21,9 +26,9 @@ import signal
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from . import server_tools
@@ -346,6 +351,7 @@ TOOLS = [
 class CallRequest(BaseModel):
     name: str
     arguments: Dict[str, Any] = Field(default_factory=dict)
+    folders: Optional[List[str]] = Field(None, description="the server folders linked to the chat; none = the roots")
 
 
 router = APIRouter(prefix="/v1/ubuntu", dependencies=[Depends(server_tools.require_token)])
@@ -359,4 +365,35 @@ async def tools():
 @router.post("/call")
 async def call(body: CallRequest):
     tool = next((t for t in TOOLS if t.name == body.name), None)
-    return {"name": body.name, "output": await server_tools.call(tool, body.name, body.arguments, TOOLS)}
+    return {"name": body.name, "output": await server_tools.call(tool, body.name, body.arguments, TOOLS,
+                                                                 folders=body.folders)}
+
+
+def subfolders(path: Optional[str] = None) -> Dict[str, Any]:
+    """What the client's server folder picker shows: the roots, or one folder's subfolders."""
+    roots = [str(r) for r in server_tools.roots()]
+    if not path:
+        return {"path": None, "parent": None, "roots": roots,
+                "folders": [{"name": r, "path": r} for r in roots if Path(r).is_dir()]}
+    folder = resolve(path)
+    if not folder.is_dir():
+        raise ToolError(f"{folder} is not a folder")
+    found = []
+    try:
+        entries = sorted(folder.iterdir(), key=lambda p: p.name.lower())
+    except OSError as e:
+        raise ToolError(f"can't open {folder}: {e.strerror or e}")
+    for p in entries:
+        if p.is_dir() and p.name not in SKIP_DIRS and _allowed(p):
+            found.append({"name": p.name, "path": str(p)})
+    root = server_tools.root_of(folder)
+    return {"path": str(folder), "parent": None if folder == root else str(folder.parent), "roots": roots,
+            "folders": found}
+
+
+@router.get("/folders")
+async def folders(path: Optional[str] = None):
+    try:
+        return await asyncio.to_thread(subfolders, path)
+    except ToolError as e:
+        raise HTTPException(400, str(e))

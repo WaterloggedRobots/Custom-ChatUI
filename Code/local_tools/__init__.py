@@ -97,6 +97,8 @@ class ToolBox:
         self.working_dir = Path(working_dir).expanduser() if working_dir else Path.home()
         self.folders: List[Path] = []     # linked in the GUI
         self.repos: List[str] = []        # GitHub repository links, linked in the GUI
+        # Folders on the Ubuntu server linked in the GUI; the ubuntu_* tools stay inside them. [] = all it allows.
+        self.server_folders: List[str] = []
         self.memory_dir: Optional[Path] = None   # this chat's memory notes; None = memory is off
         self.link_scope = None            # what this chat's links reach (linked.LinkScope), replaced whole
         self.always_allow: set = set()
@@ -206,6 +208,20 @@ class ToolBox:
 
     def remove_repo(self, url) -> None:
         self.repos = [r for r in self.repos if r != url]
+
+    def set_server_folders(self, folders) -> None:
+        """Ubuntu paths, kept as the server gave them (it checks them again on every call)."""
+        self.server_folders = []
+        for f in folders:
+            self.add_server_folder(f)
+
+    def add_server_folder(self, folder) -> None:
+        folder = str(folder).strip().rstrip("/") or "/"
+        if folder.startswith("/") and folder not in self.server_folders:
+            self.server_folders.append(folder)
+
+    def remove_server_folder(self, folder) -> None:
+        self.server_folders = [f for f in self.server_folders if f != folder]
 
     def set_working_dir(self, path: str) -> Path:
         p = self.resolve(path)
@@ -341,8 +357,8 @@ class ToolBox:
             elif remote.prefix == "rea":
                 parts.append(rea.NOTE)
             else:
-                parts.append(ubuntu.note(remote.info.get("roots") or [],
-                                         files="ubuntu_files" in mine, run="ubuntu_run" in mine))
+                parts.append(ubuntu.note(remote.info.get("roots") or [], files="ubuntu_files" in mine,
+                                         run="ubuntu_run" in mine, linked=self.server_folders))
         if not self.groups & set(GROUPS):
             parts.append("The user approves every change on the server, and may decline; if so, don't retry the "
                          "same thing. After using tools, tell the user briefly what you did and what you found.")

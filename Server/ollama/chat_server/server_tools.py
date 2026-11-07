@@ -8,13 +8,17 @@ Ubuntu file and run tools (ubuntu.py). Port 8100 is open to the LAN, so:
   token configured here the endpoints refuse everything;
 - every path must resolve (symlinks followed) inside one of Config.TOOL_ROOTS,
   never inside Config.TOOL_DENY (keys and passwords), and is only read inside
-  Config.TOOL_READ_ONLY (the game copies).
+  Config.TOOL_READ_ONLY (the game copies);
+- a chat can narrow that further: the server folders the user linked to it in
+  the client come with each Ubuntu call, and paths must then be inside one of
+  them too (call(..., folders=...)).
 
 The client asks the user before every change or command; that check is the
 client's, as it is for its own tools. This module only refuses what is never allowed.
 """
 
 import asyncio
+import contextvars
 import hmac
 import inspect
 import logging
@@ -29,6 +33,8 @@ from .config import Config
 
 TOKEN_HEADER = "X-ChatUI-Token"
 log = logging.getLogger("chat_server.tools")
+# The server folders the calling chat linked; None = all of TOOL_ROOTS. Set by call() for one call.
+LINKED: contextvars.ContextVar[Optional[List[Path]]] = contextvars.ContextVar("linked_folders", default=None)
 
 
 class ToolError(Exception):
@@ -109,6 +115,9 @@ def resolve(path: Optional[str], write: bool = False) -> Path:
     Paths are Ubuntu paths: absolute, or starting with ~. Symlinks are followed
     before checking, so a link can't lead outside the roots."""
     text = (path or "").strip().strip('"')
+    linked = LINKED.get()
+    if linked and text in ("~", "~/"):           # the tools' default folder: the chat's first linked one
+        text = str(linked[0])
     if not text:
         raise ToolError("no path given")
     if "\\" in text or (len(text) > 1 and text[1] == ":"):
@@ -125,7 +134,23 @@ def resolve(path: Optional[str], write: bool = False) -> Path:
         raise ToolError(f"{p} holds private keys or passwords; these tools may not touch it")
     if write and any(_inside(p, d) for d in _paths(Config.TOOL_READ_ONLY)):
         raise ToolError(f"{p} is read-only for these tools (game copies). Copy what you need first")
+    if linked and not any(_inside(p, f) for f in linked):
+        raise ToolError(f"{p} is outside the server folders linked to this chat: {', '.join(map(str, linked))}. "
+                        "The user can link more in the chat window")
     return p
+
+
+def linked_folders(folders: Optional[List[str]]) -> Optional[List[Path]]:
+    """The chat's linked server folders, checked against the roots; None if it linked none."""
+    if not folders:
+        return None
+    out = []
+    for f in folders:
+        p = resolve(f)
+        if not p.is_dir():
+            raise ToolError(f"the linked server folder {p} is not a folder (any more)")
+        out.append(p)
+    return out
 
 
 def root_of(p: Path) -> Path:
@@ -133,12 +158,18 @@ def root_of(p: Path) -> Path:
     return max((r for r in roots() if _inside(p, r)), key=lambda r: len(r.parts))
 
 
-async def call(tool: Optional[ServerTool], name: str, arguments: Dict[str, Any], tools: List[ServerTool]) -> str:
-    """Run one tool (blocking ones on a thread) and turn every failure into text for the model."""
+async def call(tool: Optional[ServerTool], name: str, arguments: Dict[str, Any], tools: List[ServerTool],
+               folders: Optional[List[str]] = None) -> str:
+    """Run one tool (blocking ones on a thread) and turn every failure into text for the model.
+    With `folders` (the chat's linked server folders) its paths must be inside one of them."""
     if tool is None:
         return f"Error: there is no tool called {name}. Available: {', '.join(t.name for t in tools)}"
     if not isinstance(arguments, dict):
         return "Error: arguments must be an object"
+    try:
+        linked = LINKED.set(linked_folders(folders))   # to_thread copies the context into the thread
+    except ToolError as e:
+        return f"Error: {e}"
     try:
         if inspect.iscoroutinefunction(tool.func):
             out = await tool.func(**arguments)
@@ -154,3 +185,5 @@ async def call(tool: Optional[ServerTool], name: str, arguments: Dict[str, Any],
     except Exception as e:
         log.exception("tool %s failed", name)
         return f"Error: {type(e).__name__}: {e}"
+    finally:
+        LINKED.reset(linked)

@@ -417,3 +417,27 @@ def test_server_tool_switches_and_token(gui, monkeypatch, tmp_path):
     general.save_token()
     assert paths.load_tool_token() == "tok"
     assert main.client.toolbox.server()[1] == "tok"       # the client reads the saved token
+
+
+def test_server_folder_button_shows_with_the_ubuntu_tools_and_is_saved(gui):
+    main, win, tmp = gui
+    main.create_chat("Srv", chat_settings.defaults())
+    assert main.server_folder_button.isHidden()                    # Ubuntu Files and Run are off by default
+    main.apply_settings("Srv", {**main.settings, "Tool Ubuntu Files": True})
+    assert not main.server_folder_button.isHidden() and not main.server_folder_list_button.isHidden()
+
+    main.client.toolbox.add_server_folder("/home/me/proj")
+    main.save_chat()
+    assert _saved(main)["Server Folders"] == ["/home/me/proj"]
+    assert main.server_folder_list_button.text() == "▾"             # the label updates on the next refresh
+    main._show_tools_folder()
+    assert main.server_folder_list_button.text() == "▾ 1"
+
+    main.client.toolbox.set_server_folders([])
+    main.load_chat(main.chat_path)
+    assert main.client.toolbox.server_folders == ["/home/me/proj"]
+
+    main.remove_server_folder("/home/me/proj")
+    assert _saved(main)["Server Folders"] == []
+    main.apply_settings("Srv", {**main.settings, "Tool Ubuntu Files": False})
+    assert main.server_folder_button.isHidden()

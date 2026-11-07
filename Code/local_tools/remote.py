@@ -26,12 +26,13 @@ KINDS = ("read", "write", "run")
 
 class Remote:
     def __init__(self, prefix: str, groups: Dict[str, str], label: str,
-                 summaries: Dict[str, Callable[[dict], str]], call_timeout: float):
+                 summaries: Dict[str, Callable[[dict], str]], call_timeout: float, limited: bool = False):
         self.prefix = prefix              # rea -> /v1/rea/...
         self.groups = groups              # the server's group of a tool -> the ToolBox group it belongs to
         self.label = label                # what the user calls it, for errors
         self.summaries = summaries        # tool name -> one line for the approval box (the server is added)
         self.call_timeout = call_timeout
+        self.limited = limited            # True: calls carry the chat's linked server folders
         self.tools: List[Tool] = []
         self.info: dict = {}              # the rest of the server's answer (e.g. "roots")
         self.error = ""                   # why the list couldn't be fetched; "" = it was
@@ -68,7 +69,10 @@ class Remote:
             return f"On the Ubuntu server: {detail(args) if detail else name}"
 
         def call(box, **args):
-            return self._request("post", "call", address, token, json={"name": name, "arguments": args},
+            body = {"name": name, "arguments": args}
+            if self.limited and box.server_folders:      # the server keeps the tools inside them
+                body["folders"] = box.server_folders
+            return self._request("post", "call", address, token, json=body,
                                  timeout=(10, self.call_timeout)).get("output", "")
 
         return Tool(name, fn.get("description", ""), fn.get("parameters") or {"type": "object", "properties": {}},

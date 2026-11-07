@@ -141,7 +141,7 @@ class Config:
     TOOL_TOKEN = os.getenv("TOOL_TOKEN", "")
     TOOL_TOKEN_FILE = os.getenv("TOOL_TOKEN_FILE") or str(Path.home() / ".config" / "chatui" / "tool_token")
     # Folders the tools may touch, separated by ":"; everything else is refused.
-    TOOL_ROOTS = os.getenv("TOOL_ROOTS") or f"{Path.home()}:/mnt/nas/REA"
+    TOOL_ROOTS = os.getenv("TOOL_ROOTS") or f"{Path.home()}:{NAS_MOUNT or '/mnt/nas'}"
     # Never read or written even inside a root (secrets), separated by ":".
     TOOL_DENY = os.getenv("TOOL_DENY") or ":".join(str(Path.home() / p) for p in (
         ".ssh", ".gnupg", ".aws", ".netrc", ".git-credentials", ".config/gh", ".config/chatui",

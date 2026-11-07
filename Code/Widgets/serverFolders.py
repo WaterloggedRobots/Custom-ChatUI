@@ -19,7 +19,11 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QLabel, QTreeWidget, Q
 
 STYLE = """QWidget{background:rgb(44, 44, 44);color:rgb(255, 255, 255)}
 QPushButton{background:rgb(57, 57, 57);color:rgb(255, 255, 255);border:1px solid rgb(90, 90, 90);padding:3px 10px}
-QTreeWidget{border:1px solid rgb(80, 80, 80)}"""
+QTreeWidget{background:rgb(35, 35, 35);alternate-background-color:rgb(40, 40, 40);color:rgb(255, 255, 255);
+border:1px solid rgb(80, 80, 80)}
+QTreeWidget::item{padding:2px 0}
+QTreeWidget::item:hover{background:rgb(55, 55, 55)}
+QTreeWidget::item:selected{background:rgb(42, 90, 160);color:rgb(255, 255, 255)}"""
 PATH_ROLE = Qt.UserRole
 LOADING = "Loading…"
 

@@ -39,6 +39,7 @@ from .server_tools import ServerTool, ToolError, params, resolve
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", ".idea", ".cache", ".chatui-trash"}
 MAX_READ_BYTES = 2 * 1024 * 1024
 TRASH = ".chatui-trash"
+PICKER_HIDDEN = ("#recycle", ".Trash-*", "@eaDir")   # NAS and desktop bins, left out of the folder picker
 
 
 def _size(n: float) -> str:
@@ -391,7 +392,8 @@ def subfolders(path: Optional[str] = None) -> Dict[str, Any]:
     except OSError as e:
         raise ToolError(f"can't open {folder}: {e.strerror or e}")
     for p in entries:
-        if p.is_dir() and p.name not in SKIP_DIRS and _allowed(p):
+        if p.is_dir() and p.name not in SKIP_DIRS and not any(fnmatch.fnmatch(p.name, h) for h in PICKER_HIDDEN) \
+                and _allowed(p):
             found.append({"name": p.name, "path": str(p)})
     root = server_tools.root_of(folder)
     return {"path": str(folder), "parent": None if folder == root else str(folder.parent), "roots": roots,

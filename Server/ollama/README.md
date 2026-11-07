@@ -419,7 +419,7 @@ for its own tools; reads run straight away.
   `ubuntu_write_file`, `ubuntu_edit_file`, `ubuntu_create_folder`,
   `ubuntu_move_path`, `ubuntu_copy_path` and `ubuntu_delete_path`, which moves
   to a `.chatui-trash` folder at the top of the allowed folder (`~/.chatui-trash`,
-  `/mnt/nas/REA/.chatui-trash`) instead of deleting.
+  `/mnt/nas/.chatui-trash`) instead of deleting.
 - **Ubuntu run** (`ubuntu_run_command` in the same file): one bash command
   (`bash -lc`) in a folder inside the allowed ones, with its output and exit
   code. It runs as the server's user, in its own process group: a timeout
@@ -445,7 +445,7 @@ also needs Node (for `npx`), Java 21 and Ghidra; the server finds them through
 `/usr/lib/jvm/java-21-openjdk-*` when those aren't set.
 
 **Which folders.** Every path must resolve (symlinks followed) inside
-`TOOL_ROOTS` (default: the home folder and `/mnt/nas/REA`). Inside them,
+`TOOL_ROOTS` (default: the home folder and the NAS, `NAS_MOUNT` or `/mnt/nas`). Inside them,
 `TOOL_DENY` is never touched (`~/.ssh`, `~/.gnupg`, `~/.aws`, git and GitHub
 credentials, `~/.config/chatui`, `~/.claude.json`, this folder's `.env`), and
 `TOOL_READ_ONLY` (`/mnt/nas/REA/Game File Copy`) is only read. Paths are
@@ -465,7 +465,7 @@ clones) are shown first in the picker as ★ shortcuts, when they're inside a ro
 | Setting | Default | |
 |---|---|---|
 | `TOOL_TOKEN` / `TOOL_TOKEN_FILE` | `~/.config/chatui/tool_token` | the shared token; none = the tools are off |
-| `TOOL_ROOTS` | `~:/mnt/nas/REA` | folders the tools may use, `:`-separated; each chat can link some of them |
+| `TOOL_ROOTS` | `~:/mnt/nas` | folders the tools may use, `:`-separated; each chat can link some of them |
 | `TOOL_QUICK_FOLDERS` | `~/snap/gitpeach-desktop/13/GitHub` | ★ shortcuts at the top of the client's server folder picker, `:`-separated |
 | `TOOL_DENY`, `TOOL_READ_ONLY` | see above | never touched; only read |
 | `TOOL_OUTPUT_CHARS` | 20000 | what one result may send back |

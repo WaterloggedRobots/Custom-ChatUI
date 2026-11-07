@@ -190,3 +190,10 @@ def test_quick_access_folders_show_only_when_allowed(root, monkeypatch):
     quick = ubuntu.subfolders()["quick"]
     assert quick == [{"name": "GitHub", "path": str(root / "sub" / "GitHub")}]   # once; no missing, outside or denied
     assert "quick" not in ubuntu.subfolders(str(root))         # only with the roots
+
+
+
+def test_picker_leaves_out_trash_folders(root):
+    for name in ("#recycle", ".Trash-1000", "@eaDir", "Music"):
+        (root / name).mkdir()
+    assert [f["name"] for f in ubuntu.subfolders(str(root))["folders"]] == ["Music", "sub"]

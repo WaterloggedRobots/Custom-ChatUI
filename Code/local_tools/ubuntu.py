@@ -1,7 +1,7 @@
 """Files, folders and commands on the Ubuntu server (Server/ollama/chat_server/ubuntu.py).
 
 The same tools as files.py and terminal.py, named ubuntu_*, run by the server
-on its own disk inside the folders it allows (the home folder and /mnt/nas/REA
+on its own disk inside the folders it allows (the home folder and the NAS at /mnt/nas
 by default). Deleting moves to a .chatui-trash folder there. They are two
 groups, so a chat can have the files without the commands: ubuntu_files and ubuntu_run.
 Server folders linked to the chat (ToolBox.server_folders) go with every call,

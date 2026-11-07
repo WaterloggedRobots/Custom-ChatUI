@@ -14,7 +14,8 @@ they come with each call, and the tools then stay inside them (server_tools.LINK
 Endpoints (token required):
   GET  /v1/ubuntu/tools          OpenAI `tools`, plus each one's kind and group (files | run)
   POST /v1/ubuntu/call           {name, arguments, folders?} -> {"name", "output"}
-  GET  /v1/ubuntu/folders?path=  the subfolders of path, or the roots without one, for the client's picker
+  GET  /v1/ubuntu/folders?path=  the subfolders of path, or the roots and quick access folders
+                                 (TOOL_QUICK_FOLDERS) without one, for the client's picker
 """
 
 import asyncio
@@ -370,10 +371,16 @@ async def call(body: CallRequest):
 
 
 def subfolders(path: Optional[str] = None) -> Dict[str, Any]:
-    """What the client's server folder picker shows: the roots, or one folder's subfolders."""
+    """What the client's server folder picker shows: the roots and quick access folders, or one
+    folder's subfolders."""
     roots = [str(r) for r in server_tools.roots()]
     if not path:
-        return {"path": None, "parent": None, "roots": roots,
+        quick = []
+        for text in Config.TOOL_QUICK_FOLDERS.split(":"):
+            p = Path(os.path.realpath(os.path.expanduser(text.strip()))) if text.strip() else None
+            if p and p.is_dir() and _allowed(p) and str(p) not in (q["path"] for q in quick):
+                quick.append({"name": p.name or str(p), "path": str(p)})
+        return {"path": None, "parent": None, "roots": roots, "quick": quick,
                 "folders": [{"name": r, "path": r} for r in roots if Path(r).is_dir()]}
     folder = resolve(path)
     if not folder.is_dir():

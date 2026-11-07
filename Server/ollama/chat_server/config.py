@@ -148,6 +148,8 @@ class Config:
         ".docker/config.json", ".claude.json", ".claude/.credentials.json")) + f":{ENV_FILE}"
     # Read-only inside a root: the game copies REA must not change.
     TOOL_READ_ONLY = os.getenv("TOOL_READ_ONLY") or "/mnt/nas/REA/Game File Copy"
+    # Shortcuts at the top of the client's server folder picker, ":"-separated; only those inside a root show.
+    TOOL_QUICK_FOLDERS = os.getenv("TOOL_QUICK_FOLDERS") or str(Path.home() / "snap" / "gitpeach-desktop" / "13" / "GitHub")
     TOOL_OUTPUT_CHARS = _int("TOOL_OUTPUT_CHARS", 20000)     # what one result may send back
     TOOL_RUN_MAX_TIMEOUT = _int("TOOL_RUN_MAX_TIMEOUT", 1800)  # seconds a command may run at most
 

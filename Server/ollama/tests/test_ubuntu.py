@@ -172,6 +172,7 @@ def test_folder_picker_lists_roots_and_subfolders(root):
         auth = {"X-ChatUI-Token": TOKEN}
         top = c.get("/v1/ubuntu/folders", headers=auth).json()
         assert [f["path"] for f in top["folders"]] == [str(root), str(root.parent / "nas")]
+        assert top["quick"] == []                                  # the default shortcut isn't in these roots
         inside = c.get("/v1/ubuntu/folders", params={"path": str(root)}, headers=auth).json()
         assert [f["name"] for f in inside["folders"]] == ["sub"]           # .ssh is denied, files aren't folders
         assert inside["parent"] is None
@@ -180,3 +181,12 @@ def test_folder_picker_lists_roots_and_subfolders(root):
         bad = c.get("/v1/ubuntu/folders", params={"path": "/etc"}, headers=auth)
         assert bad.status_code == 400 and "outside" in bad.json()["error"]["message"]
         assert c.get("/v1/ubuntu/folders").status_code == 401
+
+
+def test_quick_access_folders_show_only_when_allowed(root, monkeypatch):
+    (root / "sub" / "GitHub").mkdir()
+    monkeypatch.setattr(Config, "TOOL_QUICK_FOLDERS",
+                        f"{root}/sub/GitHub:{root}/missing:/etc:{root}/.ssh::{root}/sub/GitHub/")
+    quick = ubuntu.subfolders()["quick"]
+    assert quick == [{"name": "GitHub", "path": str(root / "sub" / "GitHub")}]   # once; no missing, outside or denied
+    assert "quick" not in ubuntu.subfolders(str(root))         # only with the roots

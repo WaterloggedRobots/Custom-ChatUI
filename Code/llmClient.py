@@ -87,6 +87,7 @@ class LLMClient(QObject):
         self.preset = ""
         self.character = ""            # the name in the chat's settings; the model is told it (name_note)
         self.think = True
+        self.vision = True             # False: the model can't see images, so they're named, not sent
         self.web_mode = "auto"
         self.image_workflow = ""       # ComfyUI workflow id on the server; "" = no pictures
         self.image_mode = "auto"
@@ -198,7 +199,9 @@ class LLMClient(QObject):
             if not path.is_file():
                 parts[0]["text"] += f"\n\n[Attachment {a['name']} is missing from {path}]"
                 continue
-            if a.get("kind") == "image":
+            if a.get("kind") == "image" and not self.vision:
+                parts[0]["text"] += f"\n\n[Image {a['name']} not shown: {self.model_name} can't see images]"
+            elif a.get("kind") == "image":
                 parts.append({"type": "image_url", "name": a["name"], "image_url": {"url": _data_url(path)}})
             else:
                 parts.append({"type": "file", "file": {"filename": a["name"], "file_data": _data_url(path)}})

@@ -388,3 +388,81 @@ def test_own_repos_reads_every_page_with_git_login(monkeypatch):
     assert "affiliation=owner" in seen[0][0] and seen[0][1] == "tok"
     monkeypatch.setattr(github_login, "_git", lambda *a, **k: (1, "", "no login"))
     assert github_login.own_repos() is None
+
+
+class FakeSummaries:
+    """Stands in for requests.post on the client's summary requests."""
+
+    def __init__(self, fail=False):
+        self.prompts, self.fail = [], fail
+
+    def __call__(self, url, json, timeout):
+        import requests
+        if self.fail:
+            raise requests.ConnectionError("down")
+        self.prompts.append(json["messages"][1]["content"])
+        text = f"summary {len(self.prompts)}"
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"choices": [{"message": {"content": text}}]}
+        return R()
+
+
+@pytest.fixture
+def summaries(monkeypatch):
+    import llmClient
+    from PySide6.QtCore import QCoreApplication
+    QCoreApplication.instance() or QCoreApplication([])
+    fake = FakeSummaries()
+    monkeypatch.setattr(llmClient.requests, "post", fake)
+    client = llmClient.LLMClient()
+    client.set_model("gemma4:31b")
+    client.contexts["gemma4:31b"] = 4096
+    return client, fake
+
+
+def turns(n, size):
+    return [{"role": "user" if i % 2 == 0 else "assistant", "content": f"{i} " + "x" * size} for i in range(n)]
+
+
+def test_long_messages_go_in_the_summary_before_the_context_fills(summaries):
+    client, _ = summaries
+    older, recent = client._split_history(turns(19, 1500))     # few messages, but far too long to all be sent
+    assert len(older) == 10 and recent[0]["role"] == "user"
+    short_older, short_recent = client._split_history(turns(19, 10))
+    assert not short_older and len(short_recent) == 19
+
+
+def test_a_long_history_is_summarised_in_pieces_that_fit(summaries):
+    client, fake = summaries
+    text = client._summary_for(turns(30, 3000))
+    assert len(fake.prompts) > 1 and text == f"summary {len(fake.prompts)}"
+    assert all(len(p) / 3 < 4096 for p in fake.prompts)
+    assert "summary 1" in fake.prompts[1]                     # each piece builds on the one before
+    assert client.summary["upto"] == 30
+
+
+def test_a_failed_summary_doesnt_stop_the_chat(summaries):
+    client, fake = summaries
+    fake.fail = True
+    assert client._summary_for(turns(30, 10)) is None and client.summary is None
+
+
+def test_tool_rounds_are_condensed_but_the_newest_stays(summaries):
+    client, fake = summaries
+    call = {"id": "1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}
+    base = [{"role": "user", "content": "go"}]
+    work = []
+    for i in range(3):
+        work += [{"role": "assistant", "content": "", "tool_calls": [call]},
+                 {"role": "tool", "tool_call_id": "1", "name": "read_file", "content": f"result {i}"}]
+    out = client._compact(base + work, 1)
+    assert out[0] == base[0] and out[1]["role"] == "system" and "summary 1" in out[1]["content"]
+    assert out[2:] == work[-2:]
+    assert "result 0" in fake.prompts[0] and "result 2" not in fake.prompts[0]
+    one_round = base + work[:2]
+    assert client._compact(one_round, 1) == one_round

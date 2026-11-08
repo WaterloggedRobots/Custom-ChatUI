@@ -53,8 +53,16 @@ IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 LINK_SUMMARY_MESSAGES = 30    # newest messages a linked chat's one-line summary is written from
 LINK_SUMMARY_TOKENS = 80
 MAX_TOOL_ROUNDS = 36          # tool calls the model may make in a row before it must answer
+DEFAULT_CONTEXT = 16384       # until the server has said how big this model's context is
+HISTORY_SHARE = 0.5           # the verbatim messages may fill this much of it; older ones go in the summary
+COMPACT_AT = 0.7              # how full it may get during one answer before its tool work is condensed
 TOOL_LOG_CHARS = 3000         # how much of each tool result is kept in the saved chat
 IMAGE_EXT_FOR = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
+
+
+def estimate_tokens(text: str) -> int:
+    latin = len(text.encode("ascii", "ignore"))
+    return latin // 3 + len(text) - latin       # Chinese, Japanese and the like are about a token a character
 
 
 def attachment_kind(path) -> str:
@@ -92,6 +100,8 @@ class LLMClient(QObject):
         self.image_workflow = ""       # ComfyUI workflow id on the server; "" = no pictures
         self.image_mode = "auto"
         self.summary = None            # {"upto": n, "text": "..."} covering history[:n]
+        self.contexts = {}             # model -> context size, as the server reports it
+        self._round_tokens = 0         # what the last request filled of the context
         self.stage_note = None         # 3D model on: a function returning its system note, or "" if she's away
 
         # LLM server address: Code/UI/network.json, or your saved copy (see paths.py)
@@ -214,12 +224,20 @@ class LLMClient(QObject):
         turn (it holds MAX_CONTEXT_MESSAGES to MAX_CONTEXT_MESSAGES + step - 1 messages).
         Between steps the start of the prompt doesn't change, so Ollama reuses its
         cached prompt and only reads the new messages; the summary refreshes at the
-        same steps."""
+        same steps. Long messages move it further, in the same steps, so the
+        window never fills more than HISTORY_SHARE of the model's context."""
         cut = max(0, len(history) - MAX_CONTEXT_MESSAGES)
         cut -= cut % SUMMARY_REFRESH_STEP
+        budget = self._context() * HISTORY_SHARE
+        while cut + SUMMARY_REFRESH_STEP < len(history) and \
+                sum(estimate_tokens(str(m.get("content", ""))) for m in history[cut:]) > budget:
+            cut += SUMMARY_REFRESH_STEP
         while cut < len(history) - 1 and history[cut]["role"] != "user":
             cut += 1
         return history[:cut], history[cut:]
+
+    def _context(self) -> int:
+        return self.contexts.get(self.model_name, DEFAULT_CONTEXT)
 
     def build_messages(self, history, summary_text=None):
         _, recent = self._split_history(history)
@@ -274,20 +292,58 @@ class LLMClient(QObject):
         start = s["upto"] if s else 0
         new_msgs = [{"role": m["role"], "content": self._content(m, False)} for m in older[start:]]
         self.status.emit("Summarising earlier messages…")
-        prompt = [
-            {"role": "system", "content": "Update the running summary of a conversation. Keep goals, decisions, "
-                                          "constraints, names, numbers and technical details. Be concise; "
-                                          "write it as notes, not prose."},
-            {"role": "user", "content": (f"Current summary:\n{s['text']}\n\n" if s else "")
-                                        + "New messages:\n" + json.dumps(new_msgs, ensure_ascii=False)},
-        ]
-        r = requests.post(f"{self.base_url}/v1/chat/completions", json={
-            "model": self.model_name, "messages": prompt, "think": False, "temperature": 0.2,
-            "max_tokens": SUMMARY_MAX_TOKENS, "stream": False}, timeout=300)
-        r.raise_for_status()
-        text = r.json()["choices"][0]["message"]["content"].strip()
+        try:
+            text = self._fold(s["text"] if s else "", new_msgs)
+        except (requests.RequestException, ValueError, LookupError, TypeError) as e:
+            print(f"Could not summarise the earlier messages: {e}")     # it's tried again next turn
+            return s["text"] if s else None
         self.summary = {"upto": len(older), "text": text}
         return text
+
+    def _fold(self, text: str, items) -> str:
+        """`text` (a running summary) updated with `items`, a few at a time so each request fits the context."""
+        room = self._context() - 2 * SUMMARY_MAX_TOKENS - 300
+        batches, batch, used = [], [], 0
+        for item in items:
+            item = {**item, "content": str(item.get("content", ""))[:room // 2]}
+            cost = estimate_tokens(json.dumps(item, ensure_ascii=False))
+            if batch and used + cost > room:
+                batches.append(batch)
+                batch, used = [], 0
+            batch.append(item)
+            used += cost
+        for batch in batches + [batch]:
+            prompt = [
+                {"role": "system", "content": "Update the running summary of a conversation. Keep goals, decisions, "
+                                              "constraints, names, numbers and technical details. Be concise; "
+                                              "write it as notes, not prose."},
+                {"role": "user", "content": (f"Current summary:\n{text}\n\n" if text else "")
+                                            + "New messages:\n" + json.dumps(batch, ensure_ascii=False)},
+            ]
+            r = requests.post(f"{self.base_url}/v1/chat/completions", json={
+                "model": self.model_name, "messages": prompt, "think": False, "temperature": 0.2,
+                "max_tokens": SUMMARY_MAX_TOKENS, "stream": False}, timeout=300)
+            r.raise_for_status()
+            text = r.json()["choices"][0]["message"]["content"].strip() or text
+        return text
+
+    def _compact(self, messages, base):
+        """Condense this answer's tool rounds (messages[base:], all but the newest) when the context is nearly full."""
+        last = max((i for i in range(base, len(messages)) if messages[i]["role"] == "assistant"), default=base)
+        if last == base:
+            return messages
+        self.status.emit("Condensing the tool results so far…")
+        items = [{"role": m["role"], "content": m.get("content", ""),
+                  **({"called": [c["function"] for c in m["tool_calls"]]} if m.get("tool_calls") else {})}
+                 for m in messages[base:last]]
+        try:
+            text = self._fold("", items)
+        except (requests.RequestException, ValueError, LookupError, TypeError) as e:
+            print(f"Could not condense the tool results: {e}")          # the server still fits what it can
+            return messages
+        return messages[:base] + [{"role": "system", "content": "Work already done for the current request (older "
+                                                                f"tool results, condensed; don't repeat it):\n{text}"}
+                                  ] + messages[last:]
 
     def summarize_chat(self, chat: str, history):
         """Write the line other chats see about this one, in the background; a failure just waits for next time."""
@@ -430,6 +486,9 @@ class LLMClient(QObject):
                     for k, v in chunk["usage"].items():
                         result["usage"][k] = result["usage"].get(k, 0) + v
                     result["timings"] = chunk.get("timings", {})
+                    self._round_tokens = chunk["usage"].get("total_tokens", 0)
+                    if result["timings"].get("num_ctx"):
+                        self.contexts[self.model_name] = result["timings"]["num_ctx"]
                 for choice in chunk.get("choices") or []:
                     delta = choice.get("delta") or {}
                     if delta.get("reasoning_content"):
@@ -456,6 +515,7 @@ class LLMClient(QObject):
             older, _ = self._split_history(history)
             summary = self._summary_for(older)
             messages = self.build_messages(history, summary)
+            base = len(messages)
             for round_no in range(MAX_TOOL_ROUNDS + 1):
                 payload = {
                     "model": self.model_name,
@@ -478,10 +538,14 @@ class LLMClient(QObject):
                     result["content"] += "\n\n"
                     self.token.emit("\n\n")
                 messages = messages + [{"role": "assistant", "content": text, "tool_calls": calls}]
-                messages += self._run_tools(calls, result)
+                replies = self._run_tools(calls, result)
+                messages += replies
                 if self._abort.is_set():
                     result["aborted"] = True
                     break
+                filled = self._round_tokens + sum(estimate_tokens(r["content"]) for r in replies)
+                if filled > self._context() * COMPACT_AT:
+                    messages = self._compact(messages, base)
                 self.status.emit("Reading the results…")
         except Exception as e:
             if self._abort.is_set():

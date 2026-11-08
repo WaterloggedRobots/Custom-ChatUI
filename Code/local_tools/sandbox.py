@@ -69,13 +69,13 @@ def _post(box, path, body, timeout):
     return r.json()
 
 
-def run_in_sandbox(box, code=None, language="python", command=None, files=None, copy_from_pc=None, timeout=60):
+def run_in_sandbox(box, code=None, language="python", command=None, files=None, copy_from_pc=None, timeout=180):
     body = {"session": box.sandbox_session, "language": language, "code": code, "command": command,
             "files": files or None, "timeout": timeout}
     box.sandbox_skipped = []
     if copy_from_pc:
         body["archive"] = base64.b64encode(pack(box, copy_from_pc)).decode("ascii")
-    seconds = int(timeout or 60)
+    seconds = int(timeout or 180)
     out = _post(box, "/v1/sandbox/run", body, timeout=seconds + 120)
     head = f"exit code {out['exit_code']} after {out['seconds']}s  (Ubuntu sandbox, /work: {out['command']})"
     if out.get("timed_out"):
@@ -115,7 +115,7 @@ TOOLS = [
                        "description": "More files to write first: relative path -> text"},
                 copy_from_pc={"type": "array", "items": {"type": "string"},
                               "description": "Files or folders on the PC to copy into /work first"},
-                timeout={"type": "integer", "description": "Seconds, default 60, at most 300"}),
+                timeout={"type": "integer", "description": "Seconds, default 180, at most 900"}),
          run_in_sandbox, kind="sandbox", summary=_summary),
     Tool("reset_sandbox", "Throw away this chat's sandbox and start the next run with an empty /work.",
          params(), reset_sandbox, kind="sandbox", summary=lambda a: "Reset the Ubuntu sandbox"),

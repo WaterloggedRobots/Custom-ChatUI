@@ -52,7 +52,7 @@ MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 LINK_SUMMARY_MESSAGES = 30    # newest messages a linked chat's one-line summary is written from
 LINK_SUMMARY_TOKENS = 80
-MAX_TOOL_ROUNDS = 12          # tool calls the model may make in a row before it must answer
+MAX_TOOL_ROUNDS = 36          # tool calls the model may make in a row before it must answer
 TOOL_LOG_CHARS = 3000         # how much of each tool result is kept in the saved chat
 IMAGE_EXT_FOR = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
 
@@ -397,7 +397,7 @@ class LLMClient(QObject):
         """One streamed request. Adds text to `result`; returns (this round's text, tool calls)."""
         text, calls = "", {}
         with requests.post(f"{self.base_url}/v1/chat/completions", json=payload, stream=True,
-                           timeout=(10, 600)) as r:
+                           timeout=(10, 1800)) as r:
             self._response = r
             if r.status_code != 200:
                 try:

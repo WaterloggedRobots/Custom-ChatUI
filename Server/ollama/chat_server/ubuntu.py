@@ -269,7 +269,7 @@ def delete_path(path, recursive=False):
 
 # ------------------------------------------------------------------ run tool
 
-def run_command(command, cwd="~", timeout=60):
+def run_command(command, cwd="~", timeout=180):
     if not str(command).strip():
         raise ToolError("empty command")
     folder = resolve(cwd)
@@ -345,7 +345,7 @@ TOOLS = [
                params(["command"], command={"type": "string"},
                       cwd={"type": "string", "description": "Ubuntu folder to run in"},
                       timeout={"type": "integer",
-                               "description": f"Seconds, default 60, at most {Config.TOOL_RUN_MAX_TIMEOUT}"}),
+                               "description": f"Seconds, default 180, at most {Config.TOOL_RUN_MAX_TIMEOUT}"}),
                run_command, kind="run", group="run"),
 ]
 

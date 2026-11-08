@@ -19,7 +19,7 @@ def remote() -> Remote:
             "export_assets": lambda a: f"export {a.get('source')} to the NAS at /mnt/nas/REA/{a.get('destination')}",
             "open_binary": lambda a: f"REA opens {a.get('path')}",
         },
-        call_timeout=1500,       # the server allows REA 20 minutes for one call; the first analysis is slow
+        call_timeout=3900,       # the server allows REA 60 minutes for one call; the first analysis is slow
     )
 
 

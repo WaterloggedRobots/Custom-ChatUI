@@ -539,7 +539,8 @@ async def translate(ollama, text: str, language: str, model: str) -> str:
         "think": False,
         "keep_alive": Config.KEEP_ALIVE,
         # Same num_ctx as the chat, so Ollama doesn't reload the model for this.
-        "options": {"temperature": 0.2, "num_ctx": Config.NUM_CTX, "num_predict": max(256, len(text) * 3)},
+        "options": {"temperature": 0.2, "num_ctx": await ollama.context_for(model),
+                    "num_predict": max(256, len(text) * 3)},
     })
     out = (reply.get("message") or {}).get("content") or ""
     out = re.sub(r"<think>.*?</think>", "", out, flags=re.S).strip().strip('"「」').strip()

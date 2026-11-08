@@ -7,6 +7,8 @@ and real token counts.
 
 import json
 import logging
+import re
+import time
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
@@ -21,6 +23,22 @@ class OllamaError(Exception):
         super().__init__(detail)
         self.status = status
         self.detail = detail
+
+
+def _tagged(model: str) -> str:
+    return model if ":" in model else model + ":latest"
+
+
+def context_overrides(spec: str) -> Dict[str, int]:
+    """NUM_CTX_MODELS ("name=4096, other:tag=8192") as {name:tag: size}."""
+    out = {}
+    for part in re.split(r"[,;\s]+", spec or ""):
+        name, _, size = part.partition("=")
+        if name and size.strip().isdigit():
+            out[_tagged(name.strip())] = int(size)
+        elif part:
+            log.warning("NUM_CTX_MODELS: ignoring %r (want name=size)", part)
+    return out
 
 
 def _no_think_support(err: "OllamaError") -> bool:
@@ -42,6 +60,8 @@ class Ollama:
         )
         # Models that rejected `think`, so later requests skip the retry.
         self._no_think: set = set()
+        # model -> (num_ctx from its Modelfile or None, when it was read)
+        self._model_ctx: Dict[str, tuple] = {}
 
     async def close(self):
         await self.http.aclose()
@@ -123,9 +143,32 @@ class Ollama:
         await self._raise_for(resp)
         return resp.json()
 
+    async def context_for(self, model: str) -> int:
+        """The context window to ask for with `model`: NUM_CTX_MODELS, else the
+        num_ctx in the model's Modelfile, else NUM_CTX. Every request for a model
+        must use the same value, or Ollama reloads it."""
+        if not model:
+            return Config.NUM_CTX
+        own = context_overrides(Config.NUM_CTX_MODELS).get(_tagged(model))
+        if own:
+            return own
+        cached = self._model_ctx.get(model)
+        if cached is None or time.monotonic() - cached[1] > 300:     # notices a re-created model
+            size = None
+            try:
+                params = (await self.show(model)).get("parameters") or ""
+                m = re.search(r"^num_ctx\s+(\d+)", params, flags=re.M)
+                size = int(m.group(1)) if m else None
+            except Exception as e:
+                log.debug("couldn't read %s's Modelfile: %s", model, e)
+            cached = self._model_ctx[model] = (size, time.monotonic())
+        return cached[0] or Config.NUM_CTX
+
     async def load(self, model: str, keep_alive: Any) -> None:
-        resp = await self.http.post("/api/chat", json={"model": model, "messages": [], "keep_alive": keep_alive})
+        resp = await self.http.post("/api/chat", json={"model": model, "messages": [], "keep_alive": keep_alive,
+                                                       "options": {"num_ctx": await self.context_for(model)}})
         await self._raise_for(resp)
 
     async def unload(self, model: str) -> None:
-        await self.load(model, 0)
+        resp = await self.http.post("/api/chat", json={"model": model, "messages": [], "keep_alive": 0})
+        await self._raise_for(resp)

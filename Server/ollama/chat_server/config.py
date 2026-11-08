@@ -58,6 +58,10 @@ class Config:
     # Context window asked of Ollama. Its own default (4096 on many builds) is
     # too small once search results or a document are added.
     NUM_CTX = _int("NUM_CTX", 16384)
+    # Per-model context windows, e.g. "xortron=4096, qwen3.6:35b-a3b=32768".
+    # A model without one here uses the num_ctx in its own Modelfile, if it
+    # has one, and NUM_CTX otherwise.
+    NUM_CTX_MODELS = os.getenv("NUM_CTX_MODELS", "")
     KEEP_ALIVE = os.getenv("KEEP_ALIVE", "30m")
 
     # Web search

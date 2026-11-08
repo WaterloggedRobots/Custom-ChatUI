@@ -43,7 +43,10 @@ class FakeOllama:
             self.shows.append(1)
             name = json.loads(request.content)["model"]
             caps = ["completion", "vision", "thinking"] if name.startswith("gemma") else ["completion"]
-            return httpx.Response(200, json={"capabilities": caps, "model_info": {"gemma3.context_length": 131072}})
+            params = "num_ctx                        4096\ntemperature                    0.7" \
+                if name.startswith("small") else ""
+            return httpx.Response(200, json={"capabilities": caps, "parameters": params,
+                                             "model_info": {"gemma3.context_length": 131072}})
         if path == "/api/chat":
             body = json.loads(request.content)
             self.requests.append(body)
@@ -134,6 +137,46 @@ def test_models_and_health(env):
     client.get("/v1/models", params={"detailed": True})
     assert len(fake.shows) == shows          # /api/show answers are cached per model digest
     assert client.get("/health").json()["ollama"] is True
+
+
+def _sent_ctx(client, fake, model, **extra):
+    fake.requests.clear()
+    client.post("/v1/chat/completions", json={"model": model, "messages": [{"role": "user", "content": "hi"}],
+                                              **extra})
+    return fake.requests[-1]["options"]["num_ctx"]
+
+
+def test_context_window_is_chosen_per_model(env, monkeypatch):
+    from chat_server.config import Config
+    client, fake, _ = env
+    monkeypatch.setattr(Config, "NUM_CTX", 16384)
+    monkeypatch.setattr(Config, "NUM_CTX_MODELS", "")
+    assert _sent_ctx(client, fake, "gemma4:31b") == 16384            # no Modelfile num_ctx: NUM_CTX
+    assert _sent_ctx(client, fake, "small:3b") == 4096               # the model's own Modelfile num_ctx
+    shows = len(fake.shows)
+    _sent_ctx(client, fake, "small:3b")
+    assert len(fake.shows) == shows                                   # read once, not every message
+    monkeypatch.setattr(Config, "NUM_CTX_MODELS", "small:3b=8192, gemma4=32768")
+    assert _sent_ctx(client, fake, "small:3b") == 8192               # NUM_CTX_MODELS beats the Modelfile
+    assert _sent_ctx(client, fake, "gemma4:latest") == 32768         # a name without a tag means :latest
+    assert _sent_ctx(client, fake, "gemma4:31b") == 16384
+    assert _sent_ctx(client, fake, "small:3b", num_ctx=2048) == 2048  # the request itself beats both
+
+
+def test_loading_a_model_uses_its_context_window(env, monkeypatch):
+    from chat_server.config import Config
+    client, fake, _ = env
+    monkeypatch.setattr(Config, "NUM_CTX_MODELS", "")
+    client.post("/v1/models/load", params={"model": "small:3b"})
+    assert fake.requests[-1]["options"] == {"num_ctx": 4096}         # so the first message doesn't reload it
+    client.post("/v1/models/unload/small:3b")
+    assert "options" not in fake.requests[-1] and fake.requests[-1]["keep_alive"] == 0
+
+
+def test_bad_num_ctx_models_entries_are_skipped():
+    from chat_server.ollama import context_overrides
+    assert context_overrides("xortron=4096; bad, qwen3.6:35b-a3b=32768,") == \
+        {"xortron:latest": 4096, "qwen3.6:35b-a3b": 32768}
 
 
 def test_stream_separates_thinking_and_reports_usage(env):

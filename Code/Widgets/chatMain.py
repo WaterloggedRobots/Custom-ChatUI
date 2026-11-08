@@ -13,7 +13,8 @@ from Widgets.serverFolders import ServerFolderPicker
 
 from PySide6.QtWidgets import (QInputDialog, QListWidget, QListWidgetItem, QMainWindow, QSizePolicy, QFileDialog,
                                QComboBox, QLabel, QMenu, QMessageBox, QPushButton, QScrollArea, QToolButton, QWidget,
-                               QHBoxLayout, QVBoxLayout, QWidgetAction, QGraphicsScene, QGraphicsPixmapItem)
+                               QHBoxLayout, QVBoxLayout, QWidgetAction, QGraphicsScene, QGraphicsPixmapItem,
+                               QGraphicsOpacityEffect)
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, Qt, QObject, QEvent, QUrl, QTimer, Signal, QSettings
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QDesktopServices, QKeySequence, QShortcut, QPixmap
@@ -57,6 +58,17 @@ def short_path(path) -> str:
         return "/".join([drive, *names])
     return "/".join([drive, "...", names[-2], names[-1]])
 
+
+
+def dim(widget, off: bool):
+    """Turn a bar button off and fade it, emoji included (a stylesheet colour can't grey an emoji)."""
+    widget.setEnabled(not off)
+    if off:
+        effect = QGraphicsOpacityEffect(widget)
+        effect.setOpacity(0.35)
+        widget.setGraphicsEffect(effect)
+    else:
+        widget.setGraphicsEffect(None)
 
 class LiveComboBox(QComboBox):
     """A combo box that refreshes its items each time it is opened."""
@@ -471,15 +483,23 @@ class ChatMain(QMainWindow):
             self.model_changed.emit(model)
         self._apply_options()
 
-    def _apply_options(self):
-        """Send this chat's options to the client; Tools only counts for models that can call tools."""
-        s = self.settings
+    def can(self, capability: str) -> bool:
+        """Whether this chat's model has a capability (thinking, tools, vision). A server
+        that doesn't report capabilities gets the benefit of the doubt."""
         caps = self.models.get(self.client.model_name, {}).get("capabilities")
-        can_call = not caps or "tools" in caps
+        return not caps or capability in caps
+
+    def _apply_options(self):
+        """Send this chat's options to the client, leaving out what the model can't use:
+        tools and memory need a model that calls tools, Think one that thinks, and
+        pictures one that sees."""
+        s = self.settings
+        can_call = self.can("tools")
         self.client.web_mode = s["Web Search"]
         self.client.image_workflow = s["Image Workflow"]
         self.client.image_mode = s["Image Mode"]
-        self.client.think = s["Think"]
+        self.client.think = s["Think"] and self.can("thinking")
+        self.client.vision = self.can("vision")
         groups = chat_settings.tool_groups(s)
         self.client.toolbox.set_groups(groups)
         self.client.toolbox.memory_dir = self.memory_folder() if s["Memory"] else None
@@ -494,6 +514,13 @@ class ChatMain(QMainWindow):
             tip = ""
         self.status_tools_tip = tip
         self._show_tools_folder()
+        self._show_file_button()
+
+    def _show_file_button(self):
+        sees = self.can("vision")
+        self.ui.pushButton_3.setToolTip("Attach images or files" if sees else
+                                        f"Attach files ({self.client.model_name} can't see images, "
+                                        "so pictures aren't sent)")
 
     def add_tools_folder(self):
         box = self.client.toolbox
@@ -736,6 +763,10 @@ class ChatMain(QMainWindow):
 
     def _show_tools_folder(self):
         box = self.client.toolbox
+        can_call = self.can("tools")
+        for button in (self.folder_button, self.folder_list_button, self.repo_button, self.repo_list_button,
+                       self.server_folder_button, self.server_folder_list_button):
+            dim(button, not can_call)
         n, shared = len(box.folders), len(box.shared_folders())
         self.folder_list_button.setText(self._count_label(n, shared))
         tip = self.status_tools_tip
@@ -752,7 +783,8 @@ class ChatMain(QMainWindow):
         self.server_folder_list_button.setText(self._count_label(n, 0))
         self.server_folder_button.setToolTip(
             "Link a folder on the Ubuntu server for its file and run tools "
-            + (f"({n} linked; the tools stay inside them)" if n else "(none linked: every folder the server allows)"))
+            + (f"({n} linked; the tools stay inside them)" if n else "(none linked: every folder the server allows)")
+            + (f"\n{tip}" if tip else ""))
 
     @staticmethod
     def _count_label(own, shared):
@@ -806,8 +838,12 @@ class ChatMain(QMainWindow):
             self, "Attach images or files", "",
             "Images and documents (*.png *.jpg *.jpeg *.gif *.bmp *.webp *.pdf *.docx *.txt *.md *.csv *.json "
             "*.py *.cpp *.h *.c *.js *.html *.xml *.yaml *.yml *.log);;All files (*)")
+        refused = []
         for p in paths:
             path = Path(p)
+            if llmClient.attachment_kind(path) == "image" and not self.can("vision"):
+                refused.append(path.name)
+                continue
             if path.stat().st_size > llmClient.MAX_ATTACHMENT_BYTES:
                 self.on_status(f"{path.name} is over 25 MB and was not attached")
                 continue
@@ -815,6 +851,8 @@ class ChatMain(QMainWindow):
                 continue
             self.pending_attachments.append({"name": path.name, "path": str(path), "kind": llmClient.attachment_kind(path)})
         self.show_pending_attachments()
+        if refused:
+            self.on_status(f"{self.client.model_name} can't see images; not attached: {', '.join(refused)}")
 
     def clear_attachments(self):
         self.pending_attachments = []

@@ -26,7 +26,7 @@ import voice
 from local_tools import memory
 from Widgets.chatMain import LiveComboBox, WEB_LABELS, safe_file_name
 
-from PySide6.QtWidgets import QMainWindow, QFileDialog, QComboBox, QInputDialog, QMessageBox, QScrollArea
+from PySide6.QtWidgets import QMainWindow, QFileDialog, QGridLayout, QComboBox, QInputDialog, QMessageBox, QScrollArea
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtCore import QFile, QSettings, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -294,16 +294,34 @@ class ChatSettings(QMainWindow):
             self.refresh_models()
 
     def _update_capabilities(self):
+        """Grey out the switches this chat's model can't use, with its label, and say why."""
         caps = self.chat_main.models.get(self.model, {}).get("capabilities")
         can_think = not caps or "thinking" in caps
         can_call = not caps or "tools" in caps
-        self.ui.thinkCheck.setEnabled(can_think)
-        self.ui.thinkCheck.setToolTip("" if can_think else f"{self.model} can't think; this setting is ignored")
+        self._usable(self.ui.thinkCheck, can_think, f"{self.model} can't think; this setting is ignored")
         for check, _ in self._tool_checks():
-            if not hasattr(check, "default_tip"):
-                check.default_tip = check.toolTip()
-            check.setEnabled(can_call)
-            check.setToolTip(check.default_tip if can_call else f"{self.model} can't call tools; pick a model marked 🔧")
+            self._usable(check, can_call, f"{self.model} can't call tools; pick a model marked 🔧")
+        self._usable(self.ui.memoryCheck, can_call,
+                     f"{self.model} can't call tools, which memory needs; pick a model marked 🔧")
+
+    @staticmethod
+    def _usable(check, on: bool, why: str):
+        """Turn a switch and the label beside it (same grid row) on or off; off shows `why`."""
+        widgets = [check]
+        grid = check.parentWidget().layout() if check.parentWidget() else None
+        if isinstance(grid, QGridLayout):
+            for i in range(grid.count()):
+                item = grid.itemAt(i)        # the switch itself, or a row layout holding it (Git's)
+                if item.widget() is check or (item.layout() and item.layout().indexOf(check) >= 0):
+                    label = grid.itemAtPosition(grid.getItemPosition(i)[0], 0)
+                    if label and label.widget() and label.widget() is not check:
+                        widgets.append(label.widget())
+                    break
+        for w in widgets:
+            if not hasattr(w, "default_tip"):
+                w.default_tip = w.toolTip()
+            w.setEnabled(on)
+            w.setToolTip(w.default_tip if on else why)
 
     def _tool_checks(self):
         ui = self.ui

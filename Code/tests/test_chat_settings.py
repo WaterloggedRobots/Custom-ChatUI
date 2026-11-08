@@ -441,3 +441,41 @@ def test_server_folder_button_shows_with_the_ubuntu_tools_and_is_saved(gui):
     assert _saved(main)["Server Folders"] == []
     main.apply_settings("Srv", {**main.settings, "Tool Ubuntu Files": False})
     assert main.server_folder_button.isHidden()
+
+
+def test_what_the_model_cant_use_is_greyed_out_and_not_sent(gui, monkeypatch, tmp_path):
+    main, win, tmp = gui
+    main.create_chat("Caps", {**chat_settings.defaults(), "Model": "m1", "Think": True, "Memory": True,
+                              "Tool Files": True, "Tool Ubuntu Files": True})
+    main.refresh_models()
+    assert main.folder_button.isEnabled() and main.folder_button.graphicsEffect() is None
+    assert main.client.think and main.client.tools_enabled
+
+    main.model_combo.activated.emit(main.model_combo.findData("m2"))     # completion only
+    for b in (main.folder_button, main.folder_list_button, main.repo_button, main.repo_list_button,
+              main.server_folder_button, main.server_folder_list_button):
+        assert not b.isEnabled() and b.graphicsEffect() is not None   # faded, emoji included
+    assert "can't call tools" in main.folder_button.toolTip()
+    assert not main.client.think and not main.client.tools_enabled and not main.client.vision
+    assert "can't see images" in main.ui.pushButton_3.toolTip()
+    assert main.settings["Think"]                                      # the chat's own choice is kept
+
+    win.open_for(main.ui.lineEdit.text(), main.settings, is_new=False)
+    assert not win.ui.thinkCheck.isEnabled() and not win.ui.memoryCheck.isEnabled()
+    assert "memory needs" in win.ui.memoryCheck.toolTip()
+    assert not win.ui.label_think.isEnabled()                             # its label is greyed too
+    assert not win.ui.label_gitTools.isEnabled()                          # Git's switch sits in a row layout
+
+    pic, doc = tmp_path / "cat.png", tmp_path / "notes.txt"
+    pic.write_bytes(b"\x89PNG\r\n\x1a\n"), doc.write_text("hi")
+    from Widgets import chatMain
+    monkeypatch.setattr(chatMain.QFileDialog, "getOpenFileNames", lambda *a, **k: ([str(pic), str(doc)], ""))
+    main.add_attachments()
+    assert [a["name"] for a in main.pending_attachments] == ["notes.txt"]
+    parts = main.client._content({"content": "look", "attachments": [
+        {"name": "cat.png", "path": str(pic), "kind": "image"}]}, full_attachments=True)
+    assert not any(p.get("type") == "image_url" for p in parts) and "can't see images" in parts[0]["text"]
+
+    main.model_combo.activated.emit(main.model_combo.findData("m1"))     # back to a model with tools
+    assert main.folder_button.isEnabled() and main.folder_button.graphicsEffect() is None
+    assert main.client.think and main.client.tools_enabled

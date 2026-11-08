@@ -92,6 +92,8 @@ class FakeOllama:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/tags":
             return httpx.Response(200, json={"models": []})
+        if request.url.path == "/api/show":
+            return httpx.Response(200, json={"parameters": ""})
         body = json.loads(request.content)
         if not body.get("messages"):
             self.unloaded.append(body["model"])

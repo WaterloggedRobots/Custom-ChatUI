@@ -265,6 +265,8 @@ async def plan_search(ollama: Ollama, model: str, messages: List[Dict[str, Any]]
         return []
     history = _plan_context(messages)
     prompt = (f"Conversation so far:\n{history}\n\n" if history else "") + f"Latest message:\n{question[:2000]}"
+    if Config.PLANNER_MODEL:
+        num_ctx = await ollama.context_for(Config.PLANNER_MODEL)
     started = time.monotonic()
     try:
         reply = await ollama.chat({
@@ -597,7 +599,8 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient,
     messages = prepare(job).prepared
 
     options = dict(job.options)
-    options.setdefault("num_ctx", Config.NUM_CTX)
+    if not options.get("num_ctx"):
+        options["num_ctx"] = await ollama.context_for(job.model)
 
     if job.web_search == "on":
         yield Event("status", "Planning the search…")

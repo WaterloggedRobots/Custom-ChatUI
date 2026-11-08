@@ -68,6 +68,7 @@ keep tokens there. All addresses are summarised at the top of
 | `SERVER_BIND_IP` / `SERVER_PORT` | `0.0.0.0` / `8100` | where this server listens (`API_HOST`/`API_PORT` still work) |
 | `NAS_IP` / `NAS_MOUNT` | (empty) | NAS address, kept for later; nothing uses it yet |
 | `NUM_CTX` | `16384` | context window requested from Ollama |
+| `NUM_CTX_MODELS` | (empty) | per-model context windows, e.g. `xortron=4096, qwen3.6:35b-a3b=32768`. A model not listed uses the `num_ctx` in its own Modelfile, or `NUM_CTX` if it has none. A chat request's own `num_ctx` beats both |
 | `KEEP_ALIVE` | `30m` | how long Ollama keeps a model loaded |
 | `SEARCH_RESULTS` / `SEARCH_FETCH_PAGES` | `6` / `3` | results kept / pages read |
 | `STT_ENGINE` | `auto` | speech to text: `whisper` (local), `google` (internet), `off`; `auto` = whisper if installed |

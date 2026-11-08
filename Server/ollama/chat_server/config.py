@@ -129,8 +129,8 @@ class Config:
     SANDBOX_CPUS = float(os.getenv("SANDBOX_CPUS", "2"))
     SANDBOX_PIDS = _int("SANDBOX_PIDS", 256)                           # processes; stops fork bombs
     SANDBOX_DISK = os.getenv("SANDBOX_DISK") or "1g"                   # /work, kept in memory
-    SANDBOX_TIMEOUT = _int("SANDBOX_TIMEOUT", 60)                      # seconds per run unless the model asks
-    SANDBOX_MAX_TIMEOUT = _int("SANDBOX_MAX_TIMEOUT", 300)
+    SANDBOX_TIMEOUT = _int("SANDBOX_TIMEOUT", 180)                      # seconds per run unless the model asks
+    SANDBOX_MAX_TIMEOUT = _int("SANDBOX_MAX_TIMEOUT", 900)
     SANDBOX_OUTPUT_CHARS = _int("SANDBOX_OUTPUT_CHARS", 12000)         # output kept per run (start and end)
     SANDBOX_IDLE_MINUTES = _int("SANDBOX_IDLE_MINUTES", 30)            # an unused chat's container is removed
     SANDBOX_MAX_SESSIONS = _int("SANDBOX_MAX_SESSIONS", 4)             # containers at once
@@ -155,13 +155,13 @@ class Config:
     # Shortcuts at the top of the client's server folder picker, ":"-separated; only those inside a root show.
     TOOL_QUICK_FOLDERS = os.getenv("TOOL_QUICK_FOLDERS") or str(Path.home() / "snap" / "gitpeach-desktop" / "13" / "GitHub")
     TOOL_OUTPUT_CHARS = _int("TOOL_OUTPUT_CHARS", 20000)     # what one result may send back
-    TOOL_RUN_MAX_TIMEOUT = _int("TOOL_RUN_MAX_TIMEOUT", 1800)  # seconds a command may run at most
+    TOOL_RUN_MAX_TIMEOUT = _int("TOOL_RUN_MAX_TIMEOUT", 5400)  # seconds a command may run at most
 
     # REA (Reverse Engineer Anything), one long-lived MCP server process (rea.py)
     REA_HOME = os.getenv("REA_HOME") or str(Path.home() / "snap" / "gitpeach-desktop" / "13" / "GitHub" / "REA")
     REA_COMMAND = os.getenv("REA_COMMAND") or "npx -y rea-agents@6.5.0 mcp"
     REA_ASSETS = os.getenv("REA_ASSETS") or "/mnt/nas/REA"
     REA_GAME_COPIES = os.getenv("REA_GAME_COPIES") or f"{REA_ASSETS}/Game File Copy"
-    REA_TIMEOUT = float(os.getenv("REA_TIMEOUT", "1200"))       # seconds one call may take (first analysis is slow)
+    REA_TIMEOUT = float(os.getenv("REA_TIMEOUT", "3600"))       # seconds one call may take (first analysis is slow)
     REA_START_TIMEOUT = float(os.getenv("REA_START_TIMEOUT", "180"))  # npx may download the package first
     REA_EXPORT_TIMEOUT = float(os.getenv("REA_EXPORT_TIMEOUT", "3600"))

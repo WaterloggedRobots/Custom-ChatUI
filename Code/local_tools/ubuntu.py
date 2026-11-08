@@ -29,7 +29,7 @@ def remote() -> Remote:
             "ubuntu_search_in_files": lambda a: f"search for {first_line(a.get('query'), 80)!r} in {a.get('path', '~')}",
             "ubuntu_run_command": lambda a: f"run in bash in {a.get('cwd') or '~'}:\n{a.get('command')}",
         },
-        call_timeout=1900,       # a command may run for up to 30 minutes (TOOL_RUN_MAX_TIMEOUT)
+        call_timeout=5500,       # a command may run for up to 90 minutes (TOOL_RUN_MAX_TIMEOUT)
         limited=True,
     )
 

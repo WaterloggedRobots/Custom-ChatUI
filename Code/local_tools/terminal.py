@@ -8,7 +8,7 @@ from . import Tool, ToolError, params
 
 WINDOWS = sys.platform == "win32"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)     # no console flashing up behind the GUI
-MAX_TIMEOUT = 600
+MAX_TIMEOUT = 1800
 
 
 def _kill_tree(proc: subprocess.Popen):
@@ -48,7 +48,7 @@ def shell_argv(command: str, shell: str):
                         + command]
 
 
-def run_command(box, command, shell="powershell", cwd=None, timeout=60):
+def run_command(box, command, shell="powershell", cwd=None, timeout=180):
     if not command.strip():
         raise ToolError("empty command")
     folder = box.resolve(cwd) if cwd else box.working_dir
@@ -68,7 +68,7 @@ TOOLS = [
          params(["command"], command={"type": "string"},
                 shell={"type": "string", "enum": ["powershell", "cmd"]},
                 cwd={"type": "string", "description": "Folder to run in"},
-                timeout={"type": "integer", "description": f"Seconds, default 60, at most {MAX_TIMEOUT}"}),
+                timeout={"type": "integer", "description": f"Seconds, default 180, at most {MAX_TIMEOUT}"}),
          run_command, kind="run",
          summary=lambda a: f"Run in {a.get('shell') or 'powershell'}"
                            f"{' in ' + a['cwd'] if a.get('cwd') else ''}:\n{a.get('command')}"),

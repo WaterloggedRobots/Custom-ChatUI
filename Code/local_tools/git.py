@@ -8,7 +8,7 @@ from .terminal import run_process
 REPO = {"type": "string", "description": "A folder inside the repository; default: the working folder"}
 
 
-def git(box, args, repo=None, timeout=120, check=True) -> str:
+def git(box, args, repo=None, timeout=360, check=True) -> str:
     folder = box.resolve(repo)
     if not folder.is_dir():
         raise ToolError(f"{folder} is not a folder")
@@ -84,7 +84,7 @@ def git_switch(box, branch, repo=None, create=False):
 
 
 def git_pull(box, repo=None, remote=None, branch=None):
-    return git(box, ["pull", *([remote] if remote else []), *([branch] if branch else [])], repo, timeout=300)
+    return git(box, ["pull", *([remote] if remote else []), *([branch] if branch else [])], repo, timeout=900)
 
 
 def git_push(box, repo=None, remote=None, branch=None, set_upstream=False):
@@ -95,14 +95,14 @@ def git_push(box, repo=None, remote=None, branch=None, set_upstream=False):
         args.append(remote)
     if branch:
         args.append(branch)
-    return git(box, args, repo, timeout=300) or "pushed"
+    return git(box, args, repo, timeout=900) or "pushed"
 
 
 def git_clone(box, url, destination=None):
     args = ["clone", url]
     if destination:
         args.append(str(box.resolve(destination)))
-    return git(box, args, None, timeout=600)
+    return git(box, args, None, timeout=1800)
 
 
 def git_command(box, args, repo=None):
@@ -112,7 +112,7 @@ def git_command(box, args, repo=None):
         args = args[1:]
     if not args:
         raise ToolError("no git arguments")
-    return git(box, [str(a) for a in args], repo, timeout=300, check=False) or "(no output)"
+    return git(box, [str(a) for a in args], repo, timeout=900, check=False) or "(no output)"
 
 
 def _where(a):

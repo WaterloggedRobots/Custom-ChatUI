@@ -85,7 +85,7 @@ keep tokens there. All addresses are summarised at the top of
 | `SANDBOX_ENABLED` / `SANDBOX_IMAGE` | `1` / `chatui-sandbox` | the code sandbox, and the Docker image it runs |
 | `SANDBOX_NETWORK` | `none` | `bridge` lets code in the sandbox reach the internet (pip, npm) |
 | `SANDBOX_MEMORY` / `SANDBOX_CPUS` / `SANDBOX_PIDS` / `SANDBOX_DISK` | `2g` / `2` / `256` / `1g` | limits for each chat's container (`/work` is kept in memory) |
-| `SANDBOX_TIMEOUT` / `SANDBOX_MAX_TIMEOUT` | `60` / `300` | seconds one run gets, and the most the model may ask for |
+| `SANDBOX_TIMEOUT` / `SANDBOX_MAX_TIMEOUT` | `180` / `900` | seconds one run gets, and the most the model may ask for |
 | `SANDBOX_OUTPUT_CHARS` | `12000` | output kept from one run (its start and end) |
 | `SANDBOX_IDLE_MINUTES` / `SANDBOX_MAX_SESSIONS` | `30` / `4` | an unused chat's container is removed; containers at once |
 | `ENABLE_EXTRAS` | `1` | the tool-calling test routes |
@@ -401,7 +401,7 @@ for its own tools; reads run straight away.
 - **REA** (`chat_server/rea.py`). One long-lived REA MCP server
   (`npx -y rea-agents@6.5.0 mcp`, `REA_COMMAND`) started on the first call,
   through the Python `mcp` client. Calls go one at a time; REA is started again
-  if it dies, or if a call takes longer than `REA_TIMEOUT` (20 minutes: the
+  if it dies, or if a call takes longer than `REA_TIMEOUT` (60 minutes: the
   first Ghidra analysis of a big binary is slow). Only 16 read-only tools are
   offered: `binary_overview`, `open_binary`, `binary_session`, `close_binary`,
   `list_procedures`, `search_procedures`, `procedure_pseudo_code`,
@@ -424,7 +424,7 @@ for its own tools; reads run straight away.
 - **Ubuntu run** (`ubuntu_run_command` in the same file): one bash command
   (`bash -lc`) in a folder inside the allowed ones, with its output and exit
   code. It runs as the server's user, in its own process group: a timeout
-  (60 s by default, at most `TOOL_RUN_MAX_TIMEOUT`) stops everything it
+  (180 s by default, at most `TOOL_RUN_MAX_TIMEOUT`) stops everything it
   started. The folder rules below only pick where it starts; what the command
   touches is up to you, which is why the client asks before every one.
   `TOOL_TOKEN` is taken out of its environment.
@@ -470,10 +470,10 @@ clones) are shown first in the picker as ★ shortcuts, when they're inside a ro
 | `TOOL_QUICK_FOLDERS` | `~/snap/gitpeach-desktop/13/GitHub` | ★ shortcuts at the top of the client's server folder picker, `:`-separated |
 | `TOOL_DENY`, `TOOL_READ_ONLY` | see above | never touched; only read |
 | `TOOL_OUTPUT_CHARS` | 20000 | what one result may send back |
-| `TOOL_RUN_MAX_TIMEOUT` | 1800 | seconds one command may run at most |
+| `TOOL_RUN_MAX_TIMEOUT` | 5400 | seconds one command may run at most |
 | `REA_HOME` | `~/snap/gitpeach-desktop/13/GitHub/REA` | the REA repository (its `targets/` and `scripts/`) |
 | `REA_COMMAND` | `npx -y rea-agents@6.5.0 mcp` | keep in step with `REA_VERSION` in REA's `scripts/setup-rea.sh` |
-| `REA_TIMEOUT`, `REA_START_TIMEOUT`, `REA_EXPORT_TIMEOUT` | 1200, 180, 3600 | seconds |
+| `REA_TIMEOUT`, `REA_START_TIMEOUT`, `REA_EXPORT_TIMEOUT` | 3600, 180, 3600 | seconds |
 
 ## Why Python and not C++
 

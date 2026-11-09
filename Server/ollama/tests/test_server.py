@@ -366,6 +366,29 @@ def test_fit_context_drops_in_blocks_so_the_start_stays_put():
     assert len(firsts) <= 2          # five turns, at most one change of starting message
 
 
+def test_fit_context_keeps_the_question_through_a_long_tool_run():
+    call = [{"id": "1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]
+    work = []
+    for i in range(6):
+        work += [{"role": "assistant", "content": "", "tool_calls": call},
+                 {"role": "tool", "content": f"{i}" + "x" * 3000}]
+    msgs = [{"role": "system", "content": "S"}, {"role": "user", "content": "the question"}] + work
+    kept = fit_context(msgs, num_ctx=4096, reserve=1024)
+    assert kept[:2] == msgs[:2]
+    assert kept[2]["role"] == "assistant" and kept[-1] is msgs[-1]
+    assert len(kept) < len(msgs)
+
+
+def test_fit_context_counts_the_tools_and_their_arguments():
+    msgs = [{"role": "user", "content": "x" * 100}, {"role": "assistant", "content": "y" * 100},
+            {"role": "user", "content": "z"}]
+    assert len(fit_context(msgs, num_ctx=2048, reserve=1000)) == 3
+    tools = [{"description": "d" * 6000}]
+    assert len(fit_context(msgs, num_ctx=2048, reserve=1000, tools=tools)) == 1
+    big = {"role": "assistant", "content": "", "tool_calls": [{"function": {"arguments": "a" * 6000}}]}
+    assert len(fit_context([msgs[0], big, msgs[2]], num_ctx=2048, reserve=1000)) == 1
+
+
 TOOLS = [{"type": "function", "function": {"name": "list_directory", "description": "List a folder",
                                            "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}}]
 

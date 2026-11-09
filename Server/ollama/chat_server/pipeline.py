@@ -193,38 +193,59 @@ def last_user_text(messages: List[Dict[str, Any]]) -> str:
 IMAGE_TOKENS = 800
 
 
+def _text_tokens(text: str) -> int:
+    latin = len(text.encode("ascii", "ignore"))
+    return latin // 3 + len(text) - latin       # Chinese, Japanese and the like are about a token a character
+
+
 def estimate_tokens(msg: Dict[str, Any]) -> int:
-    return len(msg.get("content", "")) // 3 + 8 + IMAGE_TOKENS * len(msg.get("images", []))
+    calls = json.dumps(msg["tool_calls"], ensure_ascii=False) if msg.get("tool_calls") else ""
+    return _text_tokens(msg.get("content", "") + calls) + 8 + IMAGE_TOKENS * len(msg.get("images", []))
 
 
 DROP_STEP = 8   # old messages are dropped in blocks, so the prompt's start (and Ollama's cache) stays put
 
 
-def fit_context(messages: List[Dict[str, Any]], num_ctx: int, reserve: int) -> List[Dict[str, Any]]:
+def fit_context(messages: List[Dict[str, Any]], num_ctx: int, reserve: int,
+                tools: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
     """Drop the oldest non-system turns until the prompt fits, so Ollama never
     silently cuts the system prompt off the front.
 
     Messages go in blocks of DROP_STEP counted from the start of the list, not
     one per turn: while a chat grows, the first kept message stays the same for
     several turns, so Ollama can reuse its cached prompt instead of re-reading
-    the whole history on every message."""
+    the whole history on every message.
+
+    The question being answered always stays. If the tool calls made for it
+    don't fit, the oldest of those rounds go."""
     budget = max(num_ctx - reserve, 1024)
     system = [m for m in messages if m["role"] == "system"]
     rest = [m for m in messages if m["role"] != "system"]
     used = sum(estimate_tokens(m) for m in system)
+    if tools:
+        used += _text_tokens(json.dumps(tools, ensure_ascii=False))
     costs = [estimate_tokens(m) for m in rest]
+    question = max((i for i, m in enumerate(rest) if m["role"] == "user"), default=len(rest) - 1)
     drop, total = 0, used + sum(costs)
-    while drop < len(rest) - 1 and total > budget:
+    while drop < question and total > budget:
         total -= costs[drop]
         drop += 1
     if drop:
-        drop = min(-(-drop // DROP_STEP) * DROP_STEP, len(rest) - 1)
+        drop = min(-(-drop // DROP_STEP) * DROP_STEP, question)
     # Never start the conversation with an orphaned assistant turn.
-    while drop < len(rest) - 1 and rest[drop]["role"] != "user":
+    while drop < question and rest[drop]["role"] != "user":
         drop += 1
-    if drop:
-        log.info("context: dropped %d old messages to fit num_ctx=%d", drop, num_ctx)
-    return system + rest[drop:]
+    total = used + sum(costs[drop:])
+    first = question + 1
+    rounds = [i for i in range(question + 1, len(rest)) if rest[i]["role"] == "assistant"]
+    for start in rounds[1:]:
+        if total <= budget:
+            break
+        total -= sum(costs[first:start])
+        first = start
+    if drop or first > question + 1:
+        log.info("context: dropped %d old messages to fit num_ctx=%d", drop + first - question - 1, num_ctx)
+    return system + rest[drop:question + 1] + rest[first:]
 
 
 # --------------------------------------------------------------------------
@@ -610,7 +631,7 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient,
         yield Event("status", "")
 
     reserve = options.get("num_predict") if (options.get("num_predict") or 0) > 0 else 4096
-    messages = fit_context(messages, options["num_ctx"], reserve)
+    messages = fit_context(messages, options["num_ctx"], reserve, job.tools)
     model_decides = job.web_search == "auto" and job.format is None
     if model_decides:
         messages = add_search_hint(messages)
@@ -709,6 +730,7 @@ async def run_chat(job: ChatJob, ollama: Ollama, http: httpx.AsyncClient,
             "total_tokens": prompt_tokens + completion_tokens,
         },
         "timings": {
+            "num_ctx": options["num_ctx"],
             "total_s": round(final.get("total_duration", 0) / 1e9, 2),
             "load_s": round(final.get("load_duration", 0) / 1e9, 2),
             "tokens_per_s": round(final.get("eval_count", 0) / (final["eval_duration"] / 1e9), 1)

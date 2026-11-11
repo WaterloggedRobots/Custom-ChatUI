@@ -24,11 +24,12 @@ import paths
 import personalities
 import voice
 from local_tools import memory
+from Widgets import projectWork
 from Widgets.chatMain import LiveComboBox, WEB_LABELS, safe_file_name
 
 from PySide6.QtWidgets import QMainWindow, QFileDialog, QGridLayout, QComboBox, QInputDialog, QMessageBox, QScrollArea
 from PySide6.QtUiTools import QUiLoader
-from PySide6.QtCore import QFile, QSettings, QTimer, QUrl, Signal
+from PySide6.QtCore import QFile, QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from pathlib import Path
 
@@ -272,8 +273,13 @@ class ChatSettings(QMainWindow):
         combo.clear()
         if self.editing:
             combo.addItem("Each chat picks its own", "")
+        lead = self._for_lead()
         for mid, m in main.models.items():
             combo.addItem(main.model_label(m), mid)
+            if lead and not projectWork.fits_lead(m):
+                combo.model().item(combo.count() - 1).setEnabled(False)
+                combo.setItemData(combo.count() - 1, "A project's chat needs a model that thinks (💭) and calls "
+                                                     "tools (🔧)", Qt.ToolTipRole)
         if self.model and self.model not in main.models:
             combo.addItem(f"   {self.model} (not on the server)", self.model)
         combo.setCurrentIndex(max(0, combo.findData(self.model)))
@@ -281,6 +287,10 @@ class ChatSettings(QMainWindow):
         if not self.model and combo.count() and not self.editing:
             self.model = combo.currentData()
         self._update_capabilities()
+
+    def _for_lead(self) -> bool:
+        """Editing the open chat, and it's a project's own chat."""
+        return not self.is_new and not self.editing and self.chat_main.is_lead()
 
     def on_model_chosen(self, index):
         chosen = self.model_combo.itemData(index)
@@ -299,6 +309,9 @@ class ChatSettings(QMainWindow):
         can_think = not caps or "thinking" in caps
         can_call = not caps or "tools" in caps
         self._usable(self.ui.thinkCheck, can_think, f"{self.model} can't think; this setting is ignored")
+        if self._for_lead():
+            self.ui.thinkCheck.setChecked(True)
+            self._usable(self.ui.thinkCheck, False, "A project's chat always thinks before it hands out work")
         for check, _ in self._tool_checks():
             self._usable(check, can_call, f"{self.model} can't call tools; pick a model marked 🔧")
         self._usable(self.ui.memoryCheck, can_call,

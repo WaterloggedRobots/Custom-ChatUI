@@ -23,6 +23,7 @@ class ChatList(QTreeWidget):
         super().__init__(parent)
         self.chats = []                 # chat names, oldest use first (.temp.json's ChatList)
         self.sections = []
+        self.project_of = lambda chat: None     # the project a chat is the own chat of (ChatMain sets it)
         self.setHeaderHidden(True)
         self.setIndentation(14)
         self.setExpandsOnDoubleClick(False)
@@ -60,13 +61,23 @@ class ChatList(QTreeWidget):
             font.setBold(True)
             item.setFont(0, font)
             for chat in members:
-                self._row(item, "chat", chat, chat, chat_flags)
+                self._chat_row(item, chat, chat_flags)
             item.setExpanded(s["Open"])
         for chat in reversed(self.chats):
             if chat not in grouped:
-                self._row(self, "chat", chat, chat, chat_flags)
+                self._chat_row(self, chat, chat_flags)
         self.blockSignals(False)
         self.verticalScrollBar().setValue(pos)
+
+    def _chat_row(self, parent, chat, flags):
+        project = self.project_of(chat)
+        item = self._row(parent, "chat", chat, f"📂 {chat}" if project else chat, flags)
+        if project:
+            item.setToolTip(0, f"The own chat of project {project}: it hands out the project's work")
+        return item
+
+    def redraw(self):
+        self._redraw()
 
     @staticmethod
     def _row(parent, kind, name, text, flags):

@@ -13,6 +13,7 @@ The sandbox tools (sandbox.py) test code in a throwaway container on the server;
 while either run or ubuntu_run is.
 Memory notes (memory.py) have their own switch: their tools are on while the chat has a memory_dir.
 Reading linked chats (linked.py) is on while the chat's links reach any.
+Handing out work (project.py) is on only in a project's own chat, which gets a Desk.
 
 They run here, in the client, because the files are on this PC and the LLM
 server is another machine. The server only passes the tool list to Ollama and
@@ -24,6 +25,7 @@ Each tool has a kind:
   write  changes files, folders or a repository. Asks you first.
   run    runs a program or shell command. Asks you first.
   sandbox  runs code in the server's throwaway container, not on this PC. Runs without asking.
+  delegate gives a session of the project a task. Runs without asking; the session asks before it changes anything.
 
 ToolBox holds the state one chat needs: the folders and GitHub repositories
 you linked to the chat (the model is told about them; the first folder is where
@@ -101,6 +103,7 @@ class ToolBox:
         self.server_folders: List[str] = []
         self.memory_dir: Optional[Path] = None   # this chat's memory notes; None = memory is off
         self.link_scope = None            # what this chat's links reach (linked.LinkScope), replaced whole
+        self.project = None               # a project's own chat: its project.Desk, for handing out work
         self.always_allow: set = set()
         # Turns a PDF or Word file into text (llmClient uses the server's /v1/files/extract).
         self.extract_text = extract_text
@@ -108,7 +111,7 @@ class ToolBox:
         self.server: Optional[Callable[[], tuple]] = None
         self.sandbox_session = uuid.uuid4().hex[:16]   # this chat's container in the server's sandbox
         self.sandbox_skipped: List[str] = []
-        from . import files, git, linked, memory, rea, sandbox, terminal, ubuntu
+        from . import files, git, linked, memory, project, rea, sandbox, terminal, ubuntu
         self.remotes = {"rea": rea.remote(), "ubuntu": ubuntu.remote()}   # each lists one or more groups
         self.tools: Dict[str, Tool] = {}
         for group, module in zip(GROUPS, (files, git, terminal)):
@@ -123,6 +126,9 @@ class ToolBox:
             self.tools[t.name] = t
         for t in linked.TOOLS:
             t.group = "links"
+            self.tools[t.name] = t
+        for t in project.TOOLS:
+            t.group = "project"
             self.tools[t.name] = t
         self.groups: set = set(GROUPS)    # the groups this chat turned on
 
@@ -156,6 +162,8 @@ class ToolBox:
             return self.memory_dir is not None
         if tool and tool.group == "links":
             return self.has_links()
+        if tool and tool.group == "project":
+            return self.project is not None
         if tool and tool.group == "sandbox":
             return bool(self.groups & SANDBOX_WITH)
         return bool(tool) and (tool.group in self.groups or (name in SHARED and bool(self.groups & set(GROUPS))))
@@ -241,7 +249,7 @@ class ToolBox:
         return tool.kind if tool else "read"
 
     def needs_approval(self, name: str) -> bool:
-        return self.kind(name) not in ("read", "sandbox") and name not in self.always_allow
+        return self.kind(name) not in ("read", "sandbox", "delegate") and name not in self.always_allow
 
     def describe(self, name: str, args: Dict[str, Any]) -> str:
         """One readable line for the approval prompt and the chat log."""

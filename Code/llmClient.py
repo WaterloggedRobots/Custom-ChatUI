@@ -94,6 +94,7 @@ class LLMClient(QObject):
         self.temperature = 0.7
         self.preset = ""
         self.character = ""            # the name in the chat's settings; the model is told it (name_note)
+        self.role_note = ""            # a project's own chat: what it's for (local_tools.project.lead_note)
         self.think = True
         self.vision = True             # False: the model can't see images, so they're named, not sent
         self.web_mode = "auto"
@@ -141,6 +142,26 @@ class LLMClient(QObject):
 
     def set_preset(self, text: str):
         self.preset = (text or "").strip()
+
+    def apply_options(self, settings: dict, caps=None, memory_dir=None) -> bool:
+        """A chat's options, leaving out what the model can't use: tools and memory need a model
+        that calls tools, Think one that thinks, and pictures one that sees. `caps` are the model's
+        capabilities as the server reports them; None or [] gives it the benefit of the doubt.
+        Set toolbox.link_scope and toolbox.project first. Returns whether the model can call tools."""
+        def can(capability):
+            return not caps or capability in caps
+        s, box = settings, self.toolbox
+        self.web_mode = s["Web Search"]
+        self.image_workflow = s["Image Workflow"]
+        self.image_mode = s["Image Mode"]
+        self.think = s["Think"] and can("thinking")
+        self.vision = can("vision")
+        groups = chat_settings.tool_groups(s)
+        box.set_groups(groups)
+        box.memory_dir = memory_dir if s["Memory"] else None
+        self.tools_enabled = (bool(groups) or box.memory_dir is not None or box.has_links()
+                              or box.project is not None) and can("tools")
+        return can("tools")
 
     @property
     def busy(self) -> bool:
@@ -242,7 +263,8 @@ class LLMClient(QObject):
     def build_messages(self, history, summary_text=None):
         _, recent = self._split_history(history)
         messages = []
-        system = "\n\n".join(p for p in (self.preset, chat_settings.name_note(self.character, self.preset)) if p)
+        system = "\n\n".join(p for p in (self.preset, chat_settings.name_note(self.character, self.preset),
+                                         self.role_note) if p)
         if system:
             messages.append({"role": "system", "content": system})
         memory = self.toolbox.memory_note()
@@ -560,6 +582,21 @@ class LLMClient(QObject):
             self._response = None
         self.status.emit("")
         self.done.emit(result)
+
+
+def reply_message(result: dict, content: str, started: float, thinking_time=None) -> dict:
+    """The chat's message for a finished answer (`result` from LLMClient.done), with its text as `content`."""
+    end = time.time()
+    msg = {"role": "assistant", "content": content, "ts": end, "response_time": round(end - started, 2)}
+    if result.get("thinking"):
+        msg["thinking"] = result["thinking"]
+        msg["thinking_time"] = thinking_time if thinking_time is not None else msg["response_time"]
+    for key in ("sources", "tools", "images", "usage"):
+        if result.get(key):
+            msg[key] = result[key]
+    if result.get("aborted"):
+        msg["stopped"] = True
+    return msg
 
 
 def keep_image(img: dict) -> dict:

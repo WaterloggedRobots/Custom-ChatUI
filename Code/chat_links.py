@@ -10,13 +10,19 @@ three kinds of link, always stored from the lower kind of node to the higher:
                                  the personality can look through it, and a
                                  project's "reads" covers all of its chats
 
+Each project can have a chat of its own, its lead chat, which the graph draws as
+the project node itself. It reads all of the project's sessions and hands them
+work (local_tools/project.py); it isn't a session of the project. A project
+"speaks as" a personality through its lead chat.
+
 It all lives in Save/links.json:
   {"Projects": [names], "Personalities": [names],
    "Links": [{"From": node, "To": node, "Kind": kind}],
    "Private": [chat names], "Layout": {node: {"x", "y", "Pinned"}},
    "Summaries": {chat: {"Upto": messages covered, "Text": one line}},
    "Overrides": {chat: [settings it changed from its personality]},
-   "Skipped": {chat: [groups of its personality's settings it doesn't take]}}
+   "Skipped": {chat: [groups of its personality's settings it doesn't take]},
+   "Leads": {project: its lead chat}}
 A node is "<type>:<name>", such as "chat:Avatar part 2".
 
 No Qt here, so it can be tested on its own (tests/test_chat_links.py).
@@ -50,7 +56,7 @@ def clean_name(name: str) -> str:
 
 
 def empty() -> dict:
-    return {"Projects": [], "Personalities": [], "Links": [], "Private": [], "Layout": {}, "Summaries": {}, "Overrides": {}, "Skipped": {}}
+    return {"Projects": [], "Personalities": [], "Links": [], "Private": [], "Layout": {}, "Summaries": {}, "Overrides": {}, "Skipped": {}, "Leads": {}}
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +84,13 @@ def normalize(data, chats) -> dict:
         if isinstance(link, dict) and link.get("From") in known and link.get("To") in known:
             add_link(out, link["From"], link["To"], link.get("Kind"))
     out["Private"] = [c for c in _names(data.get("Private")) if c in set(chats)]
+    leads = data.get("Leads") if isinstance(data.get("Leads"), dict) else {}
+    for project, chat in leads.items():
+        if project in out["Projects"] and chat in set(chats) and chat not in out["Leads"].values():
+            out["Leads"][project] = chat
+    # A lead chat is its project, not a session of one.
+    lead_nodes = {node(CHAT, c) for c in out["Leads"].values()}
+    out["Links"] = [l for l in out["Links"] if not (l["Kind"] == MEMBER and l["From"] in lead_nodes)]
     layout = data.get("Layout") if isinstance(data.get("Layout"), dict) else {}
     for name, place in layout.items():
         if name in known and isinstance(place, dict) and all(
@@ -141,7 +154,7 @@ def link_kinds(a: str, b: str) -> list:
     if kinds == {CHAT, PERSONALITY}:
         return [SPEAKS, READS]
     if kinds == {PROJECT, PERSONALITY}:
-        return [READS]
+        return [SPEAKS, READS]          # "speaks" is stored on the project's lead chat
     return []
 
 
@@ -151,14 +164,26 @@ def _ordered(a: str, b: str):
 
 def has_link(data: dict, a: str, b: str, kind: str) -> bool:
     start, end = _ordered(a, b)
+    if kind == SPEAKS and split_node(start)[0] == PROJECT:
+        lead = lead_of(data, split_node(start)[1])
+        return bool(lead) and speaks_as(data, lead) == split_node(end)[1]
     return any(l["From"] == start and l["To"] == end and l["Kind"] == kind for l in data["Links"])
 
 
 def add_link(data: dict, a: str, b: str, kind: str) -> bool:
-    """Add a link if its kind suits the nodes. "speaks" replaces the chat's earlier personality."""
+    """Add a link if its kind suits the nodes. "speaks" replaces the chat's earlier personality.
+    A project speaks through its lead chat, so it needs one first."""
     if kind == MAKE_PROJECT or kind not in link_kinds(a, b) or has_link(data, a, b, kind):
         return False
     start, end = _ordered(a, b)
+    if kind == SPEAKS and split_node(start)[0] == PROJECT:
+        lead = lead_of(data, split_node(start)[1])
+        if not lead:
+            return False
+        set_speaks_as(data, lead, split_node(end)[1])
+        return True
+    if kind == MEMBER and split_node(start)[1] in data["Leads"].values():
+        return False
     if kind == SPEAKS:
         set_speaks_as(data, split_node(start)[1], None)
     data["Links"].append({"From": start, "To": end, "Kind": kind})
@@ -167,6 +192,8 @@ def add_link(data: dict, a: str, b: str, kind: str) -> bool:
 
 def remove_link(data: dict, a: str, b: str, kind: str) -> None:
     start, end = _ordered(a, b)
+    if kind == SPEAKS and split_node(start)[0] == PROJECT:
+        start = node(CHAT, lead_of(data, split_node(start)[1]) or "")
     data["Links"] = [l for l in data["Links"]
                      if not (l["From"] == start and l["To"] == end and l["Kind"] == kind)]
     if kind == SPEAKS:
@@ -240,7 +267,40 @@ def projects_of(data: dict, chat: str) -> list:
 
 
 def is_linked(data: dict, chat: str) -> bool:
-    return bool(links_of(data, node(CHAT, chat)))
+    return bool(links_of(data, node(CHAT, chat))) or chat in data["Leads"].values()
+
+
+def lead_of(data: dict, project: str):
+    """The project's own chat, or None if it has none yet."""
+    return data["Leads"].get(project)
+
+
+def led_by(data: dict, chat: str):
+    """The project this chat is the lead chat of, or None."""
+    return next((p for p, c in data["Leads"].items() if c == chat), None)
+
+
+def set_lead(data: dict, project: str, chat: str) -> None:
+    """Make `chat` the project's own chat. It stops being a session of any project."""
+    if project not in data["Projects"]:
+        return
+    data["Leads"] = {p: c for p, c in data["Leads"].items() if c != chat}
+    data["Leads"][project] = chat
+    start = node(CHAT, chat)
+    data["Links"] = [l for l in data["Links"] if not (l["From"] == start and l["Kind"] == MEMBER)]
+
+
+def sessions_of(data: dict, project: str) -> list:
+    """The chats in a project, sorted."""
+    end = node(PROJECT, project)
+    return sorted(split_node(l["From"])[1] for l in data["Links"] if l["To"] == end and l["Kind"] == MEMBER)
+
+
+def shown_node(data: dict, name: str) -> str:
+    """Where the graph draws a node: a lead chat is drawn as its project."""
+    kind, label = split_node(name)
+    project = led_by(data, label) if kind == CHAT else None
+    return node(PROJECT, project) if project else name
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +328,10 @@ def rename_node(data: dict, kind: str, old: str, new: str) -> None:
         for table in (data["Summaries"], data["Overrides"], data["Skipped"]):
             if old in table:
                 table[new] = table.pop(old)
+        data["Leads"] = {p: new if c == old else c for p, c in data["Leads"].items()}
     else:
+        if kind == PROJECT and old in data["Leads"]:
+            data["Leads"][new] = data["Leads"].pop(old)
         data[_list_key(kind)] = [new if n == old else n for n in data[_list_key(kind)]]
     for link in data["Links"]:
         link["From"] = now if link["From"] == was else link["From"]
@@ -285,6 +348,8 @@ def remove_hub(data: dict, kind: str, name: str) -> None:
             _forget_choices(data, split_node(link["From"])[1])
     data[_list_key(kind)] = [n for n in data[_list_key(kind)] if n != name]
     data["Links"] = [l for l in data["Links"] if gone not in (l["From"], l["To"])]
+    if kind == PROJECT:
+        data["Leads"].pop(name, None)       # its chat stays, as a chat of its own
     data["Layout"].pop(gone, None)
 
 
@@ -304,11 +369,18 @@ def readable_chats(data: dict, chat: str) -> dict:
     from the other sessions of its own project."""
     found = {}
     own_projects = projects_of(data, chat)
+    led = led_by(data, chat)
     members = {}
     for link in data["Links"]:
         if link["Kind"] == MEMBER:
             members.setdefault(split_node(link["To"])[1], []).append(split_node(link["From"])[1])
+    if led:
+        for other in members.get(led, []):
+            found.setdefault(other, f"a session of your project {led}")
     for project in own_projects:
+        lead = lead_of(data, project)
+        if lead:
+            found.setdefault(lead, f"the own chat of your project {project}, where its work is handed out")
         for other in members.get(project, []):
             found.setdefault(other, f"same project: {project}")
     personality = speaks_as(data, chat)

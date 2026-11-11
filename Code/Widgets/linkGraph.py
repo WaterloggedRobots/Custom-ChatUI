@@ -126,7 +126,8 @@ class NodeItem(Fader, QGraphicsItem):
             painter.setPen(QPen(QColor(255, 255, 255, 90), 7))
             painter.setBrush(Qt.NoBrush)
             painter.drawPath(self.path)
-        chat = self.label if self.kind == cl.CHAT else None
+        chat = self.label if self.kind == cl.CHAT else cl.lead_of(graph.links, self.label) \
+            if self.kind == cl.PROJECT else None
         if self.name == graph.selected:
             pen = QPen(QColor("#ffffff"), 2.6)
         elif chat is not None and chat == graph.chat_main.chat_name():
@@ -470,7 +471,10 @@ class LinkGraph(QMainWindow):
         query = self.search.text().strip().lower()
         shown = [cl.node(cl.PROJECT, p) for p in links["Projects"]]
         shown += [cl.node(cl.PERSONALITY, p) for p in links["Personalities"]]
+        leads = set(links["Leads"].values())      # drawn as their projects
         for chat in self.chat_main.all_chats():
+            if chat in leads:
+                continue
             if (self.unlinked_check.isChecked() or cl.is_linked(links, chat) or chat == self.chat_main.chat_name()
                     or (query and query in self.shown_name(cl.node(cl.CHAT, chat)).lower())):
                 shown.append(cl.node(cl.CHAT, chat))
@@ -489,7 +493,8 @@ class LinkGraph(QMainWindow):
         new = [n for n in shown if n not in self.nodes]
         pairs = {}
         for link in links["Links"]:
-            pairs.setdefault((link["From"], link["To"]), []).append(link)
+            ends = (cl.shown_node(links, link["From"]), cl.shown_node(links, link["To"]))
+            pairs.setdefault(ends, []).append(link)
         neighbors = {}
         for start, end in pairs:
             neighbors.setdefault(start, []).append(end)
@@ -508,7 +513,7 @@ class LinkGraph(QMainWindow):
                 self.layout.place(name, x, y)
             item.setPos(self.layout.x[name], self.layout.y[name])
 
-        old_edges = {(e.link["From"], e.link["To"]) for e in self.edges}
+        old_edges = {(e.start.name, e.end.name) for e in self.edges}
         for edge in self.edges:
             self.scene.removeItem(edge)
         self.edges = []
@@ -527,9 +532,9 @@ class LinkGraph(QMainWindow):
                         edge.set_style()
                         keep_edge = self.selected_edge
         self.selected_edge = keep_edge
-        self.layout.edges = [(e.link["From"], e.link["To"]) for e in self.edges]
+        self.layout.edges = [(e.start.name, e.end.name) for e in self.edges]
         for name, item in self.nodes.items():
-            item.set_links(sum(1 for e in self.edges if name in (e.link["From"], e.link["To"])))
+            item.set_links(sum(1 for e in self.edges if name in (e.start.name, e.end.name)))
         if moved:
             self.layout.warm(1.0 if new else 0.5)
         elif not self.timer.isActive():
@@ -558,8 +563,8 @@ class LinkGraph(QMainWindow):
             bright = {focus}
             bright_edges = set()
             for edge in self.edges:
-                if focus in (edge.link["From"], edge.link["To"]):
-                    bright.update((edge.link["From"], edge.link["To"]))
+                if focus in (edge.start.name, edge.end.name):
+                    bright.update((edge.start.name, edge.end.name))
                     bright_edges.add(id(edge))
         elif query:
             bright = {n for n in self.nodes if query in self.shown_name(n).lower()}
@@ -703,13 +708,19 @@ class LinkGraph(QMainWindow):
         if kind == cl.MAKE_PROJECT:
             self._make_project(start, target.name)
         elif kind:
+            if kind == cl.SPEAKS:
+                project = next((cl.split_node(n)[1] for n in (start, target.name)
+                                if cl.split_node(n)[0] == cl.PROJECT), None)
+                if project:
+                    self.chat_main.project_chat(project)      # a project speaks through its own chat
             cl.add_link(self.links, start, target.name, kind)
             self.chat_main.links_updated()
 
     def _choose_kind(self, a, b, choices):
-        chat = cl.split_node(a if cl.split_node(a)[0] == cl.CHAT else b)[1]
+        chat = cl.split_node(b if cl.split_node(a)[0] == cl.PERSONALITY else a)[1]
         personality = cl.split_node(a if cl.split_node(a)[0] == cl.PERSONALITY else b)[1]
-        labels = {cl.SPEAKS: f"{chat} speaks as {personality}", cl.READS: f"{personality} can read {chat}"}
+        speaker = f"{chat}'s own chat" if cl.PROJECT in (cl.split_node(a)[0], cl.split_node(b)[0]) else chat
+        labels = {cl.SPEAKS: f"{speaker} speaks as {personality}", cl.READS: f"{personality} can read {chat}"}
         menu = QMenu(self)
         menu.setStyleSheet(MENU_STYLE)
         actions = {menu.addAction(labels[k]): k for k in choices}
@@ -740,6 +751,8 @@ class LinkGraph(QMainWindow):
             actions.append(("Stop keeping private" if private else "Keep private from personalities",
                             lambda: self.set_private(label, not private)))
         else:
+            if kind == cl.PROJECT:
+                actions.insert(0, ("Open project chat", lambda: self.open_project_chat(label)))
             if kind == cl.PERSONALITY:
                 actions.append(("Edit settings…", lambda: self.edit_personality.emit(label)))
             actions += [("Open memory folder", lambda: self.open_memory(kind, label)),
@@ -768,6 +781,13 @@ class LinkGraph(QMainWindow):
     def open_chat(self, chat):
         main = self.chat_main
         main.qs_chat(chat)
+        main.show()
+        main.raise_()
+        main.activateWindow()
+
+    def open_project_chat(self, project):
+        main = self.chat_main
+        main.open_project_chat(project)
         main.show()
         main.raise_()
         main.activateWindow()
@@ -928,19 +948,31 @@ class LinkGraph(QMainWindow):
         self._panel_label(self.shown_name(name), bold=True)
         self._panel_label(TYPE_NAMES[kind], muted=True)
         rows = [self._link_row(name, link) for link in cl.links_of(self.links, name)]
+        lead = cl.lead_of(self.links, label) if kind == cl.PROJECT else None
+        if lead:
+            rows += [self._link_row(cl.node(cl.CHAT, lead), link)
+                     for link in cl.links_of(self.links, cl.node(cl.CHAT, lead))]
         if rows:
             listing = QListWidget()
             listing.addItems(rows)
             listing.setMaximumHeight(170)
             self.panel_layout.addWidget(listing)
-        personality = cl.speaks_as(self.links, label) if kind == cl.CHAT else None
+        speaker = label if kind == cl.CHAT else lead
+        personality = cl.speaks_as(self.links, speaker) if speaker else None
+        if kind == cl.PROJECT:
+            count = len(cl.sessions_of(self.links, label))
+            sessions = f"{count} session{'' if count == 1 else 's'}"
+            self._panel_label(f"Its own chat hands out work to its {sessions}: open it and say what you need."
+                              if lead else f"{sessions}. Open the project chat to hand out work to them.", muted=True)
         if personality:
             self._panel_label(f"Name, description and memory notes come from {personality}. Also take:", muted=True)
             skipped = cl.skipped_of(self.links, label)
             for group in personalities.OPTIONAL:
+                if kind == cl.PROJECT and group == "LLM model":
+                    continue                 # a project's chat keeps a model that thinks
                 check = QCheckBox(group)
                 check.setChecked(group not in skipped)
-                check.toggled.connect(lambda on, c=label, g=group: self.set_followed(c, g, on))
+                check.toggled.connect(lambda on, c=speaker, g=group: self.set_followed(c, g, on))
                 self.panel_layout.addWidget(check)
         if kind == cl.CHAT:
             reach = cl.readable_chats(self.links, label)

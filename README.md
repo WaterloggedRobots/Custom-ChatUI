@@ -90,6 +90,12 @@ Each chat has its own notes: Markdown files in `Save/Chat/<chat name>/memory`, w
 | Chat to project (solid) | The chat is a session of the project. Sessions can read each other and get the project's memory notes |
 | Chat to personality, **speaks as** (thick) | The chat talks as that personality. A chat has one at most |
 | Chat or project to personality, **can read** (dashed arrow) | Chats speaking as that personality can read this chat, or every session of this project. Nothing comes back the other way |
+| Project to personality, **speaks as** (thick) | The project's own chat talks as that personality, and so do the sessions it starts |
+
+### Project chats (v0.18)
+A project node is also a chat: right-click it and choose **Open project chat** (it's made the first time, and shows in the chat list with a 📂). Tell it what you need, and it splits the work into tasks: it starts new sessions for new work, or hands a task to a session that already knows that area (a chat outside the project joins it first), with a brief holding everything that session needs, since a session only sees its brief and its own chat. Sessions work through their briefs in the background, one at a time, while you keep talking or open another chat. Each answer comes back to the project chat as a 📨 report. A session that's open answers right there, so you can watch it; one working in the background is read-only until it's done. Its changes and commands still ask your OK, in a popup that names the session.
+
+A project chat needs a model that thinks (💭) and calls tools (🔧). It starts on Gemma 4 (the largest `gemma4` on the server), Think is always on, and models that can't do both are greyed out in its lists. Its tone comes from who it speaks as: with a personality it splits the work in her own voice, like someone juggling several jobs, and its sessions speak as her too; with none it's a technical lead assigning precise tasks to its team. The personality's LLM model doesn't reach the project chat, which keeps its own.
 
 A chat can also use the folders and GitHub repositories of every chat it can read. They show in its ▾ lists with a 🔗 (the count reads like `▾ 2 +3`), and aren't saved into its own lists. Only their paths go to the model, up to 15 of each, and it opens what it needs, so this adds very little context. A private chat's folders stay out of a personality's reach, as its messages do.
 

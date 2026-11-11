@@ -8,6 +8,8 @@ import personalities
 import voice
 from local_tools import github_login, repo_url
 from local_tools.linked import LinkedChat, LinkScope, shared_by
+from local_tools.project import lead_note
+from Widgets import projectWork
 from Widgets.chatList import ChatList
 from Widgets.serverFolders import ServerFolderPicker
 
@@ -31,6 +33,7 @@ MUTED = "#8a8a8a"
 IMAGE_HEIGHT = 240              # pictures in the chat; click one to open it full size
 CAP_ICONS = (("vision", "👁"), ("thinking", "💭"), ("tools", "🔧"))
 WEB_LABELS = {"auto": "Web: Auto", "on": "Web: Always", "off": "Web: Off"}
+MAX_FOLLOW_UPS = 3                 # a project chat answers its sessions' reports this often per message of yours
 TOOL_STATE_ICONS = {"ok": "✓", "error": "⚠", "declined": "✗ declined"}
 APP_VERSION = "0.17.0_Ubuntools"
 MENU_LIST_HEIGHT = 320          # a list in a menu scrolls beyond this
@@ -234,6 +237,12 @@ class ChatMain(QMainWindow):
         self.client.approval_needed.connect(self.on_approval_needed)
         self.client.image.connect(self.on_image)
         self.client.chat_summarized.connect(self.on_chat_summarized)
+        # A project's own chat hands its sessions work, which they do in the background (projectWork.py)
+        self.desk = None                 # the open chat's projectWork.ProjectDesk, if it's a project's chat
+        self.runner = projectWork.SessionRunner(self)
+        self.runner.changed.connect(self._show_runner_state)
+        self._pending_messages = []      # for the open chat, waiting for its answer to finish
+        self._follow_ups = {}            # project chat -> times it answered its reports since your last message
         self.redrawer = Redrawer(self)
         self.redrawer.finished.connect(self.on_redrawn)
         self.redrawing = False
@@ -284,6 +293,8 @@ class ChatMain(QMainWindow):
                 self.setWindowTitle("ChatUI")
                 self.chat_list = self.ui.chatList
                 self.chat_list.sections_changed.connect(self.save_sections)
+                self.chat_list.project_of = lambda chat: chat_links.led_by(self.links, chat)
+                self.links_changed.connect(self.chat_list.redraw)
                 self.chat = self.ui.textBrowser
                 self.input = self.ui.plainTextEdit
                 self.chat.setOpenLinks(False)
@@ -469,6 +480,12 @@ class ChatMain(QMainWindow):
                             "loaded" if m.get("loaded") else "not loaded") if x), Qt.ToolTipRole)
         if current and current not in self.models:
             combo.addItem(f"   {current} (not on the server)", current)
+        if self.is_lead():
+            for i, mid in enumerate(self.models):
+                if not projectWork.fits_lead(self.models[mid]):
+                    combo.model().item(i).setEnabled(False)
+                    combo.setItemData(i, "A project's chat needs a model that thinks (💭) and calls tools (🔧)",
+                                      Qt.ToolTipRole)
         combo.setCurrentIndex(max(0, combo.findData(current)))
         combo.blockSignals(False)
         self._apply_options()
@@ -494,18 +511,17 @@ class ChatMain(QMainWindow):
         tools and memory need a model that calls tools, Think one that thinks, and
         pictures one that sees."""
         s = self.settings
-        can_call = self.can("tools")
-        self.client.web_mode = s["Web Search"]
-        self.client.image_workflow = s["Image Workflow"]
-        self.client.image_mode = s["Image Mode"]
-        self.client.think = s["Think"] and self.can("thinking")
-        self.client.vision = self.can("vision")
-        groups = chat_settings.tool_groups(s)
-        self.client.toolbox.set_groups(groups)
-        self.client.toolbox.memory_dir = self.memory_folder() if s["Memory"] else None
         self.client.toolbox.link_scope = self._link_scope()
-        self.client.tools_enabled = (bool(groups) or self.client.toolbox.memory_dir is not None
-                                     or self.client.toolbox.has_links()) and can_call
+        project = chat_links.led_by(self.links, self.chat_name())
+        if not project:
+            self.desk = None
+        elif not self.desk or (self.desk.project, self.desk.personality) != (project, self.personality_name):
+            self.desk = projectWork.ProjectDesk(self, project, self.personality_name)
+        self.client.toolbox.project = self.desk
+        self.client.role_note = lead_note(project, self.personality_name, s["Character"]) if project else ""
+        caps = self.models.get(self.client.model_name, {}).get("capabilities")
+        can_call = self.client.apply_options(s, caps, self.memory_folder())
+        groups = chat_settings.tool_groups(s)
         if not groups:
             tip = "Tools are off for this chat (Character > Settings)"
         elif not can_call:
@@ -805,12 +821,15 @@ class ChatMain(QMainWindow):
         self._insert_stream(f"🔧 {ev['summary'].splitlines()[0]}  {TOOL_STATE_ICONS.get(ev['state'], '')}\n", muted=True)
         self._show_tools_folder()
 
-    def on_approval_needed(self, req):
-        """A change or command wants to run; the worker thread waits for the answer."""
+    def on_approval_needed(self, req, client=None, who=None):
+        """A change or command wants to run; the worker thread waits for the answer.
+        `client` and `who` are for a session working in the background."""
+        client = client or self.client
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Warning if req["kind"] == "run" else QMessageBox.Question)
         box.setWindowTitle("Allow this command?" if req["kind"] == "run" else "Allow this change?")
-        box.setText(f"{html.escape(self.botName)} wants to:<br/><br/><b>"
+        asker = html.escape(self.botName) if who is None else f"Session <b>{html.escape(who)}</b>, in the background,"
+        box.setText(f"{asker} wants to:<br/><br/><b>"
                     + html.escape(req["summary"]).replace("\n", "<br/>") + "</b>")
         box.setTextFormat(Qt.RichText)
         box.setDetailedText(req.get("details", ""))
@@ -822,7 +841,7 @@ class ChatMain(QMainWindow):
         self.status_label.setText("Waiting for your OK…")
         box.exec()
         clicked = box.clickedButton()
-        self.client.answer_approval("allow" if clicked is allow else "always" if clicked is always else "deny")
+        client.answer_approval("allow" if clicked is allow else "always" if clicked is always else "deny")
 
     def on_file_button(self):
         if not self.pending_attachments:
@@ -1051,7 +1070,13 @@ class ChatMain(QMainWindow):
         time_str = f" <span style='color:{MUTED}'>[{self.format_ts(ts)}]</span>" if ts else ""
         self.chat.moveCursor(QTextCursor.End)    # a click in the chat moves the cursor; insert at the end anyway
         if msg["role"] == "user":
-            self.chat.append(f"<b>You</b>{time_str}:")
+            if msg.get("report"):
+                who = f"📨 {html.escape(msg['report'])}"
+            elif msg.get("from"):
+                who = f"📋 Brief from project {html.escape(msg['from'])}"
+            else:
+                who = "You"
+            self.chat.append(f"<b>{who}</b>{time_str}:")
             self.chat.insertHtml(self.render_user(msg))
         else:
             self.chat.append(f"<b>{html.escape(self.botName)}</b>{time_str}:")
@@ -1214,31 +1239,16 @@ class ChatMain(QMainWindow):
             self._end_response()
             self._rebuild_chat_ui()
             self.on_status("Stopped")
+            self._after_answer(None, "it was stopped")
             return
 
         end_time = time.time()
         content, acts = result.get("content", ""), []
         if self.settings["Avatar"]:
             content, acts = avatar.strip_tags(content)
-        msg = {
-            "role": "assistant",
-            "content": content,
-            "ts": end_time,
-            "response_time": round(end_time - self.response_start_time, 2),
-        }
-        if result.get("thinking"):
-            msg["thinking"] = result["thinking"]
-            msg["thinking_time"] = self.thinking_time or round(end_time - (self.thinking_started_at or end_time), 1)
-        if result.get("sources"):
-            msg["sources"] = result["sources"]
-        if result.get("tools"):
-            msg["tools"] = result["tools"]
-        if result.get("images"):
-            msg["images"] = result["images"]
-        if result.get("usage"):
-            msg["usage"] = result["usage"]
-        if result.get("aborted"):
-            msg["stopped"] = True
+        msg = llmClient.reply_message(
+            result, content, self.response_start_time,
+            self.thinking_time or round(end_time - (self.thinking_started_at or end_time), 1))
         if acts:
             msg["acts"] = acts            # her stage directions, with where they were in the text
         self.chat_markdown.append(msg)
@@ -1259,6 +1269,7 @@ class ChatMain(QMainWindow):
         if s["TTS"] and (s["TTS Auto Play"] or s["Avatar"]) and msg["content"].strip() \
                 and not result.get("aborted"):
             self.speak(len(self.chat_markdown) - 1, reacted=self._reacted)
+        self._after_answer(msg["content"] if not result.get("aborted") else None, "it was stopped")
 
     # ------------------------------------------------------------------
     # Pictures (ComfyUI, through the server)
@@ -1341,6 +1352,7 @@ class ChatMain(QMainWindow):
                           f"<div style='color:{MUTED};font-size:11px'>Press Reload Text to try again.</div>")
         cursor.insertBlock()
         self._end_response()
+        self._after_answer(None, err)
 
     def keyPressEvent(self, event):
         if self.input.hasFocus():
@@ -1461,6 +1473,8 @@ class ChatMain(QMainWindow):
         if self.client.busy:
             self.client.abort_generation()
             self._end_response()
+        self._flush_pending()
+        self.runner.give_back(self.chat_name())
 
         if path == "":
             path = self.get_first_json_file_os(str(paths.CHAT_DIR))
@@ -1517,6 +1531,9 @@ class ChatMain(QMainWindow):
         self._rebuild_chat_ui()
         self.show_latest_image()
         self.links_changed.emit()
+        self._show_runner_state()
+        self.runner.kick()
+        self._follow_up()
 
     def save_chat(self):
         if not self.chat_path:
@@ -1567,6 +1584,8 @@ class ChatMain(QMainWindow):
         self.client.temperature = s["Temperature"]
         if not s["Model"] and self.models:
             s["Model"] = next(iter(self.models))
+        if self.is_lead() and s["Model"] in self.models and not projectWork.fits_lead(self.models[s["Model"]]):
+            s["Model"] = projectWork.lead_model(self.models) or s["Model"]
         self.client.set_model(s["Model"] or None)
         self._fill_model_combo()            # also applies Think, Web Search, Tools and Pictures
         self._show_image_panel()
@@ -1650,6 +1669,7 @@ class ChatMain(QMainWindow):
             print(f"Rename failed: {e}")
             return
         self.chat_path = str(new)
+        self.runner.rename(old.stem, new.stem)
         chat_links.rename_node(self.links, chat_links.CHAT, old.stem, new.stem)
         self.save_links()
         self._apply_options()               # the memory folder moved with it
@@ -1695,15 +1715,41 @@ class ChatMain(QMainWindow):
         self.skipped = list(chat_links.skipped_of(self.links, self.chat_name()))
 
     def _running_settings(self):
-        return personalities.resolve(self.own_settings, self.personality,
-                                     chat_links.overrides_of(self.links, self.chat_name()), self.skipped)
+        return self._resolve(self.chat_name(), self.own_settings, self.personality, self.skipped)
+
+    def _resolve(self, chat, own, personality, skipped):
+        """A chat's settings under its personality. A project's chat always thinks and keeps its own model."""
+        lead = bool(chat_links.led_by(self.links, chat))
+        if lead and personality:
+            skipped = [*skipped, "LLM model"]
+        s = personalities.resolve(own, personality, chat_links.overrides_of(self.links, chat), skipped)
+        if lead:
+            s["Think"] = True
+        return s
+
+    def settings_of(self, chat, data):
+        """What another chat runs with, from its file's `data`."""
+        name = chat_links.speaks_as(self.links, chat)
+        personality = personalities.load(name) if name else None
+        skipped = chat_links.skipped_of(self.links, chat) if personality else []
+        return self._resolve(chat, chat_settings.from_chat(data), personality, skipped)
+
+    def is_lead(self) -> bool:
+        """Whether the open chat is a project's own chat."""
+        return bool(self.chat_path and chat_links.led_by(self.links, self.chat_name()))
 
     def _link_scope(self):
         """What the open chat's links reach, for the model; replaced whole, as a reply may be reading it."""
-        chat = self.chat_name()
+        return self.link_scope_of(self.chat_name())
+
+    def link_scope_of(self, chat):
+        personality = chat_links.speaks_as(self.links, chat)
         places = {f"project:{p}": paths.project_memory_dir(p) for p in chat_links.projects_of(self.links, chat)}
-        if self.personality_name:
-            places[f"personality:{self.personality_name}"] = paths.personality_memory_dir(self.personality_name)
+        led = chat_links.led_by(self.links, chat)
+        if led:
+            places[f"project:{led}"] = paths.project_memory_dir(led)
+        if personality:
+            places[f"personality:{personality}"] = paths.personality_memory_dir(personality)
         chats = {}
         for name, why in chat_links.readable_chats(self.links, chat).items():
             summary = self.links["Summaries"].get(name, {}).get("Text", "")
@@ -1753,6 +1799,160 @@ class ChatMain(QMainWindow):
         return paths.chat_memory_dir(Path(self.chat_path).stem) if self.chat_path else None
 
     # ------------------------------------------------------------------
+    # A project's own chat and its sessions (projectWork.py)
+    # ------------------------------------------------------------------
+
+    def is_answering(self) -> bool:
+        return self.client.busy or self.response_start_pos is not None
+
+    def answer_open_chat(self) -> bool:
+        """Answer the open chat's last message now, for the session runner. False if there's nothing to answer."""
+        if self.is_answering() or not self.chat_markdown or self.chat_markdown[-1].get("role") != "user":
+            return False
+        self._rebuild_chat_ui()
+        self._start_response()
+        return True
+
+    def _after_answer(self, content, why):
+        """An answer in the main window ended: deliver what waited for it, and let the sessions go on."""
+        chat = self.chat_name()
+        self._flush_pending()
+        if self.runner.in_place and self.runner.current == chat:
+            self.runner.finished_in_place(chat, content, why)
+        else:
+            self.runner.kick()
+            self._follow_up()
+
+    def _follow_up(self):
+        """All sessions are done and the open project chat has new reports: it answers them,
+        MAX_FOLLOW_UPS times at most for each message you send, so it can't go round forever."""
+        chat = self.chat_name()
+        if (self.runner.current is not None or self.runner.queue or not self.is_lead() or self.is_answering()
+                or not self.chat_markdown or not self.chat_markdown[-1].get("report")):
+            return
+        done = self._follow_ups.get(chat, 0)
+        if done < MAX_FOLLOW_UPS:
+            self._follow_ups[chat] = done + 1
+            self.answer_open_chat()
+
+    def _flush_pending(self):
+        if not self._pending_messages:
+            return
+        self.chat_markdown += self._pending_messages
+        self._pending_messages = []
+        self.save_chat()
+        self._rebuild_chat_ui(keep_scroll=True)
+
+    def append_message(self, chat, msg):
+        """Add a message to a chat, open or not. The open chat takes it once it's done answering."""
+        if chat == self.chat_name():
+            if self.is_answering():
+                self._pending_messages.append(msg)
+            else:
+                self.chat_markdown.append(msg)
+                self.save_chat()
+                self._rebuild_chat_ui(keep_scroll=True)
+            return
+        path = paths.CHAT_DIR / f"{chat}.json"
+        data = projectWork._read(path)
+        if data:
+            data.setdefault("Chat", []).append(msg)
+            projectWork._write(path, data)
+
+    def session_finished(self, chat, content, why):
+        """A session is done with its brief: show its answer if it's open, and report to its project's chat."""
+        if chat == self.chat_name() and not self.is_answering():
+            saved = projectWork._read(paths.CHAT_DIR / f"{chat}.json").get("Chat") or []
+            if len(saved) > len(self.chat_markdown):
+                self.chat_markdown = saved
+                self.client.summary = projectWork._read(paths.CHAT_DIR / f"{chat}.json").get("Summary")
+                self._rebuild_chat_ui()
+        project = self.runner.origin.pop(chat, None)
+        lead = chat_links.lead_of(self.links, project) if project else None
+        if lead:
+            self.append_message(lead, projectWork.report_message(chat, content, why))
+        self.links_changed.emit()
+        if not self.runner.queue:
+            self._follow_up()
+
+    def _show_runner_state(self):
+        """A session working in the background can't be written to until it's done."""
+        busy = self.runner.busy_with(self.chat_name())
+        self.input.setReadOnly(busy)
+        self.ui.pushButton_5.setEnabled(not busy)
+        if busy:
+            self.status_label.setText("⏳ Working on its task in the background…")
+        elif self.status_label.text().startswith("⏳"):
+            self.status_label.setText("")
+
+    def _brief(self, project, brief) -> dict:
+        return {"role": "user", "content": brief, "ts": self.now_ts(), "from": project}
+
+    def start_session(self, project, title, brief) -> str:
+        """A new chat in the project, set up like the project's chat, with the brief as its first message."""
+        lead = chat_links.lead_of(self.links, project)
+        lead_data = projectWork._read(paths.CHAT_DIR / f"{lead}.json") if lead else {}
+        path = self._free_chat_path(title)
+        name = path.stem
+        data = {"Name": title, "Settings": chat_settings.normalize(chat_settings.from_chat(lead_data)),
+                "Tools Folders": lead_data.get("Tools Folders") or [], "Tools Repos": lead_data.get("Tools Repos") or [],
+                "Server Folders": lead_data.get("Server Folders") or [], "Chat": [self._brief(project, brief)]}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        projectWork._write(path, data)
+        personality = chat_links.speaks_as(self.links, lead) if lead else None
+        if personality:
+            chat_links.set_speaks_as(self.links, name, personality)
+            chat_links.set_skipped(self.links, name, chat_links.skipped_of(self.links, lead))
+        chat_links.add_link(self.links, chat_links.node(chat_links.CHAT, name),
+                            chat_links.node(chat_links.PROJECT, project), chat_links.MEMBER)
+        logs = read_json_file(paths.CHAT_INDEX_FILE) or {"LastOpened": "", "ChatList": []}
+        logs.setdefault("ChatList", [])
+        if name not in logs["ChatList"]:
+            logs["ChatList"].insert(max(len(logs["ChatList"]) - 1, 0), name)   # under the open chat
+            with open(paths.CHAT_INDEX_FILE, "w", encoding="utf-8") as f:
+                json.dump(logs, f, indent=4)
+        self.chat_list.fill(logs["ChatList"], logs.get("Sections"))
+        self.links_updated()
+        self.runner.add(name, project)
+        return name
+
+    def assign_session(self, project, chat, brief) -> str:
+        """Another task for a chat that exists; it joins the project if it isn't in it."""
+        if chat not in self.all_chats():
+            names = ", ".join(chat_links.sessions_of(self.links, project)) or "none yet"
+            return f"Error: there's no chat called {chat}. The project's sessions: {names}"
+        if chat_links.led_by(self.links, chat):
+            return f"Error: {chat} is a project's own chat, not a session"
+        note = ""
+        if chat not in chat_links.sessions_of(self.links, project):
+            chat_links.add_link(self.links, chat_links.node(chat_links.CHAT, chat),
+                                chat_links.node(chat_links.PROJECT, project), chat_links.MEMBER)
+            self.links_updated()
+            note = f"Linked {chat} to project {project}. "
+        self.append_message(chat, self._brief(project, brief))
+        state = self.runner.state_of(chat)
+        self.runner.add(chat, project)
+        after = " after its current task" if state == "working" else ""
+        return f"{note}Gave {chat} the task; it works on it in the background{after} and reports back here."
+
+    def project_chat(self, project) -> str:
+        """The project's own chat, made the first time: Gemma 4 if the server has it, thinking on."""
+        lead = chat_links.lead_of(self.links, project)
+        if lead and (paths.CHAT_DIR / f"{lead}.json").exists():
+            return lead
+        settings = chat_settings.defaults()
+        settings["Model"] = projectWork.lead_model(self.models) or self.settings["Model"]
+        path = self._free_chat_path(project)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        projectWork._write(path, {"Name": project, "Settings": settings, "Tools Folders": [], "Chat": []})
+        chat_links.set_lead(self.links, project, path.stem)
+        self.save_links()
+        return path.stem
+
+    def open_project_chat(self, project):
+        self.qs_chat(self.project_chat(project))
+
+    # ------------------------------------------------------------------
     # Sending, editing, regenerating
     # ------------------------------------------------------------------
 
@@ -1767,6 +1967,7 @@ class ChatMain(QMainWindow):
         self.input.clear()
 
         msg = {"role": "user", "content": text, "ts": self.now_ts()}
+        self._follow_ups.pop(self.chat_name(), None)
         if self.pending_attachments:
             msg["attachments"] = self.pending_attachments
         self.chat_markdown.append(msg)

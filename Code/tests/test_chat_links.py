@@ -32,7 +32,7 @@ def data():
 def test_what_can_link_to_what():
     assert cl.link_kinds(A, WORK) == cl.link_kinds(WORK, A) == [cl.MEMBER]
     assert cl.link_kinds(A, MIO) == [cl.SPEAKS, cl.READS]
-    assert cl.link_kinds(WORK, MIO) == [cl.READS]
+    assert cl.link_kinds(WORK, MIO) == [cl.SPEAKS, cl.READS]      # speaks through its lead chat
     assert cl.link_kinds(A, B) == [cl.MAKE_PROJECT]
     assert cl.link_kinds(WORK, HOME) == cl.link_kinds(MIO, KAI) == cl.link_kinds(A, A) == []
 
@@ -343,3 +343,64 @@ def test_the_personality_name_is_the_character_name(tmp_path, monkeypatch):
     assert personalities.resolve(own, saved, overrides=["Character"])["Character"] == "Mio Mio"
     new_own, overrides = personalities.split({**saved, "Character": "Typed"}, own, saved)
     assert new_own["Character"] == "Own" and "Character" not in overrides
+
+
+def test_a_project_has_one_lead_chat_that_reads_its_sessions_and_isnt_one(data):
+    cl.add_link(data, A, WORK, cl.MEMBER)
+    cl.add_link(data, B, WORK, cl.MEMBER)
+    cl.add_link(data, C, WORK, cl.MEMBER)
+    cl.set_lead(data, "Work", "c")                    # c stops being a session and becomes the project's chat
+    assert cl.lead_of(data, "Work") == "c" and cl.led_by(data, "c") == "Work"
+    assert cl.sessions_of(data, "Work") == ["a", "b"]
+    assert not cl.add_link(data, C, HOME, cl.MEMBER)  # a lead is no session of any project
+    assert set(cl.readable_chats(data, "c")) == {"a", "b"}
+    assert "c" in cl.readable_chats(data, "a")        # sessions read the project's chat for context
+    assert cl.shown_node(data, C) == WORK and cl.shown_node(data, A) == A
+    assert cl.is_linked(data, "c")
+
+    assert not cl.has_link(data, WORK, MIO, cl.SPEAKS)
+    assert cl.add_link(data, MIO, WORK, cl.SPEAKS)    # stored on the lead chat
+    assert cl.speaks_as(data, "c") == "Mio" and cl.has_link(data, WORK, MIO, cl.SPEAKS)
+    cl.remove_link(data, WORK, MIO, cl.SPEAKS)
+    assert cl.speaks_as(data, "c") is None
+    assert not cl.add_link(data, HOME, MIO, cl.SPEAKS)   # no lead chat yet
+
+    cl.rename_node(data, cl.PROJECT, "Work", "Job")
+    cl.rename_node(data, cl.CHAT, "c", "lead")
+    assert data["Leads"] == {"Job": "lead"}
+    again = cl.normalize(json.loads(json.dumps(data)), ["a", "b", "lead"])
+    assert again["Leads"] == {"Job": "lead"}
+    assert cl.normalize(data, ["a", "b"])["Leads"] == {}    # its chat is gone
+    cl.remove_hub(data, cl.PROJECT, "Job")
+    assert data["Leads"] == {}
+
+
+def test_project_tools_are_only_in_the_projects_chat(tmp_path):
+    from local_tools import project
+
+    class Desk:
+        project, personality = "Work", None
+        started = []
+
+        def sessions(self):
+            return [{"name": "a", "summary": "the login page", "state": "idle"}]
+
+        def start(self, title, brief):
+            self.started.append((title, brief))
+            return title
+
+        def assign(self, chat, brief):
+            return f"gave {chat} the task"
+
+    box = ToolBox(working_dir=str(tmp_path))
+    names = {t.name for t in box.active()}
+    assert not names & {"list_sessions", "start_session", "assign_task"}
+    box.project = Desk()
+    assert {"list_sessions", "start_session", "assign_task"} <= {t.name for t in box.active()}
+    assert not box.needs_approval("start_session")
+    assert "a [idle]: the login page" in box.run("list_sessions", {})
+    assert "Started session Login" in box.run("start_session", {"title": "Login", "brief": "Build it"})
+    assert box.run("start_session", {"title": "x", "brief": " "}).startswith("Error:")
+    assert box.run("assign_task", {"session": "a", "brief": "More"}) == "gave a the task"
+    assert "technical lead" in project.lead_note("Work", None, "Bot")
+    assert "juggling" in project.lead_note("Work", "Mio", "Mio")

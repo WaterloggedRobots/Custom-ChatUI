@@ -18,6 +18,7 @@ class ChatList(QTreeWidget):
     chat_clicked = Signal(str)
     new_chat_clicked = Signal()
     sections_changed = Signal(list)     # the sections, after you changed them
+    fresh_requested = Signal(str)       # a project whose own chat should start fresh
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -176,6 +177,9 @@ class ChatList(QTreeWidget):
             move.addAction("New section…", lambda: self.new_section(name))
             if current:
                 menu.addAction("Remove from section", lambda: self.move_chat(name, None))
+            project = self.project_of(name)
+            if project:
+                menu.addAction("Start project chat fresh…", lambda: self.fresh_requested.emit(project))
         else:
             menu.addAction("New section…", self.new_section)
         menu.exec(self.viewport().mapToGlobal(pos))

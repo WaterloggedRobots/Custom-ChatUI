@@ -385,9 +385,9 @@ def test_project_tools_are_only_in_the_projects_chat(tmp_path):
         def sessions(self):
             return [{"name": "a", "summary": "the login page", "state": "idle"}]
 
-        def start(self, title, brief):
-            self.started.append((title, brief))
-            return title
+        def start(self, title, brief, model=None):
+            self.started.append((title, brief, model))
+            return f"Started session {title}"
 
         def assign(self, chat, brief):
             return f"gave {chat} the task"
@@ -402,5 +402,9 @@ def test_project_tools_are_only_in_the_projects_chat(tmp_path):
     assert "Started session Login" in box.run("start_session", {"title": "Login", "brief": "Build it"})
     assert box.run("start_session", {"title": "x", "brief": " "}).startswith("Error:")
     assert box.run("assign_task", {"session": "a", "brief": "More"}) == "gave a the task"
-    assert "technical lead" in project.lead_note("Work", None, "Bot")
-    assert "juggling" in project.lead_note("Work", "Mio", "Mio")
+    box.run("start_session", {"title": "Code", "brief": "Fix it", "model": "qwen3.8:27b"})
+    assert Desk.started[-1] == ("Code", "Fix it", "qwen3.8:27b")
+    tech = project.lead_note("Work", None, "Bot", ["qwen3.8:27b (27B; thinking, tools)"], "gemma4:31b")
+    assert "technical lead" in tech and "- qwen3.8:27b (27B; thinking, tools)" in tech
+    mio = project.lead_note("Work", "Mio", "Mio", ["qwen3.8:27b (27B; thinking, tools)"], "gemma4:31b")
+    assert "juggling" in mio and "qwen3.8" not in mio and "don't give start_session a model" in mio

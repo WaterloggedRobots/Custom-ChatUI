@@ -26,7 +26,7 @@ class Desk(Protocol):
     def sessions(self) -> list:     # [{"name", "summary", "state"}]
         ...
 
-    def start(self, title: str, brief: str) -> str:   # the new session's name
+    def start(self, title: str, brief: str, model: Optional[str] = None) -> str:   # what happened, for the model
         ...
 
     def assign(self, chat: str, brief: str) -> str:   # what happened, for the model
@@ -61,11 +61,9 @@ def list_sessions(box) -> str:
     return "\n".join(lines)
 
 
-def start_session(box, title, brief) -> str:
+def start_session(box, title, brief, model=None) -> str:
     desk = _desk(box)
-    name = desk.start(str(title or "").strip() or "Session", _brief(brief))
-    return (f"Started session {name} in project {desk.project} with your brief. It works on it in the background; "
-            "its answer comes back here as a report.")
+    return desk.start(str(title or "").strip() or "Session", _brief(brief), str(model or "").strip() or None)
 
 
 def assign_task(box, session, brief) -> str:
@@ -85,8 +83,11 @@ TOOLS = [
                           "Use it for work that no existing session covers.",
          params(["title", "brief"], title={"type": "string", "description": "A short name for the session, like "
                                                                             "'Login page' or 'Weekly report'"},
-                brief=BRIEF),
-         start_session, kind="delegate", summary=lambda a: f"Start session {a.get('title')}"),
+                brief=BRIEF,
+                model={"type": "string", "description": "The model for this session, from the list you were given; "
+                                                        "leave it out for the one you use"}),
+         start_session, kind="delegate",
+         summary=lambda a: f"Start session {a.get('title')}" + (f" on {a['model']}" if a.get("model") else "")),
     Tool("assign_task", "Give an existing session another task with a brief. A chat that isn't in this project yet is "
                         "linked to it first. Use it when the work continues what that session did.",
          params(["session", "brief"], session=SESSION, brief=BRIEF),
@@ -94,8 +95,9 @@ TOOLS = [
 ]
 
 
-def lead_note(project: str, personality: Optional[str], name: str) -> str:
-    """The system note of a project's own chat: what it's for, and its tone."""
+def lead_note(project: str, personality: Optional[str], name: str, models=(), own_model: str = "") -> str:
+    """The system note of a project's own chat: what it's for, its tone, and the models it can give sessions.
+    `models` are lines like "qwen3.8:27b (27B; thinking, tools)"."""
     common = (
         f"This is the own chat of project {project}, where its work is handed out. Never do a task yourself here, "
         "however small or quick: don't write the list, the email, the code or the answer. Split what the user asks "
@@ -110,8 +112,16 @@ def lead_note(project: str, personality: Optional[str], name: str) -> str:
         return common + (
             f" You are {name}, and these sessions are your own tasks. Talk like a person juggling several jobs at "
             "once: natural and in your own voice, saying which task you'll pick up, which can wait and how it's "
-            "going. Write the briefs as notes to yourself for later, in plain words, but still complete.")
+            "going. Write the briefs as notes to yourself for later, in plain words, but still complete. Every "
+            f"session runs on your model{f' ({own_model})' if own_model else ''}, so you stay yourself in each of "
+            "them; don't give start_session a model.")
+    listed = "\n".join(f"- {m}" for m in models)
     return common + (
         " You are the technical lead and the sessions are your team. Be precise and brief, like a manager "
         "assigning work: for each task give the objective, the context, the files and constraints, the steps "
-        "if they matter, and acceptance criteria. Tell the user the plan as a short list of who does what.")
+        "if they matter, and acceptance criteria. Tell the user the plan as a short list of who does what."
+        + (f"\n\nGive each new session the model that fits its task best with start_session's model: a strong "
+           "coding model for code, one that thinks for planning or hard problems, one that sees for pictures, and "
+           "one that calls tools for anything touching files, commands or the web. Leave it out to use yours"
+           f"{f' ({own_model})' if own_model else ''}. Sessions run one at a time and switching models takes a few "
+           f"seconds, so don't switch for no reason. The models on the server:\n{listed}" if models else ""))

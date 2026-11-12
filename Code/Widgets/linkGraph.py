@@ -753,6 +753,8 @@ class LinkGraph(QMainWindow):
         else:
             if kind == cl.PROJECT:
                 actions.insert(0, ("Open project chat", lambda: self.open_project_chat(label)))
+                if cl.lead_of(self.links, label):
+                    actions.insert(1, ("Start project chat fresh…", lambda: self.chat_main.ask_start_fresh(label)))
             if kind == cl.PERSONALITY:
                 actions.append(("Edit settings…", lambda: self.edit_personality.emit(label)))
             actions += [("Open memory folder", lambda: self.open_memory(kind, label)),

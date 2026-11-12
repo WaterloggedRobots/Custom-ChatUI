@@ -243,6 +243,9 @@ class ChatMain(QMainWindow):
         self.runner.changed.connect(self._show_runner_state)
         self._pending_messages = []      # for the open chat, waiting for its answer to finish
         self._follow_ups = {}            # project chat -> times it answered its reports since your last message
+        self.handover = projectWork.Handover(self)        # writes context.md when a project chat starts fresh
+        self.handover.done.connect(self._on_handover)
+        self._handing_over = None        # the project whose context.md is being written
         self.redrawer = Redrawer(self)
         self.redrawer.finished.connect(self.on_redrawn)
         self.redrawing = False
@@ -294,6 +297,7 @@ class ChatMain(QMainWindow):
                 self.chat_list = self.ui.chatList
                 self.chat_list.sections_changed.connect(self.save_sections)
                 self.chat_list.project_of = lambda chat: chat_links.led_by(self.links, chat)
+                self.chat_list.fresh_requested.connect(self.ask_start_fresh)
                 self.links_changed.connect(self.chat_list.redraw)
                 self.chat = self.ui.textBrowser
                 self.input = self.ui.plainTextEdit
@@ -430,6 +434,10 @@ class ChatMain(QMainWindow):
         self.ui.actionLoad_Chat.setShortcut("Ctrl+O")
         self.ui.actionChat_Settings.setShortcut("Ctrl+E")
         self.ui.actionLink_Graph.setShortcut("Ctrl+G")
+        self.fresh_action = self.ui.menuChat.addAction(
+            "Start Project Chat Fresh…", lambda: self.ask_start_fresh(chat_links.led_by(self.links, self.chat_name())))
+        self.fresh_action.setToolTip("A new chat for this project, with a context.md handover instead of the history")
+        self.fresh_action.setEnabled(False)
 
         self.ui.pushButton_6.clicked.connect(self.regenerate_last_response) #regen
         self.ui.pushButton_7.clicked.connect(self.redraw_image)
@@ -518,7 +526,10 @@ class ChatMain(QMainWindow):
         elif not self.desk or (self.desk.project, self.desk.personality) != (project, self.personality_name):
             self.desk = projectWork.ProjectDesk(self, project, self.personality_name)
         self.client.toolbox.project = self.desk
-        self.client.role_note = lead_note(project, self.personality_name, s["Character"]) if project else ""
+        if hasattr(self, "fresh_action"):
+            self.fresh_action.setEnabled(bool(project))
+        self.client.role_note = lead_note(project, self.personality_name, s["Character"], self._model_lines(),
+                                          self.client.model_name or "") if project else ""
         caps = self.models.get(self.client.model_name, {}).get("capabilities")
         can_call = self.client.apply_options(s, caps, self.memory_folder())
         groups = chat_settings.tool_groups(s)
@@ -1657,22 +1668,34 @@ class ChatMain(QMainWindow):
         return path
 
     def _rename_chat_file(self, title):
-        old = Path(self.chat_path)
+        self.rename_chat(self.chat_name(), title)
+
+    def rename_chat(self, chat, title) -> str:
+        """Rename a chat's file and memory folder to fit `title`, open or not. Returns its new name."""
+        is_open = chat == self.chat_name()
+        old = paths.CHAT_DIR / f"{chat}.json"
         new = self._free_chat_path(title, current=old)
         if new == old:
-            return
+            return chat
         try:
             os.replace(old, new)
             if (paths.CHAT_DIR / old.stem).exists():
                 os.replace(paths.CHAT_DIR / old.stem, paths.CHAT_DIR / new.stem)
         except OSError as e:
             print(f"Rename failed: {e}")
-            return
-        self.chat_path = str(new)
+            return chat
+        if is_open:
+            self.chat_path = str(new)
+        else:
+            data = projectWork._read(new)
+            if data:
+                data["Name"] = title
+                projectWork._write(new, data)
         self.runner.rename(old.stem, new.stem)
         chat_links.rename_node(self.links, chat_links.CHAT, old.stem, new.stem)
         self.save_links()
-        self._apply_options()               # the memory folder moved with it
+        if is_open:
+            self._apply_options()           # the memory folder moved with it
         logs = read_json_file(paths.CHAT_INDEX_FILE) or {"LastOpened": "", "ChatList": []}
         logs["ChatList"] = [new.stem if c == old.stem else c for c in logs.get("ChatList", [])]
         if new.stem not in logs["ChatList"]:
@@ -1680,10 +1703,12 @@ class ChatMain(QMainWindow):
         sections = chat_sections.normalize(logs.get("Sections"), [old.stem, *logs["ChatList"]])
         chat_sections.rename_chat(sections, old.stem, new.stem)
         logs["Sections"] = sections
-        logs["LastChat"] = str(new)
+        if is_open:
+            logs["LastChat"] = str(new)
         with open(paths.CHAT_INDEX_FILE, "w", encoding="utf-8") as f:
             json.dump(logs, f, indent=4)
         self.chat_list.fill(logs["ChatList"], sections)
+        return new.stem
 
     def save_sections(self, sections):
         logs = read_json_file(paths.CHAT_INDEX_FILE) or {"LastOpened": "", "ChatList": []}
@@ -1717,11 +1742,26 @@ class ChatMain(QMainWindow):
     def _running_settings(self):
         return self._resolve(self.chat_name(), self.own_settings, self.personality, self.skipped)
 
+    def _model_lines(self) -> list:
+        """The server's models a project chat may give a session: "qwen3.8:27b (27B; thinking, tools)".
+        Only ones that call tools, since a session needs them to touch files, commands and the web."""
+        lines = []
+        for mid, m in self.models.items():
+            if m.get("capabilities") and "tools" not in m["capabilities"]:
+                continue
+            caps = [c for c in m.get("capabilities") or [] if c != "completion"]
+            about = "; ".join(x for x in (m.get("parameter_size"), ", ".join(caps)) if x)
+            lines.append(f"{mid} ({about})" if about else mid)
+        return lines
+
     def _resolve(self, chat, own, personality, skipped):
-        """A chat's settings under its personality. A project's chat always thinks and keeps its own model."""
+        """A chat's settings under its personality. A project's chat always thinks, and takes its
+        personality's model only if that one thinks and calls tools; otherwise it keeps its own."""
         lead = bool(chat_links.led_by(self.links, chat))
         if lead and personality:
-            skipped = [*skipped, "LLM model"]
+            model = self.models.get(personality.get("Model") or "")
+            if not model or not projectWork.fits_lead(model):
+                skipped = [*skipped, "LLM model"]
         s = personalities.resolve(own, personality, chat_links.overrides_of(self.links, chat), skipped)
         if lead:
             s["Think"] = True
@@ -1888,21 +1928,36 @@ class ChatMain(QMainWindow):
     def _brief(self, project, brief) -> dict:
         return {"role": "user", "content": brief, "ts": self.now_ts(), "from": project}
 
-    def start_session(self, project, title, brief) -> str:
-        """A new chat in the project, set up like the project's chat, with the brief as its first message."""
+    def start_session(self, project, title, brief, model=None) -> str:
+        """A new chat in the project, set up like the project's chat, with the brief as its first message.
+        It can run on another model, unless the project speaks as a personality: then every session
+        uses the project chat's model, so she behaves the same in each. Returns what happened, for the model."""
         lead = chat_links.lead_of(self.links, project)
         lead_data = projectWork._read(paths.CHAT_DIR / f"{lead}.json") if lead else {}
+        personality = chat_links.speaks_as(self.links, lead) if lead else None
+        settings = chat_settings.normalize(chat_settings.from_chat(lead_data))
+        lead_model = self.settings_of(lead, lead_data)["Model"] if lead else settings["Model"]
+        note = ""
+        if personality:
+            if model and model != lead_model:
+                note = f" It runs on {lead_model}, like you, not {model}, so {personality} stays herself."
+            model = lead_model
+        elif model and (model not in self.models or "tools" not in (self.models[model].get("capabilities")
+                                                                     or ["tools"])):
+            usable = ", ".join(line.split(" ")[0] for line in self._model_lines())
+            return f"Error: {model} isn't a model on the server that can call tools. Pick one of: {usable}"
+        settings["Model"] = model or lead_model
         path = self._free_chat_path(title)
         name = path.stem
-        data = {"Name": title, "Settings": chat_settings.normalize(chat_settings.from_chat(lead_data)),
+        data = {"Name": title, "Settings": settings,
                 "Tools Folders": lead_data.get("Tools Folders") or [], "Tools Repos": lead_data.get("Tools Repos") or [],
                 "Server Folders": lead_data.get("Server Folders") or [], "Chat": [self._brief(project, brief)]}
         path.parent.mkdir(parents=True, exist_ok=True)
         projectWork._write(path, data)
-        personality = chat_links.speaks_as(self.links, lead) if lead else None
         if personality:
             chat_links.set_speaks_as(self.links, name, personality)
-            chat_links.set_skipped(self.links, name, chat_links.skipped_of(self.links, lead))
+            skipped = [g for g in chat_links.skipped_of(self.links, lead) if g != "LLM model"]
+            chat_links.set_skipped(self.links, name, [*skipped, "LLM model"])   # the model set above
         chat_links.add_link(self.links, chat_links.node(chat_links.CHAT, name),
                             chat_links.node(chat_links.PROJECT, project), chat_links.MEMBER)
         logs = read_json_file(paths.CHAT_INDEX_FILE) or {"LastOpened": "", "ChatList": []}
@@ -1914,7 +1969,8 @@ class ChatMain(QMainWindow):
         self.chat_list.fill(logs["ChatList"], logs.get("Sections"))
         self.links_updated()
         self.runner.add(name, project)
-        return name
+        return (f"Started session {name} on {settings['Model']} in project {project} with your brief. It works on "
+                f"it in the background; its answer comes back here as a report.{note}")
 
     def assign_session(self, project, chat, brief) -> str:
         """Another task for a chat that exists; it joins the project if it isn't in it."""
@@ -1951,6 +2007,89 @@ class ChatMain(QMainWindow):
 
     def open_project_chat(self, project):
         self.qs_chat(self.project_chat(project))
+
+    def ask_start_fresh(self, project):
+        lead = chat_links.lead_of(self.links, project)
+        if not lead:
+            self.open_project_chat(project)
+            return
+        if QMessageBox.question(
+                self, "Start fresh",
+                f"Start {project}'s chat fresh?\n\nIts model writes a context.md handover first, and the new chat "
+                f"starts with only that, so its context is short again. The current chat is kept as "
+                f"\"{project} (old)\", and the new one can still read it and every session.") == QMessageBox.Yes:
+            self.start_fresh(project)
+
+    def start_fresh(self, project):
+        """Write the project chat's context.md, then swap in a new chat that starts from it (_on_handover)."""
+        lead = chat_links.lead_of(self.links, project)
+        if not lead or self._handing_over:
+            return
+        if lead == self.chat_name():
+            if self.is_answering():
+                self.status_label.setText("Wait for the project chat to finish answering, then start it fresh")
+                return
+            history = self.chat_markdown
+        else:
+            history = projectWork._read(paths.CHAT_DIR / f"{lead}.json").get("Chat") or []
+        if not [m for m in history if m.get("role") in ("user", "assistant")]:
+            self.status_label.setText(f"{project}'s chat is empty, so it's fresh already")
+            return
+        model = self.settings_of(lead, projectWork._read(paths.CHAT_DIR / f"{lead}.json"))["Model"]
+        self._handing_over = project
+        self.status_label.setText(f"📝 Writing context.md for {project}'s fresh start…")
+        sessions = projectWork.ProjectDesk(self, project, None)._sessions()
+        self.handover.start(self.client.base_url, model, project, sessions, history,
+                            self.client.contexts.get(model, llmClient.DEFAULT_CONTEXT))
+
+    def _on_handover(self, project, text, err):
+        self._handing_over = None
+        if err:
+            self.status_label.setText(f"Couldn't write the handover, so {project}'s chat stays as it was: {err}")
+            return
+        new = self.fresh_lead(project, text)
+        if new:
+            self.qs_chat(new)
+            self.status_label.setText(f"{project} started fresh. Its handover is in context.md "
+                                      "(Chat Settings > Memory > Open folder)")
+
+    def fresh_lead(self, project, context) -> str:
+        """Keep the project chat as "<project> (old)" and make a new one like it, with `context` as its
+        context.md memory note. Returns the new chat's name, or "" if it has no project chat."""
+        old = chat_links.lead_of(self.links, project)
+        if not old:
+            return ""
+        if old == self.chat_name():
+            self._flush_pending()
+            self.save_chat()
+        old = self.rename_chat(old, f"{project} (old)")
+        data = projectWork._read(paths.CHAT_DIR / f"{old}.json")
+        personality = chat_links.speaks_as(self.links, old)
+        skipped, overrides = chat_links.skipped_of(self.links, old), chat_links.overrides_of(self.links, old)
+        chat_links.retire_lead(self.links, project)
+        settings = chat_settings.normalize(chat_settings.from_chat(data))
+        settings["Memory"] = True                       # context.md is a memory note
+        path = self._free_chat_path(project)
+        projectWork._write(path, {"Name": project, "Settings": settings,
+                                  "Tools Folders": data.get("Tools Folders") or [],
+                                  "Tools Repos": data.get("Tools Repos") or [],
+                                  "Server Folders": data.get("Server Folders") or [], "Chat": []})
+        new = path.stem
+        chat_links.set_lead(self.links, project, new)
+        if personality:
+            chat_links.set_speaks_as(self.links, new, personality)
+            chat_links.set_skipped(self.links, new, skipped)
+            chat_links.set_overrides(self.links, new, overrides)
+        notes, old_notes = paths.chat_memory_dir(new), paths.chat_memory_dir(old)
+        notes.mkdir(parents=True, exist_ok=True)
+        if old_notes.is_dir():                          # its rules and notes carry over; context.md is new
+            for note in old_notes.glob("*.md"):
+                if note.name.lower() != "context.md":
+                    (notes / note.name).write_text(note.read_text(encoding="utf-8"), encoding="utf-8")
+        (notes / "context.md").write_text(context.strip() + "\n", encoding="utf-8")
+        self.save_links()
+        self.links_changed.emit()
+        return new
 
     # ------------------------------------------------------------------
     # Sending, editing, regenerating

@@ -85,8 +85,9 @@ def test_a_project_chat_whose_model_cant_think_moves_to_one_that_can(main):
 
 def test_a_new_session_gets_the_brief_answers_it_and_reports_back(main):
     main.open_project_chat("Work")
-    name = main.desk.start("Login page", "Build the login form. Done when it validates emails.")
-    assert name == "Login page"
+    result = main.desk.start("Login page", "Build the login form. Done when it validates emails.")
+    name = "Login page"
+    assert result.startswith("Started session Login page on gemma4:31b")
     assert cl.sessions_of(main.links, "Work") == ["Login page"]
     session = saved(name)
     assert session[0] == {**session[0], "role": "user", "from": "Work"}
@@ -110,8 +111,18 @@ def test_a_session_speaks_as_the_projects_personality(main):
     main.qs_chat(lead)
     assert main.personality_name == "Mio" and "juggling" in main.client.role_note
     assert main.settings["Model"] == "gemma4:31b"         # the personality's model doesn't reach the project chat
-    name = main.desk.start("Groceries", "Make the shopping list")
-    assert cl.speaks_as(main.links, name) == "Mio"
+    result = main.desk.start("Groceries", "Make the shopping list", "llama3:8b")
+    assert cl.speaks_as(main.links, "Groceries") == "Mio"
+    assert "runs on gemma4:31b, like you, not llama3:8b, so Mio stays herself" in result
+    main.qs_chat("Groceries")
+    assert main.settings["Model"] == "gemma4:31b"         # the same model as the project chat, not Mio's
+
+    main.save_personality("Mio", {**main.settings, "Character": "Mio", "Pretext": "tsundere", "Model": "gemma4:12b"})
+    main.qs_chat(lead)                                    # her own model thinks and calls tools: the project takes it
+    assert main.settings["Model"] == "gemma4:12b"
+    main.desk.start("Laundry", "Plan the laundry")
+    main.qs_chat("Laundry")
+    assert main.settings["Model"] == "gemma4:12b"
 
 
 def test_an_existing_chat_joins_the_project_for_its_task(main):
@@ -184,3 +195,78 @@ def test_the_project_chat_answers_reports_three_times_per_message_at_most(main):
     main.sendMessage()                                    # your message: it may follow up again
     main.desk.assign("b", "Task 5")
     assert main.chat_markdown[-1]["role"] == "assistant"
+
+
+def test_without_a_personality_each_session_gets_the_model_it_needs(main):
+    main.open_project_chat("Work")
+    assert "- llama3:8b (tools)" in main.client.role_note
+    assert "on llama3:8b" in main.desk.start("Quick", "Rename the files", "llama3:8b")
+    main.qs_chat("Quick")
+    assert main.settings["Model"] == "llama3:8b"
+    main.qs_chat("Work")
+    assert main.desk.start("Bad", "x", "nope:1b").startswith("Error: nope:1b isn't a model on the server")
+    main.models["seer:7b"] = {"id": "seer:7b", "capabilities": ["completion", "vision"]}
+    main.qs_chat("Work")
+    assert "seer:7b" not in main.client.role_note             # it can't call tools, so it's not offered
+    assert main.desk.start("Bad", "x", "seer:7b").startswith("Error: seer:7b isn't a model on the server")
+
+
+def test_starting_fresh_keeps_the_old_chat_and_hands_over_a_context_md(main, monkeypatch):
+    from PySide6.QtCore import QCoreApplication
+    from Widgets import projectWork
+    cl.add_hub(main.links, cl.PERSONALITY, "Mio")
+    personalities.save("Mio", {**main.settings, "Character": "Mio", "Pretext": "tsundere", "Model": ""})
+    lead = main.project_chat("Work")
+    cl.add_link(main.links, cl.node(cl.PROJECT, "Work"), cl.node(cl.PERSONALITY, "Mio"), cl.SPEAKS)
+    main.qs_chat(lead)
+    rules = paths.chat_memory_dir(lead)
+    rules.mkdir(parents=True)
+    (rules / "rules.md").write_text("Always ask before buying", encoding="utf-8")
+    main.desk.start("Login page", "Build it")
+    sent = {}
+
+    class Reply:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": "## Goal\nShip the login page"}}]}
+
+    def post(url, json=None, timeout=None):
+        sent.update(json)
+        return Reply()
+
+    monkeypatch.setattr(projectWork.requests, "post", post)
+    main.start_fresh("Work")
+    for _ in range(200):
+        QCoreApplication.processEvents()
+        if main._handing_over is None:
+            break
+        import time
+        time.sleep(0.01)
+    told = sent["messages"][1]["content"]
+    assert "Login page [idle]: Build it" in told and "Report from session" in told
+    assert main.chat_name() == "Work" and main.chat_markdown == []        # the new one, empty
+    assert cl.lead_of(main.links, "Work") == "Work" and main.links["Past"] == {"Work": ["Work (old)"]}
+    assert (paths.chat_memory_dir("Work") / "context.md").read_text(encoding="utf-8") == "## Goal\nShip the login page\n"
+    assert (paths.chat_memory_dir("Work") / "rules.md").exists()           # its notes come along
+    assert "Ship the login page" in main.client.toolbox.memory_note()     # it's in every reply
+    assert cl.speaks_as(main.links, "Work") == "Mio"
+    assert saved("Work (old)")[-1]["role"] == "assistant"                   # the old one keeps its history
+    reach = cl.readable_chats(main.links, "Work")
+    assert set(reach) == {"Login page", "Work (old)"}
+    assert cl.sessions_of(main.links, "Work") == ["Login page"]
+    main.desk.assign("Login page", "Add a logout button")                  # reports reach the new one
+    assert any(m.get("report") == "Login page" for m in saved("Work"))
+
+
+def test_an_empty_project_chat_is_fresh_already(main):
+    main.open_project_chat("Work")
+    main.start_fresh("Work")
+    assert main._handing_over is None and "fresh already" in main.status_label.text()
+
+
+def test_a_fenced_handover_is_unwrapped():
+    from Widgets.projectWork import unfence
+    assert unfence("```markdown\n## Goal\nShip it\n```\n") == "## Goal\nShip it"
+    assert unfence("## Goal\n```py\nx\n```") == "## Goal\n```py\nx\n```"

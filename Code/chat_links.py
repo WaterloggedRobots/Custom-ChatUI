@@ -13,7 +13,8 @@ three kinds of link, always stored from the lower kind of node to the higher:
 Each project can have a chat of its own, its lead chat, which the graph draws as
 the project node itself. It reads all of the project's sessions and hands them
 work (local_tools/project.py); it isn't a session of the project. A project
-"speaks as" a personality through its lead chat.
+"speaks as" a personality through its lead chat. Starting the lead chat fresh
+keeps the old one as a past lead, which the new one can still read.
 
 It all lives in Save/links.json:
   {"Projects": [names], "Personalities": [names],
@@ -22,7 +23,7 @@ It all lives in Save/links.json:
    "Summaries": {chat: {"Upto": messages covered, "Text": one line}},
    "Overrides": {chat: [settings it changed from its personality]},
    "Skipped": {chat: [groups of its personality's settings it doesn't take]},
-   "Leads": {project: its lead chat}}
+   "Leads": {project: its lead chat}, "Past": {project: [its earlier lead chats]}}
 A node is "<type>:<name>", such as "chat:Avatar part 2".
 
 No Qt here, so it can be tested on its own (tests/test_chat_links.py).
@@ -56,7 +57,7 @@ def clean_name(name: str) -> str:
 
 
 def empty() -> dict:
-    return {"Projects": [], "Personalities": [], "Links": [], "Private": [], "Layout": {}, "Summaries": {}, "Overrides": {}, "Skipped": {}, "Leads": {}}
+    return {"Projects": [], "Personalities": [], "Links": [], "Private": [], "Layout": {}, "Summaries": {}, "Overrides": {}, "Skipped": {}, "Leads": {}, "Past": {}}
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +89,11 @@ def normalize(data, chats) -> dict:
     for project, chat in leads.items():
         if project in out["Projects"] and chat in set(chats) and chat not in out["Leads"].values():
             out["Leads"][project] = chat
+    past = data.get("Past") if isinstance(data.get("Past"), dict) else {}
+    for project, olds in past.items():
+        kept = [c for c in _names(olds) if c in set(chats) and c not in out["Leads"].values()]
+        if project in out["Projects"] and kept:
+            out["Past"][project] = kept
     # A lead chat is its project, not a session of one.
     lead_nodes = {node(CHAT, c) for c in out["Leads"].values()}
     out["Links"] = [l for l in out["Links"] if not (l["Kind"] == MEMBER and l["From"] in lead_nodes)]
@@ -290,6 +296,15 @@ def set_lead(data: dict, project: str, chat: str) -> None:
     data["Links"] = [l for l in data["Links"] if not (l["From"] == start and l["Kind"] == MEMBER)]
 
 
+def retire_lead(data: dict, project: str) -> None:
+    """The project's chat starts fresh: the one it had becomes a past lead, readable by the next."""
+    old = data["Leads"].pop(project, None)
+    if old:
+        data["Past"].setdefault(project, [])
+        if old not in data["Past"][project]:
+            data["Past"][project].append(old)
+
+
 def sessions_of(data: dict, project: str) -> list:
     """The chats in a project, sorted."""
     end = node(PROJECT, project)
@@ -329,9 +344,12 @@ def rename_node(data: dict, kind: str, old: str, new: str) -> None:
             if old in table:
                 table[new] = table.pop(old)
         data["Leads"] = {p: new if c == old else c for p, c in data["Leads"].items()}
+        data["Past"] = {p: [new if c == old else c for c in olds] for p, olds in data["Past"].items()}
     else:
         if kind == PROJECT and old in data["Leads"]:
             data["Leads"][new] = data["Leads"].pop(old)
+        if kind == PROJECT and old in data["Past"]:
+            data["Past"][new] = data["Past"].pop(old)
         data[_list_key(kind)] = [new if n == old else n for n in data[_list_key(kind)]]
     for link in data["Links"]:
         link["From"] = now if link["From"] == was else link["From"]
@@ -349,7 +367,8 @@ def remove_hub(data: dict, kind: str, name: str) -> None:
     data[_list_key(kind)] = [n for n in data[_list_key(kind)] if n != name]
     data["Links"] = [l for l in data["Links"] if gone not in (l["From"], l["To"])]
     if kind == PROJECT:
-        data["Leads"].pop(name, None)       # its chat stays, as a chat of its own
+        data["Leads"].pop(name, None)       # its chats stay, as chats of their own
+        data["Past"].pop(name, None)
     data["Layout"].pop(gone, None)
 
 
@@ -377,6 +396,8 @@ def readable_chats(data: dict, chat: str) -> dict:
     if led:
         for other in members.get(led, []):
             found.setdefault(other, f"a session of your project {led}")
+        for other in data["Past"].get(led, []):
+            found.setdefault(other, f"an earlier own chat of your project {led}, before it started fresh")
     for project in own_projects:
         lead = lead_of(data, project)
         if lead:

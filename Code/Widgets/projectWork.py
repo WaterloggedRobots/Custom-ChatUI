@@ -8,11 +8,18 @@ SessionRunner answers the sessions' briefs one at a time with a client of its
 own, so you can keep talking in the project chat or open another. A session
 that's open in the main window is answered there instead, where you watch it.
 Each answer goes back to the project chat as a report.
+
+Handover writes context.md when a project chat starts fresh: what the next one
+needs to carry on, from the old one's conversation, in one request. The new
+chat gets it as a memory note, so it's in every reply and you can edit it.
 """
 
 import json
+import threading
 import time
 from pathlib import Path
+
+import requests
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal
 
@@ -22,6 +29,15 @@ import paths
 
 LEAD_MODEL = "gemma4"            # what a project's chat starts with, if the server has it
 REPORT_CHARS = 6000              # of a session's answer, in its report
+HANDOVER_TOKENS = 2500           # the longest context.md
+HANDOVER_SHARE = 0.6             # how much of the model's context the old conversation may fill
+HANDOVER_PROMPT = (
+    "You are handing a project's planning chat over to a fresh one, which will know nothing but what you write "
+    "now. Write context.md in Markdown with these sections: ## Goal (what the user is after overall), "
+    "## Decisions and preferences (what was agreed, and how the user wants things done), ## Sessions (each "
+    "session: what it works on, what it has done, what it's waiting on), ## Open tasks (what's left, in order), "
+    "and ## Notes (names, numbers, paths, links and anything else that must not be lost). Keep facts and drop "
+    "chit-chat. Write it for the next manager, not for the user, and keep it under 1,000 words.")
 
 
 def fits_lead(model: dict) -> bool:
@@ -88,8 +104,8 @@ class ProjectDesk(QObject):
     def sessions(self) -> list:
         return self._on_gui(self._sessions)
 
-    def start(self, title, brief) -> str:
-        return self._on_gui(lambda: self.main.start_session(self.project, title, brief))
+    def start(self, title, brief, model=None) -> str:
+        return self._on_gui(lambda: self.main.start_session(self.project, title, brief, model))
 
     def assign(self, chat, brief) -> str:
         return self._on_gui(lambda: self.main.assign_session(self.project, chat, brief))
@@ -257,3 +273,49 @@ def report_message(chat: str, content, why) -> dict:
             body = body[:REPORT_CHARS] + f"\n… [cut; read_linked_chat {chat} for the rest]"
         text = f"Report from session {chat}:\n\n{body}"
     return {"role": "user", "content": text, "ts": time.time(), "report": chat}
+
+
+class Handover(QObject):
+    """Writes a project chat's context.md in the background."""
+    done = Signal(str, str, str)     # the project, context.md, an error ("" if it worked)
+
+    def start(self, base_url, model, project, sessions, history, context_tokens):
+        room = int(context_tokens * HANDOVER_SHARE) - HANDOVER_TOKENS
+        items, used = [], 0
+        for m in reversed(history):           # the newest first, as many as fit
+            if m.get("role") not in ("user", "assistant"):
+                continue
+            who = f"report from {m['report']}" if m.get("report") else m["role"]
+            item = {"from": who, "text": str(m.get("content", ""))[:4000]}
+            cost = llmClient.estimate_tokens(json.dumps(item, ensure_ascii=False))
+            if items and used + cost > room:
+                break
+            items.insert(0, item)
+            used += cost
+        rows = "\n".join(f"- {r['name']} [{r['state']}]: {r['summary']}" for r in sessions) or "(none yet)"
+        prompt = [{"role": "system", "content": HANDOVER_PROMPT},
+                  {"role": "user", "content": f"Project: {project}\nSessions:\n{rows}\n\nThe conversation, oldest "
+                                              f"first:\n{json.dumps(items, ensure_ascii=False)}"}]
+
+        def job():
+            try:
+                r = requests.post(f"{base_url}/v1/chat/completions", json={
+                    "model": model, "messages": prompt, "think": False, "temperature": 0.2,
+                    "max_tokens": HANDOVER_TOKENS, "stream": False}, timeout=900)
+                r.raise_for_status()
+                text = unfence(r.json()["choices"][0]["message"]["content"])
+            except (requests.RequestException, ValueError, LookupError, TypeError) as e:
+                self.done.emit(project, "", str(e))
+                return
+            self.done.emit(project, text, "" if text else "the model wrote nothing")
+
+        threading.Thread(target=job, daemon=True).start()
+
+
+def unfence(text: str) -> str:
+    """Models like to wrap a whole Markdown file in ```markdown … ```; the file is what's inside."""
+    text = text.strip()
+    lines = text.splitlines()
+    if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].strip() == "```":
+        text = "\n".join(lines[1:-1]).strip()
+    return text

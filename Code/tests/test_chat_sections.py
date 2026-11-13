@@ -222,3 +222,34 @@ def test_renaming_from_the_header_renames_everywhere(gui):
     main.ui.lineEdit.setText("  ")                                # an empty name goes back to the old one
     main.ui.lineEdit.editingFinished.emit()
     assert main.ui.lineEdit.text() == "Final plan"
+
+
+def test_header_rename_after_an_old_save_and_repair_on_open(gui):
+    """Older versions saved the header's text as the chat's Name without renaming its file."""
+    import paths
+    main, app, tmp = gui
+    main.create_chat("Old file", chat_settings.defaults())
+    main.ui.lineEdit.setText("Typed name")
+    main.save_chat()                                    # what the old version did: Name changes, file doesn't
+    main.ui.lineEdit.editingFinished.emit()
+    assert main.chat_name() == "Typed name" and not (paths.CHAT_DIR / "Old file.json").exists()
+
+    main.create_chat("Other", chat_settings.defaults())
+    data = json.loads((paths.CHAT_DIR / "Typed name.json").read_text(encoding="utf-8"))
+    data["Name"] = "Renamed long ago"
+    (paths.CHAT_DIR / "Typed name.json").write_text(json.dumps(data), encoding="utf-8")
+    main.qs_chat("Typed name")                          # opening it fixes the file name
+    assert main.chat_name() == "Renamed long ago" and (paths.CHAT_DIR / "Renamed long ago.json").exists()
+    assert "Renamed long ago" in _index(tmp)["ChatList"] and "Typed name" not in _index(tmp)["ChatList"]
+    assert "Renamed long ago" in _rows(main.chat_list)
+
+
+def test_switching_chats_keeps_a_name_typed_in_the_header(gui):
+    import paths
+    main, app, tmp = gui
+    main.create_chat("Other", chat_settings.defaults())
+    main.create_chat("Draft", chat_settings.defaults())
+    main.ui.lineEdit.setText("Decompile Endfield")       # typed, but the edit hasn't finished
+    main.qs_chat("Other")
+    assert (paths.CHAT_DIR / "Decompile Endfield.json").exists() and not (paths.CHAT_DIR / "Draft.json").exists()
+    assert main.chat_name() == "Other" and main.ui.lineEdit.text() == "Other"

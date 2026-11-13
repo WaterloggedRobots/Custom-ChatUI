@@ -1498,6 +1498,8 @@ class ChatMain(QMainWindow):
         if self.client.busy:
             self.client.abort_generation()
             self._end_response()
+        if self.chat_path and path and Path(path).resolve() != Path(self.chat_path).resolve():
+            self.rename_from_header()       # a name still being typed in the header counts before switching
         self._flush_pending()
         self.runner.give_back(self.chat_name())
 
@@ -1559,6 +1561,9 @@ class ChatMain(QMainWindow):
         self._show_runner_state()
         self.runner.kick()
         self._follow_up()
+        name = str(chatHist.get("Name") or "").strip()
+        if name and safe_file_name(name) != self.chat_name():
+            self._rename_chat_file(name)    # renamed in the header by an older version, which left the file as it was
 
     def save_chat(self):
         if not self.chat_path:
@@ -1649,7 +1654,7 @@ class ChatMain(QMainWindow):
             self.client.summary = None      # written by the old model; harmless to redo
         if title != self.ui.lineEdit.text():
             self.ui.lineEdit.setText(title)
-            self._rename_chat_file(title)
+        self._rename_chat_file(title)       # also when the header already showed it
         self.save_chat()
         self._rebuild_chat_ui()
         self.links_changed.emit()
@@ -1690,10 +1695,12 @@ class ChatMain(QMainWindow):
         if not title:
             self.ui.lineEdit.setText(saved)
             return
-        if title == saved:
+        if title == saved and safe_file_name(title) == self.chat_name():
             return
+        # Compared with the file's name, not the "Name" saved in it: older versions saved the header's
+        # text there without renaming anything, so the two can already differ.
         self.ui.lineEdit.setText(title)
-        self._rename_chat_file(title)
+        self._rename_chat_file(title)       # does nothing if the file already has this name
         self.save_chat()
         self.links_changed.emit()
 
@@ -1716,6 +1723,7 @@ class ChatMain(QMainWindow):
             return chat
         if is_open:
             self.chat_path = str(new)
+            self.ui.lineEdit.setText(title)
         else:
             data = projectWork._read(new)
             if data:

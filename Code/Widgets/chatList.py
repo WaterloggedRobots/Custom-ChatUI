@@ -1,7 +1,11 @@
-"""The chat list on the left: sections you make and drag chats into (chat_sections.py).
+"""The chat list on the left: sections you make and drag chats into (chat_sections.py),
+and a group for each project holding its chats.
 
 Dragging only says what moves where. The list is always redrawn from the
-sections, so chats keep their most-recently-used order inside each section.
+sections and the projects' links, so chats keep their most-recently-used order
+inside each group. A project's chats can't be dragged out of it, but the project
+can be dragged into a section. Clicking a project opens its own chat, where its
+work is handed out; its arrow opens and closes the group.
 """
 
 import chat_sections
@@ -10,13 +14,17 @@ from PySide6.QtWidgets import QInputDialog, QMenu, QTreeWidget, QTreeWidgetItem
 from PySide6.QtCore import Qt, QTimer, Signal
 
 NEW_CHAT_LABEL = "Create New Chat [+]"
+NEW_PROJECT_LABEL = "Start New Project [+]"
 NEW_SECTION_LABEL = "Create New Section [+]"
-ROW = Qt.UserRole                       # each row's (kind, name); kind is "new chat", "new section", "section" or "chat"
+ROW = Qt.UserRole                       # each row's (kind, name); kind is "new chat", "new project", "new section",
+                                        # "section", "project" or "chat"
 
 
 class ChatList(QTreeWidget):
     chat_clicked = Signal(str)
     new_chat_clicked = Signal()
+    project_clicked = Signal(str)       # open the project's own chat
+    new_project_requested = Signal(str) # ask for a new project's name; it goes in this section ("" = none)
     sections_changed = Signal(list)     # the sections, after you changed them
     fresh_requested = Signal(str)       # a project whose own chat should start fresh
 
@@ -24,7 +32,10 @@ class ChatList(QTreeWidget):
         super().__init__(parent)
         self.chats = []                 # chat names, oldest use first (.temp.json's ChatList)
         self.sections = []
-        self.project_of = lambda chat: None     # the project a chat is the own chat of (ChatMain sets it)
+        # [(project, its own chat or None, its other chats)], in the links' order (ChatMain sets it)
+        self.project_groups = lambda: []
+        self._closed_projects = set()
+        self._press_x = None            # where the last click went down, to tell a project's arrow from its name
         self.setHeaderHidden(True)
         self.setIndentation(14)
         self.setExpandsOnDoubleClick(False)
@@ -50,32 +61,59 @@ class ChatList(QTreeWidget):
         pos = self.verticalScrollBar().value()
         self.blockSignals(True)
         self.clear()
-        self._row(self, "new chat", "", NEW_CHAT_LABEL, Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-        self._row(self, "new section", "", NEW_SECTION_LABEL, Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        for kind, label in (("new chat", NEW_CHAT_LABEL), ("new project", NEW_PROJECT_LABEL),
+                            ("new section", NEW_SECTION_LABEL)):
+            self._row(self, kind, "", label, Qt.ItemIsEnabled | Qt.ItemIsSelectable)
         chat_flags = Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled
-        grouped = set()
+        groups = {}
+        in_project = {}                 # chat -> the project it's listed under (its first one)
+        for project, lead, chats in self.project_groups():
+            groups[project] = (lead, [c for c in chats if c != lead and c not in in_project])
+            for chat in [lead, *chats]:
+                if chat:
+                    in_project.setdefault(chat, project)
+        placed = set()
         for s in self.sections:
-            members = [c for c in reversed(self.chats) if c in s["Chats"]]
-            grouped.update(members)
-            item = self._row(self, "section", s["Name"], f"{s['Name']} ({len(members)})", chat_flags)
-            font = item.font(0)
-            font.setBold(True)
-            item.setFont(0, font)
+            projects = [p for p in s.get("Projects", []) if p in groups]
+            placed.update(projects)
+            members = [c for c in reversed(self.chats) if c in s["Chats"] and c not in in_project]
+            item = self._row(self, "section", s["Name"], f"{s['Name']} ({len(projects) + len(members)})", chat_flags)
+            self._bold(item)
+            for project in projects:
+                self._project_row(item, project, *groups[project])
             for chat in members:
                 self._chat_row(item, chat, chat_flags)
             item.setExpanded(s["Open"])
+        for project in groups:
+            if project not in placed:
+                self._project_row(self, project, *groups[project])
         for chat in reversed(self.chats):
-            if chat not in grouped:
+            if chat not in in_project and not chat_sections.section_of(self.sections, chat):
                 self._chat_row(self, chat, chat_flags)
         self.blockSignals(False)
         self.verticalScrollBar().setValue(pos)
 
-    def _chat_row(self, parent, chat, flags):
-        project = self.project_of(chat)
-        item = self._row(parent, "chat", chat, f"📂 {chat}" if project else chat, flags)
-        if project:
-            item.setToolTip(0, f"The own chat of project {project}: it hands out the project's work")
+    @staticmethod
+    def _bold(item):
+        font = item.font(0)
+        font.setBold(True)
+        item.setFont(0, font)
+
+    def _project_row(self, parent, project, lead, chats):
+        """The project's group: clicking it opens its own chat; its chats can't be dragged out."""
+        order = {c: i for i, c in enumerate(reversed(self.chats))}
+        chats = sorted(chats, key=lambda c: order.get(c, len(order)))
+        item = self._row(parent, "project", project, f"📂 {project} ({len(chats)})",
+                         Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled)
+        self._bold(item)
+        item.setToolTip(0, f"Project {project}: click to open its own chat, where its work is handed out")
+        for chat in chats:
+            self._row(item, "chat", chat, chat, Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        item.setExpanded(project not in self._closed_projects)
         return item
+
+    def _chat_row(self, parent, chat, flags):
+        return self._row(parent, "chat", chat, chat, flags)
 
     def redraw(self):
         self._redraw()
@@ -94,17 +132,33 @@ class ChatList(QTreeWidget):
 
     def _remember_open(self, item, is_open):
         kind, name = item.data(0, ROW)
+        if kind == "project":
+            (self._closed_projects.discard if is_open else self._closed_projects.add)(name)
         section = chat_sections.find(self.sections, name) if kind == "section" else None
         if section:
             section["Open"] = is_open
             self.sections_changed.emit(self.sections)
 
+    def mousePressEvent(self, event):
+        self._press_x = event.position().x()
+        super().mousePressEvent(event)
+
+    def _on_arrow(self, item) -> bool:
+        """Whether the click that's being handled went on the item's arrow, left of its name."""
+        x, self._press_x = self._press_x, None
+        return x is not None and x < self.visualItemRect(item).left()
+
     def on_click(self, item):
         kind, name = item.data(0, ROW)
         if kind == "section":
             item.setExpanded(not item.isExpanded())
+        elif kind == "project":
+            if not self._on_arrow(item):
+                QTimer.singleShot(0, lambda: self.project_clicked.emit(name))
         elif kind == "new section":
             self.new_section()
+        elif kind == "new project":
+            QTimer.singleShot(0, lambda: self.new_project_requested.emit(""))
         # Deferred: opening a chat redraws this list, which must not happen inside the click.
         elif kind == "new chat":
             QTimer.singleShot(0, self.new_chat_clicked.emit)
@@ -140,12 +194,18 @@ class ChatList(QTreeWidget):
     def _drop(self, dragged, target, below):
         kind, name = dragged
         target_kind, target_name = target.data(0, ROW) if target else ("", "")
-        if target_kind == "chat":
-            parent = target.parent()       # a chat in a section stands for its section
-            target_kind, target_name = parent.data(0, ROW) if parent else ("", "")
+        if kind == "chat" and (target_kind == "project"
+                               or (target is not None and target.parent() is not None
+                                   and target.parent().data(0, ROW)[0] == "project")):
+            return                          # a project's chats come from its links, not from dragging
+        while target is not None and target_kind in ("chat", "project") and target.parent() is not None:
+            target = target.parent()       # a row in a section stands for its section
+            target_kind, target_name = target.data(0, ROW)
         into = target_name if target_kind == "section" else None
         if kind == "chat":
             chat_sections.move_chat(self.sections, name, into)
+        elif kind == "project":
+            chat_sections.move_project(self.sections, name, into)
         elif not into:
             chat_sections.move_section(self.sections, name)
         else:
@@ -168,21 +228,32 @@ class ChatList(QTreeWidget):
         if kind == "section":
             menu.addAction("Rename section…", lambda: self.rename_section(name))
             menu.addAction("Delete section (keeps its chats)", lambda: self.delete_section(name))
-        elif kind == "chat":
-            move = menu.addMenu("Move to section")
+            menu.addAction("Start new project here…", lambda: self.new_project_requested.emit(name))
+        elif kind == "project":
+            menu.addAction("Open project chat", lambda: self.project_clicked.emit(name))
+            if any(p == name and lead for p, lead, _ in self.project_groups()):
+                menu.addAction("Start project chat fresh…", lambda: self.fresh_requested.emit(name))
+            self._move_menu(menu, chat_sections.section_of_project(self.sections, name),
+                            lambda to: self.move_project(name, to))
+        elif kind == "chat" and (item.parent() is None or item.parent().data(0, ROW)[0] != "project"):
             current = chat_sections.section_of(self.sections, name)
-            for s in self.sections:
-                if s["Name"] != current:
-                    move.addAction(s["Name"], lambda to=s["Name"]: self.move_chat(name, to))
+            move = self._move_menu(menu, current, lambda to: self.move_chat(name, to))
             move.addAction("New section…", lambda: self.new_section(name))
-            if current:
-                menu.addAction("Remove from section", lambda: self.move_chat(name, None))
-            project = self.project_of(name)
-            if project:
-                menu.addAction("Start project chat fresh…", lambda: self.fresh_requested.emit(project))
-        else:
+        elif kind != "chat":
             menu.addAction("New section…", self.new_section)
-        menu.exec(self.viewport().mapToGlobal(pos))
+            menu.addAction("Start new project…", lambda: self.new_project_requested.emit(""))
+        if not menu.isEmpty():
+            menu.exec(self.viewport().mapToGlobal(pos))
+
+    def _move_menu(self, menu, current, move_to):
+        """"Move to section" and, when it's in one, "Remove from section"."""
+        move = menu.addMenu("Move to section")
+        for s in self.sections:
+            if s["Name"] != current:
+                move.addAction(s["Name"], lambda to=s["Name"]: move_to(to))
+        if current:
+            menu.addAction("Remove from section", lambda: move_to(None))
+        return move
 
     def _ask_name(self, title, text=""):
         name, ok = QInputDialog.getText(self, title, "Section name", text=text)
@@ -207,4 +278,8 @@ class ChatList(QTreeWidget):
 
     def move_chat(self, chat, to):
         chat_sections.move_chat(self.sections, chat, to)
+        self._changed()
+
+    def move_project(self, project, to):
+        chat_sections.move_project(self.sections, project, to)
         self._changed()

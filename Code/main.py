@@ -162,6 +162,7 @@ if __name__ == "__main__":
     paths.ensure_data_dirs()
     print("Client app files:", paths.CLIENT_REPO_DIR)
     print("Client data:     ", paths.CLIENT_DATA_DIR)
+    print("Chats saved in:  ", paths.SAVE_DIR, "" if paths.SAVE_ON_NAS else "(on this PC)")
 
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon(str(paths.IMG_DIR / "AppIcon.png")))

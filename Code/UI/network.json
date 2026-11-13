@@ -15,8 +15,10 @@
         "port": 7870
     },
     "nas": {
-        "_about": "Samba NAS. Chat and bot saves move here in the next step; not used yet.",
+        "_about": "Samba NAS. Chats, sections, links, projects and personalities are saved in save_path on it: //ip/share/save_path on Windows, mount/save_path on Linux (Code/paths.py).",
         "ip": "192.168.0.163",
-        "share": ""
+        "share": "personal_folder",
+        "mount": "/mnt/nas",
+        "save_path": "LLM/Save"
     }
 }

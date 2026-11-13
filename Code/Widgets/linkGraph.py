@@ -16,6 +16,7 @@ follow, then links_changed redraws the graph from them.
 import math
 
 import chat_links as cl
+import chat_sections
 import graph_layout
 import paths
 import personalities
@@ -857,6 +858,9 @@ class LinkGraph(QMainWindow):
             return
         was = cl.node(kind, old)
         cl.rename_node(self.links, kind, old, new)
+        if kind == cl.PROJECT:              # its place in the chat list's sections follows it
+            chat_sections.rename_project(self.chat_main.chat_list.sections, old, new)
+            self.chat_main.save_sections(self.chat_main.chat_list.sections)
         if self.selected == was:
             self.selected = cl.node(kind, new)
         self.chat_main.links_updated()
@@ -867,6 +871,9 @@ class LinkGraph(QMainWindow):
                              "settings. Its folder and memory notes go to the Recycle Bin."):
             return
         cl.remove_hub(self.links, kind, name)
+        if kind == cl.PROJECT:
+            chat_sections.move_project(self.chat_main.chat_list.sections, name, None)
+            self.chat_main.save_sections(self.chat_main.chat_list.sections)
         try:
             personalities.remove_folder(self._folder(kind, name))
         except OSError as e:

@@ -16,8 +16,12 @@ def test_normalize_drops_bad_entries_and_missing_chats():
     data = [{"Name": "Work", "Chats": ["a", "gone", "a"], "Open": False}, {"Name": "Work"}, {"Name": " "}, "junk",
             {"Name": "Home", "Chats": ["a", "b"]}]
     assert chat_sections.normalize(data, ["a", "b"]) == [
-        {"Name": "Work", "Chats": ["a"], "Open": False}, {"Name": "Home", "Chats": ["b"], "Open": True}]
+        {"Name": "Work", "Chats": ["a"], "Projects": [], "Open": False},
+        {"Name": "Home", "Chats": ["b"], "Projects": [], "Open": True}]
     assert chat_sections.normalize(None, ["a"]) == []
+    data = [{"Name": "Work", "Projects": ["P", "gone", "P"]}, {"Name": "Home", "Projects": ["P", "Q"]}]
+    assert [s["Projects"] for s in chat_sections.normalize(data, [], ["P", "Q"])] == [["P"], ["Q"]]
+    assert chat_sections.normalize(data, [])[0]["Projects"] == ["P", "gone"]      # None: names kept as they are
 
 
 def test_section_rules():
@@ -64,10 +68,14 @@ def gui(tmp_path, monkeypatch):
 def _rows(tree):
     """What the list shows, with the chats of a section indented."""
     rows = []
+
+    def add(item, depth):
+        rows.append("  " * depth + item.text(0))
+        for k in range(item.childCount()):
+            add(item.child(k), depth + 1)
+
     for i in range(tree.topLevelItemCount()):
-        item = tree.topLevelItem(i)
-        rows.append(item.text(0))
-        rows += ["  " + item.child(k).text(0) for k in range(item.childCount())]
+        add(tree.topLevelItem(i), 0)
     return rows
 
 
@@ -105,26 +113,27 @@ def test_drag_chats_into_and_out_of_sections(gui, monkeypatch):
     tree.on_click(_find(tree, "Create New Section [+]"))
     monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Home", True))
     tree.new_section()
-    assert _rows(tree) == ["Create New Chat [+]", "Create New Section [+]", "Work (0)", "Home (0)",
+    assert _rows(tree) == ["Create New Chat [+]", "Start New Project [+]", "Create New Section [+]", "Work (0)",
+                           "Home (0)",
                            "Three", "Two", "One"]
 
     _drag(app, tree, _find(tree, "One"), _find(tree, "Work (0)"))
     _drag(app, tree, _find(tree, "Two"), _find(tree, "One"))      # onto a chat in the section
-    assert _rows(tree)[2:] == ["Work (2)", "  Two", "  One", "Home (0)", "Three"]
+    assert _rows(tree)[3:] == ["Work (2)", "  Two", "  One", "Home (0)", "Three"]
     assert _index(tmp)["Sections"][0]["Chats"] == ["One", "Two"]
 
     _drag(app, tree, _find(tree, "Home (0)"), _find(tree, "Work (2)"), upper=True)
-    assert _rows(tree)[2:4] == ["Home (0)", "Work (2)"]
+    assert _rows(tree)[3:5] == ["Home (0)", "Work (2)"]
     _drag(app, tree, _find(tree, "Two"))                          # out onto the empty space
-    assert _rows(tree)[2:] == ["Home (0)", "Work (1)", "  One", "Three", "Two"]
+    assert _rows(tree)[3:] == ["Home (0)", "Work (1)", "  One", "Three", "Two"]
 
     # Opening a chat keeps it in its section, on top; renaming keeps it there too.
     main.create_chat("Four", chat_settings.defaults())
     _drag(app, tree, _find(tree, "Four"), _find(tree, "Work (1)"))
     main.qs_chat("One")
-    assert _rows(tree)[3:6] == ["Work (2)", "  One", "  Four"]
+    assert _rows(tree)[4:7] == ["Work (2)", "  One", "  Four"]
     main.apply_settings("Uno", main.settings)
-    assert _rows(tree)[4] == "  Uno"
+    assert _rows(tree)[5] == "  Uno"
     assert sorted(_index(tmp)["Sections"][1]["Chats"]) == ["Four", "Uno"]
 
     tree.delete_section("Work")                                  # its chats stay
@@ -156,3 +165,60 @@ def test_clicking_a_row_opens_it(gui):
     tree.on_click(_find(tree, "Create New Chat [+]"))
     app.processEvents()
     assert opened == ["One"] and new == [1]
+
+
+def test_projects_are_groups_their_chats_cant_leave(gui, monkeypatch):
+    import chat_links
+    from PySide6.QtWidgets import QInputDialog
+    main, app, tmp = gui
+    main.create_chat("Loose", chat_settings.defaults())
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Game", True))
+    tree = main.chat_list
+    tree.on_click(_find(tree, "Start New Project [+]"))
+    app.processEvents()
+    assert chat_links.lead_of(main.links, "Game") == "Game" and main.chat_name() == "Game"
+    assert main.start_session("Game", "Art", "Draw the title screen.").startswith("Started session Art")
+    rows = _rows(tree)
+    assert rows[3:] == ["📂 Game (1)", "  Art", "Loose"]          # its own chat is the group's header
+
+    opened = []
+    tree.project_clicked.connect(opened.append)
+    main.qs_chat("Loose")
+    tree.on_click(_find(tree, "📂 Game (1)"))
+    app.processEvents()
+    assert opened == ["Game"] and main.chat_name() == "Game"
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Work", True))
+    tree.new_section()
+    _drag(app, tree, _find(tree, "Art"))                          # a project's chat stays in it
+    assert _rows(tree)[3:] == ["Work (0)", "📂 Game (1)", "  Art", "Loose"]
+    _drag(app, tree, _find(tree, "📂 Game (1)"), _find(tree, "Work (0)"))
+    assert _rows(tree)[3:] == ["Work (1)", "  📂 Game (1)", "    Art", "Loose"]
+    assert _index(tmp)["Sections"][0]["Projects"] == ["Game"]
+    _drag(app, tree, _find(tree, "Loose"), _find(tree, "📂 Game (1)"))   # dropped on a project: lands in its section
+    assert _rows(tree)[3:] == ["Work (1)", "  📂 Game (1)", "    Art", "Loose"]
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Music", True))
+    main.start_new_project("Work")                                # from the section's right-click menu
+    assert _rows(tree)[3:6] == ["Work (2)", "  📂 Game (1)", "    Art"]
+    assert "  📂 Music (0)" in _rows(tree)
+
+
+def test_renaming_from_the_header_renames_everywhere(gui):
+    import chat_links
+    import paths
+    main, app, tmp = gui
+    main.create_chat("Draft", chat_settings.defaults())
+    chat_links.add_hub(main.links, chat_links.PROJECT, "P")
+    chat_links.add_link(main.links, "chat:Draft", "project:P", chat_links.MEMBER)
+    main.save_links()
+    main.ui.lineEdit.setText("Final plan")
+    main.ui.lineEdit.editingFinished.emit()
+    assert main.chat_name() == "Final plan" and (paths.CHAT_DIR / "Final plan.json").exists()
+    assert not (paths.CHAT_DIR / "Draft.json").exists()
+    assert json.loads((paths.CHAT_DIR / "Final plan.json").read_text(encoding="utf-8"))["Name"] == "Final plan"
+    assert chat_links.sessions_of(main.links, "P") == ["Final plan"]
+    assert "Final plan" in _index(tmp)["ChatList"] and "Draft" not in _index(tmp)["ChatList"]
+    main.ui.lineEdit.setText("  ")                                # an empty name goes back to the old one
+    main.ui.lineEdit.editingFinished.emit()
+    assert main.ui.lineEdit.text() == "Final plan"

@@ -23,7 +23,7 @@ from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QDesktopServices
 import html
 import json
 import threading
-from pathlib import Path, PurePath
+from pathlib import Path, PurePath, PureWindowsPath
 import os
 import markdown
 import time
@@ -295,9 +295,12 @@ class ChatMain(QMainWindow):
                 self.setCentralWidget(self.ui)
                 self.setWindowTitle("ChatUI")
                 self.chat_list = self.ui.chatList
+                self.ui.lineEdit.editingFinished.connect(self.rename_from_header)
                 self.chat_list.sections_changed.connect(self.save_sections)
-                self.chat_list.project_of = lambda chat: chat_links.led_by(self.links, chat)
+                self.chat_list.project_groups = self._project_groups
                 self.chat_list.fresh_requested.connect(self.ask_start_fresh)
+                self.chat_list.project_clicked.connect(self.open_project_chat)
+                self.chat_list.new_project_requested.connect(self.start_new_project)
                 self.links_changed.connect(self.chat_list.redraw)
                 self.chat = self.ui.textBrowser
                 self.input = self.ui.plainTextEdit
@@ -308,6 +311,7 @@ class ChatMain(QMainWindow):
                 lastChat = self.get_lastChat()
                 self.load_chat(lastChat)
                 QTimer.singleShot(0, self.refresh_models)
+                QTimer.singleShot(0, self._note_save_place)
 
         except Exception as e:
             print(f"Error loading UI: {e}")
@@ -455,6 +459,11 @@ class ChatMain(QMainWindow):
     # ------------------------------------------------------------------
     # Options and attachments
     # ------------------------------------------------------------------
+
+    def _note_save_place(self):
+        if paths.NAS_SAVE_DIR and not paths.SAVE_ON_NAS:
+            self.status_label.setText(f"⚠ Can't reach {paths.NAS_SAVE_DIR.parent}: chats are saved on this PC "
+                                      f"until the NAS is back")
 
     def refresh_models(self):
         """Ask the server which models Ollama has and fill the model list. Returns their names."""
@@ -646,6 +655,9 @@ class ChatMain(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Without this the list behind the rows is the system's bright window colour, not the menu's.
+        rows_widget.setObjectName("menuRows")
+        scroll.setStyleSheet("QScrollArea, #menuRows{background:rgb(45,45,45)}")
         hint = rows_widget.sizeHint()
         tall = hint.height() > MENU_LIST_HEIGHT
         scroll.setFixedSize(hint.width() + (scroll.verticalScrollBar().sizeHint().width() if tall else 0),
@@ -1468,8 +1480,10 @@ class ChatMain(QMainWindow):
         return None
 
     def get_lastChat(self):
-        log = read_json_file(paths.CHAT_INDEX_FILE)
-        return log["LastChat"]
+        """The last opened chat's file in this PC's CHAT_DIR: the NAS index may hold another PC's path."""
+        last = str((read_json_file(paths.CHAT_INDEX_FILE) or {}).get("LastChat") or "")
+        path = paths.CHAT_DIR / f"{PureWindowsPath(last).stem}.json" if last else None
+        return str(path) if path and path.exists() else ""
 
     def update_lastChat(self, path):
         logPath = paths.CHAT_INDEX_FILE
@@ -1666,6 +1680,22 @@ class ChatMain(QMainWindow):
             path = paths.CHAT_DIR / f"{base} ({i}).json"
             i += 1
         return path
+
+    def rename_from_header(self):
+        """The chat's name was typed in the header: rename its file, links, list and sections to match."""
+        if not self.chat_path:
+            return
+        title = self.ui.lineEdit.text().strip()
+        saved = (read_json_file(self.chat_path) or {}).get("Name") or self.chat_name()
+        if not title:
+            self.ui.lineEdit.setText(saved)
+            return
+        if title == saved:
+            return
+        self.ui.lineEdit.setText(title)
+        self._rename_chat_file(title)
+        self.save_chat()
+        self.links_changed.emit()
 
     def _rename_chat_file(self, title):
         self.rename_chat(self.chat_name(), title)
@@ -2007,6 +2037,30 @@ class ChatMain(QMainWindow):
 
     def open_project_chat(self, project):
         self.qs_chat(self.project_chat(project))
+
+    def _project_groups(self):
+        """What the chat list shows for each project: its own chat, then its sessions and past own chats."""
+        links = getattr(self, "links", None)
+        if not links:
+            return []
+        return [(p, chat_links.lead_of(links, p), [*chat_links.sessions_of(links, p), *links["Past"].get(p, [])])
+                for p in links["Projects"]]
+
+    def start_new_project(self, section=""):
+        """Ask for a name, make the project and open its own chat; `section` is where it goes in the chat list."""
+        name, ok = QInputDialog.getText(self, "Start new project", "Project name")
+        name = chat_links.clean_name(name) if ok else ""
+        if not name:
+            return
+        if not chat_links.add_hub(self.links, chat_links.PROJECT, name):
+            QMessageBox.warning(self, "Start new project", f"There's already a project called {name}.")
+            return
+        self.save_links()
+        if section:
+            chat_sections.move_project(self.chat_list.sections, name, section)
+            self.save_sections(self.chat_list.sections)
+        self.open_project_chat(name)
+        self.links_updated()
 
     def ask_start_fresh(self, project):
         lead = chat_links.lead_of(self.links, project)

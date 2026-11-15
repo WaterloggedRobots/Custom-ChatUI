@@ -1603,8 +1603,9 @@ class ChatMain(QMainWindow):
             self._rebuild_chat_ui(keep_scroll=True)
         if self.client.model_name != old_model:
             self.client.summary = None      # written by the old model; harmless to redo
-        if title != self.ui.lineEdit.text():
+        if title:
             self.ui.lineEdit.setText(title)
+            # Also when the title didn't change: an earlier rename may have failed and left the old file name.
             self._rename_chat_file(title)
         self.save_chat()
         self._rebuild_chat_ui()
@@ -1642,12 +1643,24 @@ class ChatMain(QMainWindow):
         new = self._free_chat_path(title, current=old)
         if new == old:
             return
+        folder = paths.CHAT_DIR / old.stem          # its memory notes
         try:
-            os.replace(old, new)
-            if (paths.CHAT_DIR / old.stem).exists():
-                os.replace(paths.CHAT_DIR / old.stem, paths.CHAT_DIR / new.stem)
+            # The folder first: Windows refuses while a file in it is open or Explorer is inside it,
+            # and then nothing has moved yet.
+            if folder.exists():
+                os.replace(folder, paths.CHAT_DIR / new.stem)
+            try:
+                os.replace(old, new)
+            except OSError:
+                if folder.exists() or not (paths.CHAT_DIR / new.stem).exists():
+                    raise
+                os.replace(paths.CHAT_DIR / new.stem, folder)
+                raise
         except OSError as e:
-            print(f"Rename failed: {e}")
+            QMessageBox.warning(self, "Rename", f"The chat is still saved as \"{old.stem}\": its file or its folder "
+                                                f"couldn't be renamed.\n\n{e}\n\nClose anything using them (an "
+                                                "Explorer window inside its folder, an open note) and save the "
+                                                "settings again.")
             return
         self.chat_path = str(new)
         chat_links.rename_node(self.links, chat_links.CHAT, old.stem, new.stem)

@@ -6,6 +6,7 @@ Run from Code/:  python -m pytest -q tests
 
 import json
 import os
+from pathlib import Path
 import sys
 import time
 
@@ -145,6 +146,39 @@ def test_saving_from_the_window_renames_and_applies(gui):
     assert main.client.think is False
     index = json.loads((tmp / ".temp.json").read_text(encoding="utf-8"))
     assert index["ChatList"] == ["Renamed chat"]
+
+
+def test_a_chat_left_with_its_old_file_name_is_renamed_on_the_next_save(gui):
+    main, win, tmp = gui
+    main.create_chat("Test 128B", chat_settings.defaults())
+    data = _saved(main)
+    data["Name"] = "Decompile"                                          # an earlier rename that didn't happen
+    (tmp / "Chat" / "Test 128B.json").write_text(json.dumps(data), encoding="utf-8")
+    main.load_chat(str(tmp / "Chat" / "Test 128B.json"))
+    assert main.ui.lineEdit.text() == "Decompile"
+    main.apply_settings("Decompile", main.settings)
+    assert main.chat_path.endswith("Decompile.json") and not (tmp / "Chat" / "Test 128B.json").exists()
+    assert json.loads((tmp / ".temp.json").read_text(encoding="utf-8"))["ChatList"] == ["Decompile"]
+
+
+def test_a_failed_rename_moves_nothing_and_says_so(gui, monkeypatch):
+    from Widgets import chatMain
+    main, win, tmp = gui
+    main.create_chat("Old", chat_settings.defaults())
+    (tmp / "Chat" / "Old").mkdir(exist_ok=True)
+    (tmp / "Chat" / "Old" / "note.md").write_text("x", encoding="utf-8")
+    real, warned = os.replace, []
+
+    def replace(src, dst):
+        if Path(src).suffix == ".json":
+            raise PermissionError("in use")                             # after the folder has moved
+        real(src, dst)
+    monkeypatch.setattr(chatMain.os, "replace", replace)
+    monkeypatch.setattr(chatMain.QMessageBox, "warning", lambda *a: warned.append(a[2]))
+    main.apply_settings("New", main.settings)
+    assert warned and "still saved as \"Old\"" in warned[0]
+    assert main.chat_path.endswith("Old.json") and (tmp / "Chat" / "Old" / "note.md").exists()
+    assert not (tmp / "Chat" / "New").exists() and not (tmp / "Chat" / "New.json").exists()
 
 
 def test_old_chat_is_migrated_on_load(gui):

@@ -57,6 +57,16 @@ DEFAULT_CONTEXT = 16384       # until the server has said how big this model's c
 HISTORY_SHARE = 0.5           # the verbatim messages may fill this much of it; older ones go in the summary
 COMPACT_AT = 0.7              # how full it may get during one answer before its tool work is condensed
 TOOL_LOG_CHARS = 3000         # how much of each tool result is kept in the saved chat
+FOCUS_NOTE = ("Reply to the user's latest message. Requests from earlier in this chat are done unless that "
+              "message takes them up again.")
+SUMMARY_PROMPT = ("Update the running summary of a conversation. Newer messages matter most: give the latest topics, "
+                  "requests and results the most detail, and shorten what came before, the more the older it is. "
+                  "Mark requests that were done, dropped or replaced as such, so they aren't taken up again. Keep the "
+                  "decisions, constraints, names, numbers and technical details that still apply. Write notes, not "
+                  "prose, and end with a 'Latest:' line on where things stood at the end of the new messages.")
+COMPACT_PROMPT = ("Condense this record of tool calls and their results, made while working on one request. Keep what "
+                  "was found, changed or decided, with paths, names, numbers and errors; the newest in the most "
+                  "detail. Write notes, not prose.")
 IMAGE_EXT_FOR = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
 
 
@@ -255,11 +265,14 @@ class LLMClient(QObject):
         if stage:
             messages.append({"role": "system", "content": stage})
         if summary_text:
-            messages.append({"role": "system", "content": f"Summary of the earlier conversation:\n{summary_text}"})
+            messages.append({"role": "system", "content": "Summary of the earlier conversation (older than the "
+                                                          "messages below, and may be out of date: where they "
+                                                          f"differ, the newer messages win):\n{summary_text}"})
         user_idx = [i for i, m in enumerate(recent) if m["role"] == "user"]
         full = set(user_idx[-ATTACHMENT_TURNS:])
         if self.tools_enabled:
             messages.append({"role": "system", "content": self.toolbox.system_note()})
+        messages.append({"role": "system", "content": FOCUS_NOTE})
         for i, m in enumerate(recent):
             if m["role"] not in ("user", "assistant"):
                 continue
@@ -300,7 +313,7 @@ class LLMClient(QObject):
         self.summary = {"upto": len(older), "text": text}
         return text
 
-    def _fold(self, text: str, items) -> str:
+    def _fold(self, text: str, items, instruction=SUMMARY_PROMPT) -> str:
         """`text` (a running summary) updated with `items`, a few at a time so each request fits the context."""
         room = self._context() - 2 * SUMMARY_MAX_TOKENS - 300
         batches, batch, used = [], [], 0
@@ -314,9 +327,7 @@ class LLMClient(QObject):
             used += cost
         for batch in batches + [batch]:
             prompt = [
-                {"role": "system", "content": "Update the running summary of a conversation. Keep goals, decisions, "
-                                              "constraints, names, numbers and technical details. Be concise; "
-                                              "write it as notes, not prose."},
+                {"role": "system", "content": instruction},
                 {"role": "user", "content": (f"Current summary:\n{text}\n\n" if text else "")
                                             + "New messages:\n" + json.dumps(batch, ensure_ascii=False)},
             ]
@@ -337,12 +348,17 @@ class LLMClient(QObject):
                   **({"called": [c["function"] for c in m["tool_calls"]]} if m.get("tool_calls") else {})}
                  for m in messages[base:last]]
         try:
-            text = self._fold("", items)
+            text = self._fold("", items, COMPACT_PROMPT)
         except (requests.RequestException, ValueError, LookupError, TypeError) as e:
             print(f"Could not condense the tool results: {e}")          # the server still fits what it can
             return messages
-        return messages[:base] + [{"role": "system", "content": "Work already done for the current request (older "
-                                                                f"tool results, condensed; don't repeat it):\n{text}"}
+        # The request is restated, so a long run of tools doesn't drift from what was asked.
+        asked = next((m["content"] for m in reversed(messages[:base]) if m["role"] == "user"), "")
+        if isinstance(asked, list):
+            asked = "\n".join(p.get("text", "") for p in asked if p.get("type") == "text")
+        return messages[:base] + [{"role": "system", "content": f"The request being worked on:\n{asked[:4000]}\n\n"
+                                                                "Work already done for it (older tool results, "
+                                                                f"condensed; don't repeat it):\n{text}"}
                                   ] + messages[last:]
 
     def summarize_chat(self, chat: str, history):

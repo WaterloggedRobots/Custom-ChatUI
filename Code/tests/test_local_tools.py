@@ -394,13 +394,14 @@ class FakeSummaries:
     """Stands in for requests.post on the client's summary requests."""
 
     def __init__(self, fail=False):
-        self.prompts, self.fail = [], fail
+        self.prompts, self.instructions, self.fail = [], [], fail
 
     def __call__(self, url, json, timeout):
         import requests
         if self.fail:
             raise requests.ConnectionError("down")
         self.prompts.append(json["messages"][1]["content"])
+        self.instructions.append(json["messages"][0]["content"])
         text = f"summary {len(self.prompts)}"
 
         class R:
@@ -453,6 +454,7 @@ def test_a_failed_summary_doesnt_stop_the_chat(summaries):
 
 
 def test_tool_rounds_are_condensed_but_the_newest_stays(summaries):
+    import llmClient
     client, fake = summaries
     call = {"id": "1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}
     base = [{"role": "user", "content": "go"}]
@@ -462,7 +464,21 @@ def test_tool_rounds_are_condensed_but_the_newest_stays(summaries):
                  {"role": "tool", "tool_call_id": "1", "name": "read_file", "content": f"result {i}"}]
     out = client._compact(base + work, 1)
     assert out[0] == base[0] and out[1]["role"] == "system" and "summary 1" in out[1]["content"]
+    assert "request being worked on:\ngo\n" in out[1]["content"]
+    assert fake.instructions[0] == llmClient.COMPACT_PROMPT
     assert out[2:] == work[-2:]
     assert "result 0" in fake.prompts[0] and "result 2" not in fake.prompts[0]
     one_round = base + work[:2]
     assert client._compact(one_round, 1) == one_round
+
+
+def test_the_summary_favours_recent_messages_and_yields_to_them(summaries):
+    import llmClient
+    client, fake = summaries
+    client._summary_for(turns(30, 10))
+    assert fake.instructions[0] == llmClient.SUMMARY_PROMPT and "Newer messages matter most" in fake.instructions[0]
+    sent = client.build_messages(turns(31, 10), "old plans")
+    system = [m["content"] for m in sent if m["role"] == "system"]
+    assert any("old plans" in t and "the newer messages win" in t for t in system)
+    assert system[-1] == llmClient.FOCUS_NOTE                 # the last word before the conversation
+    assert sent[-1] == {"role": "user", "content": turns(31, 10)[-1]["content"]}

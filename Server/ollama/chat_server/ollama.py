@@ -149,7 +149,8 @@ class Ollama:
         must use the same value, or Ollama reloads it."""
         if not model:
             return Config.NUM_CTX
-        own = context_overrides(Config.NUM_CTX_MODELS).get(_tagged(model))
+        own = {**context_overrides(Config.TESTED_CTX_MODELS),
+               **context_overrides(Config.NUM_CTX_MODELS)}.get(_tagged(model))
         if own:
             return own
         cached = self._model_ctx.get(model)

@@ -430,11 +430,40 @@ def turns(n, size):
 
 
 def test_long_messages_go_in_the_summary_before_the_context_fills(summaries):
+    import llmClient
     client, _ = summaries
     older, recent = client._split_history(turns(19, 1500))     # few messages, but far too long to all be sent
-    assert len(older) == 10 and recent[0]["role"] == "user"
+    assert older and recent[0]["role"] == "user"
+    sent = sum(llmClient.estimate_tokens(m["content"]) for m in recent)
+    assert sent <= 4096 * llmClient.REFILL_SHARE * llmClient.HISTORY_SHARE + 600   # one message over at most
     short_older, short_recent = client._split_history(turns(19, 10))
     assert not short_older and len(short_recent) == 19
+
+
+def test_the_window_keeps_its_start_until_it_overflows(summaries):
+    """A bigger context keeps more messages verbatim, and the window only jumps when it overflows."""
+    client, _ = summaries
+    client.contexts["gemma4:31b"] = 131072
+    older, recent = client._split_history(turns(200, 300))     # ~20K tokens: all of it fits
+    assert not older and len(recent) == 200
+    client.contexts["gemma4:31b"] = 4096
+    history = turns(41, 150)                                   # ~50 tokens each; 2048 fit, so ~40 messages
+    older, _ = client._split_history(history)
+    client.summary = {"upto": len(older), "text": "notes"}
+    starts = {client._split_history(history + turns(2 * k, 150))[0].__len__() for k in range(1, 8)}
+    assert starts == {len(older)}                              # the next turns don't move it
+    jumped, _ = client._split_history(history + turns(60, 150))
+    assert len(jumped) > len(older) + 20                       # overflowing moves it a long way at once
+
+
+def test_the_summary_is_background_and_newer_messages_win(summaries):
+    client, fake = summaries
+    history = turns(31, 3000)                                   # ends with the user's newest message
+    older, _ = client._split_history(history)
+    messages = client.build_messages(history, client._summary_for(older))
+    note = next(m["content"] for m in messages if m["role"] == "system" and "older part" in m["content"])
+    assert "answer the user's latest message" in note and messages[-1]["role"] == "user"
+    assert "Newer messages:" in fake.prompts[0]
 
 
 def test_a_long_history_is_summarised_in_pieces_that_fit(summaries):

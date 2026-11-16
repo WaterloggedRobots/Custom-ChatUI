@@ -151,6 +151,8 @@ def test_context_window_is_chosen_per_model(env, monkeypatch):
     client, fake, _ = env
     monkeypatch.setattr(Config, "NUM_CTX", 16384)
     monkeypatch.setattr(Config, "NUM_CTX_MODELS", "")
+    assert _sent_ctx(client, fake, "gemma4:31b") == 131072           # measured to fit: TESTED_CTX_MODELS
+    monkeypatch.setattr(Config, "TESTED_CTX_MODELS", "")
     assert _sent_ctx(client, fake, "gemma4:31b") == 16384            # no Modelfile num_ctx: NUM_CTX
     assert _sent_ctx(client, fake, "small:3b") == 4096               # the model's own Modelfile num_ctx
     shows = len(fake.shows)
@@ -161,12 +163,16 @@ def test_context_window_is_chosen_per_model(env, monkeypatch):
     assert _sent_ctx(client, fake, "gemma4:latest") == 32768         # a name without a tag means :latest
     assert _sent_ctx(client, fake, "gemma4:31b") == 16384
     assert _sent_ctx(client, fake, "small:3b", num_ctx=2048) == 2048  # the request itself beats both
+    monkeypatch.setattr(Config, "TESTED_CTX_MODELS", "gemma4:31b=131072, small:3b=65536")
+    assert _sent_ctx(client, fake, "gemma4:31b") == 131072
+    assert _sent_ctx(client, fake, "small:3b") == 8192               # .env's NUM_CTX_MODELS beats the tested ones
 
 
 def test_loading_a_model_uses_its_context_window(env, monkeypatch):
     from chat_server.config import Config
     client, fake, _ = env
     monkeypatch.setattr(Config, "NUM_CTX_MODELS", "")
+    monkeypatch.setattr(Config, "TESTED_CTX_MODELS", "")
     client.post("/v1/models/load", params={"model": "small:3b"})
     assert fake.requests[-1]["options"] == {"num_ctx": 4096}         # so the first message doesn't reload it
     client.post("/v1/models/unload/small:3b")

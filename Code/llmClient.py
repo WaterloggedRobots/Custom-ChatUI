@@ -4,9 +4,11 @@ The chat history in ChatMain is the single source of truth; every request
 builds its message list from it here:
 
 - the bot preset goes first as the system message;
-- long chats keep the newest messages verbatim and fold older ones into a
-  rolling summary, which is only refreshed after enough new messages have
-  dropped out of the window (not on every request);
+- long chats send as many of the newest messages verbatim as fit in
+  HISTORY_SHARE of the model's context, and fold older ones into a rolling
+  summary. The window only moves when it overflows, and then by a lot at
+  once, so the prompt's start (and Ollama's cache of it) rarely changes. The
+  summary is marked as older background, so the latest message always wins;
 - images and files attached to recent user messages are sent inline
   (OpenAI content parts); older ones are replaced by a short note;
 - the model's reasoning is requested with `think` and streamed separately,
@@ -43,9 +45,7 @@ from local_tools.memory import MAX_NOTE_CHARS
 
 DEFAULT_PORT = 8100
 
-MAX_CONTEXT_MESSAGES = 20     # at least this many newest messages are sent verbatim
-SUMMARY_REFRESH_STEP = 10     # re-summarise after this many more messages fall out of the window
-SUMMARY_MAX_TOKENS = 600
+SUMMARY_MAX_TOKENS = 900
 ATTACHMENT_TURNS = 2          # user turns whose attachments are re-sent in full
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
@@ -55,9 +55,25 @@ LINK_SUMMARY_TOKENS = 80
 MAX_TOOL_ROUNDS = 36          # tool calls the model may make in a row before it must answer
 DEFAULT_CONTEXT = 16384       # until the server has said how big this model's context is
 HISTORY_SHARE = 0.5           # the verbatim messages may fill this much of it; older ones go in the summary
+REFILL_SHARE = 0.6            # when they overflow it, the window jumps forward until they fill this much of it
 COMPACT_AT = 0.7              # how full it may get during one answer before its tool work is condensed
 TOOL_LOG_CHARS = 3000         # how much of each tool result is kept in the saved chat
 IMAGE_EXT_FOR = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
+
+
+# How the summary of older messages is written, and how it's shown to the model. Newer things win:
+# without that, a model treats goals from long ago as current and works on them instead of the latest message.
+SUMMARY_PROMPT = (
+    "You keep notes on the older part of a conversation, the part that no longer fits in the model's context. "
+    "Update the notes with the newer messages. Newer messages matter more: when one changes, replaces or "
+    "cancels something earlier, keep only the newer version. Move tasks that were finished or dropped to "
+    "'Done or dropped' in a few words, and keep under 'Still open' only what nobody has finished or cancelled. "
+    "Keep facts, names, numbers, file paths, decisions and the user's preferences. Write short notes under "
+    "these headings: 'Done or dropped', 'Still open', 'Facts and preferences'. Under 500 words.")
+SUMMARY_INTRO = (
+    "Notes on the older part of this conversation, which no longer fits (background only, and it may be out "
+    "of date). The messages after this are newer: answer the user's latest message, and where it differs from "
+    "these notes, follow the message.\n\n")
 
 
 def estimate_tokens(text: str) -> int:
@@ -241,19 +257,26 @@ class LLMClient(QObject):
     def _split_history(self, history):
         """(older, recent): recent is the verbatim window and starts with a user turn.
 
-        The window moves in steps of SUMMARY_REFRESH_STEP rather than one message per
-        turn (it holds MAX_CONTEXT_MESSAGES to MAX_CONTEXT_MESSAGES + step - 1 messages).
-        Between steps the start of the prompt doesn't change, so Ollama reuses its
-        cached prompt and only reads the new messages; the summary refreshes at the
-        same steps. Long messages move it further, in the same steps, so the
-        window never fills more than HISTORY_SHARE of the model's context."""
-        cut = max(0, len(history) - MAX_CONTEXT_MESSAGES)
-        cut -= cut % SUMMARY_REFRESH_STEP
+        The window is as many of the newest messages as fit in HISTORY_SHARE of the
+        model's context, so a bigger context keeps more of the chat word for word.
+        It starts where the summary ends and stays there while it fits, so the start
+        of the prompt doesn't change and Ollama reuses its cached prompt, only reading
+        the new messages. Once it overflows it jumps forward until it fills only
+        REFILL_SHARE of that, which leaves room for many turns before the next jump
+        (and the next summary update)."""
+        if not history:
+            return [], []
         budget = self._context() * HISTORY_SHARE
-        while cut + SUMMARY_REFRESH_STEP < len(history) and \
-                sum(estimate_tokens(str(m.get("content", ""))) for m in history[cut:]) > budget:
-            cut += SUMMARY_REFRESH_STEP
-        while cut < len(history) - 1 and history[cut]["role"] != "user":
+        costs = [estimate_tokens(str(m.get("content", ""))) for m in history]
+        last_user = max((i for i, m in enumerate(history) if m["role"] == "user"), default=len(history) - 1)
+        s = self.summary
+        cut = s["upto"] if s and 0 < s.get("upto", 0) <= last_user else 0
+        if sum(costs[cut:]) > budget:
+            left = sum(costs[cut:])
+            while cut < last_user and left > budget * REFILL_SHARE:
+                left -= costs[cut]
+                cut += 1
+        while cut < last_user and history[cut]["role"] != "user":
             cut += 1
         return history[:cut], history[cut:]
 
@@ -277,7 +300,7 @@ class LLMClient(QObject):
         if stage:
             messages.append({"role": "system", "content": stage})
         if summary_text:
-            messages.append({"role": "system", "content": f"Summary of the earlier conversation:\n{summary_text}"})
+            messages.append({"role": "system", "content": SUMMARY_INTRO + summary_text})
         user_idx = [i for i, m in enumerate(recent) if m["role"] == "user"]
         full = set(user_idx[-ATTACHMENT_TURNS:])
         if self.tools_enabled:
@@ -303,13 +326,13 @@ class LLMClient(QObject):
     # ------------------------------------------------------------- summary
 
     def _summary_for(self, older):
-        """Summary text covering `older`, refreshing it only when it lags by SUMMARY_REFRESH_STEP."""
+        """Summary text covering `older`, updated when the window has moved past where it ends."""
         if not older:
             return None
         s = self.summary
         if s and s.get("upto", 0) > len(older):
             s = None                                  # history was edited underneath it
-        if s and len(older) - s["upto"] < SUMMARY_REFRESH_STEP:
+        if s and len(older) == s["upto"]:
             return s["text"]
         start = s["upto"] if s else 0
         new_msgs = [{"role": m["role"], "content": self._content(m, False)} for m in older[start:]]
@@ -322,8 +345,9 @@ class LLMClient(QObject):
         self.summary = {"upto": len(older), "text": text}
         return text
 
-    def _fold(self, text: str, items) -> str:
+    def _fold(self, text: str, items, instructions=None) -> str:
         """`text` (a running summary) updated with `items`, a few at a time so each request fits the context."""
+        instructions = instructions or SUMMARY_PROMPT
         room = self._context() - 2 * SUMMARY_MAX_TOKENS - 300
         batches, batch, used = [], [], 0
         for item in items:
@@ -336,11 +360,9 @@ class LLMClient(QObject):
             used += cost
         for batch in batches + [batch]:
             prompt = [
-                {"role": "system", "content": "Update the running summary of a conversation. Keep goals, decisions, "
-                                              "constraints, names, numbers and technical details. Be concise; "
-                                              "write it as notes, not prose."},
-                {"role": "user", "content": (f"Current summary:\n{text}\n\n" if text else "")
-                                            + "New messages:\n" + json.dumps(batch, ensure_ascii=False)},
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": (f"Current notes:\n{text}\n\n" if text else "")
+                                            + "Newer messages:\n" + json.dumps(batch, ensure_ascii=False)},
             ]
             r = requests.post(f"{self.base_url}/v1/chat/completions", json={
                 "model": self.model_name, "messages": prompt, "think": False, "temperature": 0.2,
@@ -359,7 +381,9 @@ class LLMClient(QObject):
                   **({"called": [c["function"] for c in m["tool_calls"]]} if m.get("tool_calls") else {})}
                  for m in messages[base:last]]
         try:
-            text = self._fold("", items)
+            text = self._fold("", items, "Condense the work done so far for the current request: what was looked at, "
+                                         "found, changed and run, with file paths, names, numbers and key results. "
+                                         "Write it as short notes, under 500 words.")
         except (requests.RequestException, ValueError, LookupError, TypeError) as e:
             print(f"Could not condense the tool results: {e}")          # the server still fits what it can
             return messages

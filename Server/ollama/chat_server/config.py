@@ -60,7 +60,14 @@ class Config:
     NUM_CTX = _int("NUM_CTX", 16384)
     # Per-model context windows, e.g. "xortron=4096, qwen3.6:35b-a3b=32768".
     # A model without one here uses the num_ctx in its own Modelfile, if it
-    # has one, and NUM_CTX otherwise.
+    # has one, and NUM_CTX otherwise. NUM_CTX_MODELS in .env adds to these and
+    # wins where both name a model.
+    # Measured on the RTX 5090 (32 GB) beside GPT-SoVITS on 2026-11-16: these load
+    # all their layers on the GPU at 128K (peak 30.8 GB) and still found a fact
+    # placed at the start of a 105K-token prompt. gemma4-heretic spilled 4 of 61
+    # layers to the CPU at 96K, so it stays at 64K.
+    TESTED_CTX_MODELS = ("gemma4:31b=131072, qwen3.8:27b=131072, qwen3.6:35b-a3b=131072, "
+                         "gemma4-heretic=65536")
     NUM_CTX_MODELS = os.getenv("NUM_CTX_MODELS", "")
     KEEP_ALIVE = os.getenv("KEEP_ALIVE", "30m")
 

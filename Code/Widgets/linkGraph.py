@@ -870,10 +870,10 @@ class LinkGraph(QMainWindow):
                              f"Delete {name}? Its chats stay, and chats speaking as it go back to their own "
                              "settings. Its folder and memory notes go to the Recycle Bin."):
             return
-        cl.remove_hub(self.links, kind, name)
         if kind == cl.PROJECT:
-            chat_sections.move_project(self.chat_main.chat_list.sections, name, None)
-            self.chat_main.save_sections(self.chat_main.chat_list.sections)
+            self.chat_main.remove_project(name)
+            return
+        cl.remove_hub(self.links, kind, name)
         try:
             personalities.remove_folder(self._folder(kind, name))
         except OSError as e:

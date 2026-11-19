@@ -5,19 +5,44 @@ Dragging only says what moves where. The list is always redrawn from the
 sections and the projects' links, so chats keep their most-recently-used order
 inside each group. A project's chats can't be dragged out of it, but the project
 can be dragged into a section. Clicking a project opens its own chat, where its
-work is handed out; its arrow opens and closes the group.
+work is handed out; its arrow opens and closes the group. The row under the
+cursor shows an x on its right that deletes it, once ChatMain has asked.
 """
 
 import chat_sections
 
-from PySide6.QtWidgets import QInputDialog, QMenu, QTreeWidget, QTreeWidgetItem
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtWidgets import QInputDialog, QMenu, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem
+from PySide6.QtCore import QEvent, QRect, Qt, QTimer, Signal
+from PySide6.QtGui import QColor
 
 NEW_CHAT_LABEL = "Create New Chat [+]"
 NEW_PROJECT_LABEL = "Start New Project [+]"
 NEW_SECTION_LABEL = "Create New Section [+]"
 ROW = Qt.UserRole                       # each row's (kind, name); kind is "new chat", "new project", "new section",
                                         # "section", "project" or "chat"
+DELETABLE = ("section", "project", "chat")
+X_WIDTH = 22                            # the delete x's box at the right of the hovered row
+
+
+class _RowDelegate(QStyledItemDelegate):
+    """Draws the hovered row with an x on its right, its text kept clear of it."""
+
+    def __init__(self, tree):
+        super().__init__(tree)
+        self.tree = tree
+
+    def paint(self, painter, option, index):
+        item = self.tree.itemFromIndex(index)
+        if item is None or item is not self.tree.hovered or item.data(0, ROW)[0] not in DELETABLE:
+            super().paint(painter, option, index)
+            return
+        opt = QStyleOptionViewItem(option)
+        opt.rect.setRight(min(opt.rect.right(), self.tree.x_rect(option.rect).left() - 2))
+        super().paint(painter, opt, index)
+        painter.save()
+        painter.setPen(QColor(235, 110, 110) if self.tree.on_x else QColor(170, 170, 170))
+        painter.drawText(self.tree.x_rect(option.rect), Qt.AlignCenter, "✕")
+        painter.restore()
 
 
 class ChatList(QTreeWidget):
@@ -27,6 +52,7 @@ class ChatList(QTreeWidget):
     new_project_requested = Signal(str) # ask for a new project's name; it goes in this section ("" = none)
     sections_changed = Signal(list)     # the sections, after you changed them
     fresh_requested = Signal(str)       # a project whose own chat should start fresh
+    delete_requested = Signal(str, str) # (kind, name) of a section, project or chat to delete, once you say yes
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -36,6 +62,10 @@ class ChatList(QTreeWidget):
         self.project_groups = lambda: []
         self._closed_projects = set()
         self._press_x = None            # where the last click went down, to tell a project's arrow from its name
+        self.hovered = None             # the row under the cursor, which shows the delete x
+        self.on_x = False               # the cursor is on that x
+        self.setMouseTracking(True)
+        self.setItemDelegate(_RowDelegate(self))
         self.setHeaderHidden(True)
         self.setIndentation(14)
         self.setExpandsOnDoubleClick(False)
@@ -118,6 +148,10 @@ class ChatList(QTreeWidget):
     def redraw(self):
         self._redraw()
 
+    def clear(self):
+        self.hovered = None             # its rows are about to go
+        super().clear()
+
     @staticmethod
     def _row(parent, kind, name, text, flags):
         item = QTreeWidgetItem(parent, [text])
@@ -139,7 +173,46 @@ class ChatList(QTreeWidget):
             section["Open"] = is_open
             self.sections_changed.emit(self.sections)
 
+    # ------------------------------------------------------------------
+    # The delete x on the hovered row
+    # ------------------------------------------------------------------
+
+    def x_rect(self, row_rect):
+        """Where the x goes on a row: the right of the list, wherever the row's own text ends."""
+        return QRect(self.viewport().width() - X_WIDTH - 4, row_rect.top(), X_WIDTH, row_rect.height())
+
+    def _x_hit(self, pos):
+        """The deletable row whose x is at `pos`, or None."""
+        item = self.itemAt(pos)
+        if item is None or item.data(0, ROW)[0] not in DELETABLE:
+            return None
+        return item if self.x_rect(self.visualItemRect(item)).contains(pos) else None
+
+    def _hover(self, item, on_x=False):
+        if (item, on_x) == (self.hovered, self.on_x):
+            return
+        self.hovered, self.on_x = item, on_x
+        self.setCursor(Qt.PointingHandCursor if on_x else Qt.ArrowCursor)
+        self.viewport().update()
+
+    def mouseMoveEvent(self, event):
+        pos = event.position().toPoint()
+        if not event.buttons():
+            self._hover(self.itemAt(pos), self._x_hit(pos) is not None)
+        super().mouseMoveEvent(event)
+
+    def viewportEvent(self, event):
+        if event.type() == QEvent.Leave:
+            self._hover(None)
+        return super().viewportEvent(event)
+
     def mousePressEvent(self, event):
+        hit = self._x_hit(event.position().toPoint())
+        if hit is not None and event.button() == Qt.LeftButton:
+            kind, name = hit.data(0, ROW)
+            event.accept()                  # not a click on the row: it isn't opened or dragged
+            QTimer.singleShot(0, lambda: self.delete_requested.emit(kind, name))
+            return
         self._press_x = event.position().x()
         super().mousePressEvent(event)
 
@@ -227,7 +300,7 @@ class ChatList(QTreeWidget):
         menu.setStyleSheet("QMenu{background:rgb(45,45,45);color:white}")
         if kind == "section":
             menu.addAction("Rename section…", lambda: self.rename_section(name))
-            menu.addAction("Delete section (keeps its chats)", lambda: self.delete_section(name))
+            menu.addAction("Delete section (keeps its chats)…", lambda: self.delete_requested.emit("section", name))
             menu.addAction("Start new project here…", lambda: self.new_project_requested.emit(name))
         elif kind == "project":
             menu.addAction("Open project chat", lambda: self.project_clicked.emit(name))
@@ -235,11 +308,14 @@ class ChatList(QTreeWidget):
                 menu.addAction("Start project chat fresh…", lambda: self.fresh_requested.emit(name))
             self._move_menu(menu, chat_sections.section_of_project(self.sections, name),
                             lambda to: self.move_project(name, to))
-        elif kind == "chat" and (item.parent() is None or item.parent().data(0, ROW)[0] != "project"):
-            current = chat_sections.section_of(self.sections, name)
-            move = self._move_menu(menu, current, lambda to: self.move_chat(name, to))
-            move.addAction("New section…", lambda: self.new_section(name))
-        elif kind != "chat":
+            menu.addAction("Delete project and its chats…", lambda: self.delete_requested.emit("project", name))
+        elif kind == "chat":
+            if item.parent() is None or item.parent().data(0, ROW)[0] != "project":
+                current = chat_sections.section_of(self.sections, name)
+                move = self._move_menu(menu, current, lambda to: self.move_chat(name, to))
+                move.addAction("New section…", lambda: self.new_section(name))
+            menu.addAction("Delete chat…", lambda: self.delete_requested.emit("chat", name))
+        else:
             menu.addAction("New section…", self.new_section)
             menu.addAction("Start new project…", lambda: self.new_project_requested.emit(""))
         if not menu.isEmpty():

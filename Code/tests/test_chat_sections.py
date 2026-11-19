@@ -253,3 +253,94 @@ def test_switching_chats_keeps_a_name_typed_in_the_header(gui):
     main.qs_chat("Other")
     assert (paths.CHAT_DIR / "Decompile Endfield.json").exists() and not (paths.CHAT_DIR / "Draft.json").exists()
     assert main.chat_name() == "Other" and main.ui.lineEdit.text() == "Other"
+
+
+def _yes(monkeypatch, asked=None):
+    from PySide6.QtWidgets import QMessageBox
+
+    def question(parent, title, text, *a, **k):
+        if asked is not None:
+            asked.append(text)
+        return QMessageBox.Yes
+    monkeypatch.setattr(QMessageBox, "question", question)
+
+
+def test_the_x_shows_on_the_hovered_row_and_asks_first(gui, monkeypatch):
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QMessageBox
+    main, app, tmp = gui
+    for name in ("Keep", "Bin me"):
+        main.create_chat(name, chat_settings.defaults())
+    tree = main.chat_list
+    row = _find(tree, "Bin me")
+    rect = tree.visualItemRect(row)
+    on_x = tree.x_rect(rect).center()
+    move = QMouseEvent(QMouseEvent.MouseMove, QPointF(on_x), Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+    tree.mouseMoveEvent(move)
+    assert tree.hovered is row and tree.on_x
+    tree._hover(None)
+    assert tree._x_hit(QPoint(5, rect.center().y())) is None          # the name itself still opens it
+    assert tree._x_hit(tree.x_rect(tree.visualItemRect(_find(tree, "Create New Chat [+]"))).center()) is None
+
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(a[2]) or QMessageBox.No)
+    press = QMouseEvent(QMouseEvent.MouseButtonPress, QPointF(on_x), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    tree.mousePressEvent(press)
+    app.processEvents()
+    assert "Bin me" in asked[0] and (tmp / "Chat" / "Bin me.json").exists()      # said no: still there
+    assert main.chat_name() == "Bin me"
+
+    _yes(monkeypatch)
+    tree.mousePressEvent(press)
+    app.processEvents()
+    assert not (tmp / "Chat" / "Bin me.json").exists() and "Bin me" not in _rows(tree)
+    assert "Bin me" not in _index(tmp)["ChatList"]
+    assert main.chat_name() == "Keep"                                       # the open one went: the last one opens
+    assert (tmp / "Chat" / "Deleted" / "Bin me.json").exists() or sys.platform == "win32"
+
+
+def test_deleting_a_project_deletes_its_chats(gui, monkeypatch):
+    import chat_links
+    from PySide6.QtWidgets import QInputDialog
+    main, app, tmp = gui
+    main.create_chat("Loose", chat_settings.defaults())
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Work", True))
+    main.chat_list.new_section()
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Game", True))
+    main.start_new_project("Work")
+    main.start_session("Game", "Art", "Draw the title screen.")
+    main.start_session("Game", "Sound", "Make the jump sound.")
+    main.runner.queue.clear()
+    main.runner.current = None
+    asked = []
+    _yes(monkeypatch, asked)
+    main.ask_delete("project", "Game")
+    app.processEvents()
+    assert "all 3 of its chats" in asked[0] and "Art" in asked[0]
+    for chat in ("Game", "Art", "Sound"):
+        assert not (tmp / "Chat" / f"{chat}.json").exists()
+    assert "Game" not in main.links["Projects"] and chat_links.lead_of(main.links, "Game") is None
+    assert _rows(main.chat_list)[3:] == ["Work (0)", "Loose"]
+    assert _index(tmp)["Sections"][0]["Projects"] == []
+    assert main.chat_name() == "Loose"
+
+    main.ask_delete("section", "Work")                  # a section goes, its chats stay
+    assert _rows(main.chat_list)[3:] == ["Loose"]
+    main.ask_delete("chat", "Loose")                    # the last chat: a new one takes its place
+    assert main.chat_name() == "New Chat" and (tmp / "Chat" / "New Chat.json").exists()
+
+
+def test_a_session_at_work_isnt_deleted(gui, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog, QMessageBox
+    main, app, tmp = gui
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Game", True))
+    main.start_new_project()
+    main.start_session("Game", "Art", "Draw the title screen.")
+    main.runner.current, main.runner.in_place = "Art", False
+    told = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: told.append(a[2]))
+    _yes(monkeypatch)
+    main.ask_delete("project", "Game")
+    assert "Art" in told[0] and (tmp / "Chat" / "Art.json").exists() and "Game" in main.links["Projects"]
+    main.runner.current = None

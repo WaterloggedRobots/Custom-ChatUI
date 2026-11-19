@@ -25,6 +25,7 @@ import json
 import threading
 from pathlib import Path, PurePath, PureWindowsPath
 import os
+import sys
 import markdown
 import time
 from datetime import datetime
@@ -299,6 +300,7 @@ class ChatMain(QMainWindow):
                 self.chat_list.sections_changed.connect(self.save_sections)
                 self.chat_list.project_groups = self._project_groups
                 self.chat_list.fresh_requested.connect(self.ask_start_fresh)
+                self.chat_list.delete_requested.connect(self.ask_delete)
                 self.chat_list.project_clicked.connect(self.open_project_chat)
                 self.chat_list.new_project_requested.connect(self.start_new_project)
                 self.links_changed.connect(self.chat_list.redraw)
@@ -438,10 +440,6 @@ class ChatMain(QMainWindow):
         self.ui.actionLoad_Chat.setShortcut("Ctrl+O")
         self.ui.actionChat_Settings.setShortcut("Ctrl+E")
         self.ui.actionLink_Graph.setShortcut("Ctrl+G")
-        self.fresh_action = self.ui.menuChat.addAction(
-            "Start Project Chat Fresh…", lambda: self.ask_start_fresh(chat_links.led_by(self.links, self.chat_name())))
-        self.fresh_action.setToolTip("A new chat for this project, with a context.md handover instead of the history")
-        self.fresh_action.setEnabled(False)
 
         self.ui.pushButton_6.clicked.connect(self.regenerate_last_response) #regen
         self.ui.pushButton_7.clicked.connect(self.redraw_image)
@@ -535,8 +533,6 @@ class ChatMain(QMainWindow):
         elif not self.desk or (self.desk.project, self.desk.personality) != (project, self.personality_name):
             self.desk = projectWork.ProjectDesk(self, project, self.personality_name)
         self.client.toolbox.project = self.desk
-        if hasattr(self, "fresh_action"):
-            self.fresh_action.setEnabled(bool(project))
         self.client.role_note = lead_note(project, self.personality_name, s["Character"], self._model_lines(),
                                           self.client.model_name or "") if project else ""
         caps = self.models.get(self.client.model_name, {}).get("capabilities")
@@ -2068,6 +2064,95 @@ class ChatMain(QMainWindow):
             chat_sections.move_project(self.chat_list.sections, name, section)
             self.save_sections(self.chat_list.sections)
         self.open_project_chat(name)
+        self.links_updated()
+
+    # ------------------------------------------------------------------
+    # Deleting from the chat list (its x and right-click menu)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _bin_name():
+        return "the Recycle Bin" if sys.platform == "win32" else "a Deleted folder next to your chats"
+
+    def project_chats(self, project) -> list:
+        """Every chat the project holds: its own chat, its sessions and its past own chats."""
+        _, lead, chats = next((g for g in self._project_groups() if g[0] == project), (project, None, []))
+        return list(dict.fromkeys(c for c in [lead, *chats] if c))
+
+    def ask_delete(self, kind, name):
+        """Ask first, then delete a section (its chats stay), a chat, or a project with all its chats."""
+        if kind == "section":
+            title, text = "Delete section", f"Delete the section {name}?\n\nIts chats and projects stay in the list."
+        elif kind == "chat":
+            title, text = "Delete chat", f"Delete the chat {name}?\n\nIts file and memory notes go to {self._bin_name()}."
+        else:
+            chats = self.project_chats(name)
+            shown = "\n".join(f"  • {c}" for c in chats[:12]) + (f"\n  … and {len(chats) - 12} more" if len(chats) > 12 else "")
+            title = "Delete project"
+            text = (f"Delete the project {name} and all {len(chats)} of its chats?\n\n{shown}\n\n" if chats
+                    else f"Delete the project {name}? It has no chats.\n\n")
+            text += f"The chats, their memory notes and the project's folder go to {self._bin_name()}."
+        if QMessageBox.question(self, title, text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        if kind == "section":
+            self.chat_list.delete_section(name)
+        elif kind == "chat":
+            self.delete_chats([name])
+        else:
+            chats = self.project_chats(name)
+            if self.delete_chats(chats):
+                self.remove_project(name)
+
+    def delete_chats(self, chats) -> bool:
+        """Move these chats' files and memory folders to the bin and drop them from the list and links.
+        False, with nothing deleted, while one of them is being answered in the background."""
+        busy = [c for c in chats if self.runner.busy_with(c)]
+        if busy:
+            QMessageBox.information(self, "Delete", f"{busy[0]} is working on its brief. Stop it or wait for it "
+                                                    "to finish, then delete it.")
+            return False
+        self.runner.queue = [c for c in self.runner.queue if c not in chats]
+        if self.chat_name() in chats:
+            if self.client.busy:
+                self.client.abort_generation()
+                self._end_response()
+            self.speaker.stop()
+            self._pending_messages = []
+            self.chat_path = None           # nothing may save it back
+        for chat in chats:
+            for path in (paths.CHAT_DIR / f"{chat}.json", paths.CHAT_DIR / chat):
+                try:
+                    personalities.remove_folder(path)
+                except OSError as e:
+                    print(f"Could not delete {path}: {e}")
+        fresh = chat_links.normalize(self.links, self.all_chats())
+        self.links.clear()                  # in place: other parts hold this dict
+        self.links.update(fresh)
+        self.save_links()
+        logs = read_json_file(paths.CHAT_INDEX_FILE) or {"LastOpened": "", "ChatList": []}
+        logs["ChatList"] = [c for c in logs.get("ChatList", []) if c not in chats]
+        logs["Sections"] = chat_sections.normalize(logs.get("Sections"), logs["ChatList"])
+        with open(paths.CHAT_INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump(logs, f, indent=4)
+        self.chat_list.fill(logs["ChatList"], logs["Sections"])
+        if self.chat_path is None:         # the open one went: open the last one used, or a new one
+            left = [c for c in logs["ChatList"] if (paths.CHAT_DIR / f"{c}.json").exists()]
+            if left:
+                self.qs_chat(left[-1])
+            else:
+                self.create_chat("New Chat", chat_settings.defaults())
+        self.links_updated()
+        return True
+
+    def remove_project(self, name):
+        """Drop a project, its links and its place in the sections; its folder goes to the bin. Its chats stay."""
+        chat_links.remove_hub(self.links, chat_links.PROJECT, name)
+        chat_sections.move_project(self.chat_list.sections, name, None)
+        self.save_sections(self.chat_list.sections)
+        try:
+            personalities.remove_folder(paths.PROJECT_DIR / name)
+        except OSError as e:
+            print(f"Could not move the folder of {name}: {e}")
         self.links_updated()
 
     def ask_start_fresh(self, project):

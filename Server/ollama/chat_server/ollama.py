@@ -49,6 +49,19 @@ def _no_tool_support(err: "OllamaError") -> bool:
     return err.status == 400 and "tools" in err.detail.lower()
 
 
+def _out_of_memory(err: "OllamaError") -> bool:
+    return "out of memory" in err.detail.lower()
+
+
+# Ollama only puts layers in system RAM when its estimate says the model won't
+# fit. Parts it doesn't measure (gemma4's draft model for speculative decoding,
+# the vision projector) can still run the GPU out at run time, and that's a
+# crash, not a fallback. So after one, the model gets this many fewer layers on
+# the GPU each time, and the rest run from system RAM.
+OOM_LAYER_STEP = 6
+OOM_RETRIES = 3
+
+
 class Ollama:
     def __init__(self, base_url: str = Config.OLLAMA_URL, transport: Optional[httpx.AsyncBaseTransport] = None):
         # One pooled client for the whole process; streaming replies can take
@@ -62,6 +75,9 @@ class Ollama:
         self._no_think: set = set()
         # model -> (num_ctx from its Modelfile or None, when it was read)
         self._model_ctx: Dict[str, tuple] = {}
+        # model -> layers it may put on the GPU, once it ran out of GPU memory.
+        # Kept for the life of the server, as a new value makes Ollama reload it.
+        self._gpu_layers: Dict[str, int] = {}
 
     async def close(self):
         await self.http.aclose()
@@ -69,7 +85,37 @@ class Ollama:
     def _prepare(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if payload.get("model") in self._no_think:
             payload = {k: v for k, v in payload.items() if k != "think"}
-        return payload
+        return self._with_gpu_layers(payload)
+
+    def _with_gpu_layers(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        layers = self._gpu_layers.get(payload.get("model"))
+        if layers is None or "num_gpu" in (payload.get("options") or {}):
+            return payload
+        return {**payload, "options": {**(payload.get("options") or {}), "num_gpu": layers}}
+
+    async def _layer_count(self, model: str) -> int:
+        """The layers Ollama can put on the GPU: the model's blocks and its output layer."""
+        try:
+            info = (await self.show(model)).get("model_info") or {}
+            blocks = next((v for k, v in info.items() if k.endswith(".block_count")), None)
+            return int(blocks) + 1 if blocks else 0
+        except Exception as e:
+            log.debug("couldn't read %s's layer count: %s", model, e)
+            return 0
+
+    async def _fewer_gpu_layers(self, model: str) -> bool:
+        """After the GPU ran out of memory: move more of the model to system RAM. False when none are left."""
+        now = self._gpu_layers.get(model)
+        if now is None:
+            now = await self._layer_count(model)
+            if not now:
+                return False
+        if now <= 0:
+            return False
+        self._gpu_layers[model] = max(now - OOM_LAYER_STEP, 0)
+        log.warning("%s ran out of GPU memory; retrying with %d of its layers on the GPU, the rest in system RAM",
+                    model, self._gpu_layers[model])
+        return True
 
     async def _raise_for(self, resp: httpx.Response):
         if resp.status_code != 200:
@@ -84,13 +130,21 @@ class Ollama:
         """Yield Ollama's streamed chunks. Retries without `think` when the model
         doesn't support reasoning, and without `tools` when it can't call tools."""
         body = self._prepare({**payload, "stream": True})
-        for _ in range(3):
+        sent = False
+        for _ in range(3 + OOM_RETRIES):
             try:
                 async for chunk in self._stream(body):
+                    sent = True
                     yield chunk
                 return
             except OllamaError as e:
-                if "think" in body and _no_think_support(e):
+                if _out_of_memory(e) and "num_gpu" not in (payload.get("options") or {}):
+                    # The next request gets fewer layers either way; this one only if nothing reached you yet.
+                    if not await self._fewer_gpu_layers(body["model"]) or sent:
+                        raise
+                    body = self._with_gpu_layers({**body, "options": {
+                        k: v for k, v in (body.get("options") or {}).items() if k != "num_gpu"}})
+                elif "think" in body and _no_think_support(e):
                     log.info("%s has no thinking support; retrying without it", body["model"])
                     self._no_think.add(body["model"])
                     body.pop("think")
@@ -114,17 +168,22 @@ class Ollama:
     async def chat(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """One non-streamed reply."""
         body = self._prepare({**payload, "stream": False})
-        resp = await self.http.post("/api/chat", json=body)
-        try:
-            await self._raise_for(resp)
-        except OllamaError as e:
-            if "think" in body and _no_think_support(e):
-                self._no_think.add(body["model"])
-                body.pop("think")
-                resp = await self.http.post("/api/chat", json=body)
+        for _ in range(2 + OOM_RETRIES):
+            resp = await self.http.post("/api/chat", json=body)
+            try:
                 await self._raise_for(resp)
-            else:
-                raise
+                return resp.json()
+            except OllamaError as e:
+                if (_out_of_memory(e) and "num_gpu" not in (payload.get("options") or {})
+                        and await self._fewer_gpu_layers(body["model"])):
+                    body = self._with_gpu_layers({**body, "options": {
+                        k: v for k, v in (body.get("options") or {}).items() if k != "num_gpu"}})
+                elif "think" in body and _no_think_support(e):
+                    self._no_think.add(body["model"])
+                    body.pop("think")
+                else:
+                    raise
+        await self._raise_for(resp)
         return resp.json()
 
     async def tags(self) -> List[Dict[str, Any]]:
@@ -166,8 +225,9 @@ class Ollama:
         return cached[0] or Config.NUM_CTX
 
     async def load(self, model: str, keep_alive: Any) -> None:
-        resp = await self.http.post("/api/chat", json={"model": model, "messages": [], "keep_alive": keep_alive,
-                                                       "options": {"num_ctx": await self.context_for(model)}})
+        resp = await self.http.post("/api/chat", json=self._with_gpu_layers(
+            {"model": model, "messages": [], "keep_alive": keep_alive,
+             "options": {"num_ctx": await self.context_for(model)}}))
         await self._raise_for(resp)
 
     async def unload(self, model: str) -> None:

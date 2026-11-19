@@ -455,3 +455,40 @@ def test_model_without_tools_is_retried_without_them(env):
     text = "".join(ch["delta"].get("content", "") for e in events if isinstance(e, dict) for ch in e.get("choices", []))
     assert text == "Hello world [1]"
     assert "tools" not in fake.requests[-1]
+
+
+def test_out_of_gpu_memory_retries_with_layers_in_system_ram():
+    import asyncio
+    from chat_server.ollama import Ollama, OllamaError
+    sent = []
+
+    def fake(request):
+        body = json.loads(request.content)
+        if request.url.path == "/api/show":
+            return httpx.Response(200, json={"model_info": {"gemma4.block_count": 60}})
+        sent.append(body.get("options", {}).get("num_gpu"))
+        if (body.get("options", {}).get("num_gpu") or 99) > 50:      # fits once 11 of 61 layers are off the GPU
+            return httpx.Response(500, json={"error": "an error was encountered while running the model: "
+                                                      "CUDA error: out of memory\nCUDA error"})
+        if not body.get("stream", True):
+            return httpx.Response(200, json={"message": {"content": "ok"}, "done": True})
+        return httpx.Response(200, content=json.dumps({"message": {"content": "ok"}, "done": True}).encode())
+
+    async def run():
+        ollama = Ollama(transport=httpx.MockTransport(fake))
+        chunks = [c async for c in ollama.stream_chat({"model": "gemma4-heretic", "messages": [],
+                                                       "options": {"num_ctx": 65536}})]
+        assert chunks[0]["message"]["content"] == "ok" and sent == [None, 55, 49]
+        sent.clear()
+        assert (await ollama.chat({"model": "gemma4-heretic", "messages": []}))["message"]["content"] == "ok"
+        assert sent == [49]                                              # remembered: no reload, no retry
+        sent.clear()
+        try:                                                             # one you pinned yourself isn't changed
+            await ollama.chat({"model": "other", "messages": [], "options": {"num_gpu": 99}})
+        except OllamaError as e:
+            assert "out of memory" in e.detail and sent == [99]
+        else:
+            raise AssertionError("it should have failed")
+        await ollama.close()
+
+    asyncio.run(run())

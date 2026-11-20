@@ -238,12 +238,14 @@ class ChatMain(QMainWindow):
         self.client.approval_needed.connect(self.on_approval_needed)
         self.client.image.connect(self.on_image)
         self.client.chat_summarized.connect(self.on_chat_summarized)
+        self.client.promise_checked.connect(self.on_promise_checked)
         # A project's own chat hands its sessions work, which they do in the background (projectWork.py)
         self.desk = None                 # the open chat's projectWork.ProjectDesk, if it's a project's chat
         self.runner = projectWork.SessionRunner(self)
         self.runner.changed.connect(self._show_runner_state)
         self._pending_messages = []      # for the open chat, waiting for its answer to finish
         self._queued_sends = []          # your messages sent with Enter mid-answer: they go out when it ends
+        self._reminded = set()           # project chats reminded to call the tool since your last message
         self._follow_ups = {}            # project chat -> times it answered its reports since your last message
         self.handover = projectWork.Handover(self)        # writes context.md when a project chat starts fresh
         self.handover.done.connect(self._on_handover)
@@ -1112,6 +1114,8 @@ class ChatMain(QMainWindow):
                 who = f"📨 {html.escape(msg['report'])}"
             elif msg.get("from"):
                 who = f"📋 Brief from project {html.escape(msg['from'])}"
+            elif msg.get("app_note"):
+                who = "⚙ Note from the app"
             else:
                 who = "You"
             self.chat.append(f"<b>{who}</b>{time_str}:")
@@ -1309,10 +1313,13 @@ class ChatMain(QMainWindow):
         if s["TTS"] and (s["TTS Auto Play"] or s["Avatar"]) and msg["content"].strip() \
                 and not result.get("aborted"):
             self.speak(len(self.chat_markdown) - 1, reacted=self._reacted)
-        if faked and self.is_lead() and not any(t.get("name") in ("start_session", "assign_task")
-                                                for t in result.get("tools") or []):
-            self.status_label.setText("⚠ It said it handed out work but called no tool, so no session got a task. "
-                                      "Ask it again to give the task to a session.")
+        if (self.is_lead() and not result.get("aborted")
+                and not any(t.get("name") in ("start_session", "assign_task") for t in result.get("tools") or [])):
+            sessions = chat_links.sessions_of(self.links, chat_links.led_by(self.links, chat))
+            if faked:                       # a made-up note of tool use: a promise for sure
+                QTimer.singleShot(0, lambda: self.on_promise_checked(chat, []))
+            else:
+                self.client.check_promise(chat, msg["content"], sessions)
         self._after_answer(msg["content"] if not result.get("aborted") else None, "it was stopped")
 
     # ------------------------------------------------------------------
@@ -1943,6 +1950,26 @@ class ChatMain(QMainWindow):
             self._follow_ups[chat] = done + 1
             self.answer_open_chat()
 
+    def on_promise_checked(self, chat, sessions):
+        """The project chat said a session gets a task but called no tool: remind it once to call it,
+        or, if you've moved on, say so in the status line."""
+        who = ", ".join(sessions) or "a session"
+        if (chat != self.chat_name() or self.is_answering() or self._queued_sends or chat in self._reminded
+                or not self.chat_markdown or self.chat_markdown[-1].get("role") != "assistant"):
+            self.status_label.setText(f"⚠ {chat} said {who} would get a task but called no tool, so nothing was "
+                                      "sent. Ask it again.")
+            return
+        self._reminded.add(chat)
+        note = {"role": "user", "ts": self.now_ts(), "app_note": True, "content": (
+            f"[Note from the app, not the user: you wrote that {who} would get a task, but you called no tool, so no "
+            "session got anything. Call assign_task or start_session now, once for each task you promised, with the "
+            "full brief. If you meant to wait for the user's answer first, say so in one line instead.]")}
+        self.chat_markdown.append(note)
+        self.save_chat()
+        self._append_message(note, len(self.chat_markdown) - 1)
+        self.status_label.setText(f"⚠ It promised {who} a task without calling the tool; reminding it.")
+        self.answer_open_chat()
+
     def _flush_pending(self):
         if not self._pending_messages:
             return
@@ -2335,6 +2362,7 @@ class ChatMain(QMainWindow):
 
     def _send(self, msg):
         self._follow_ups.pop(self.chat_name(), None)
+        self._reminded.discard(self.chat_name())
         self.chat_markdown.append(msg)
         self._append_message(msg, len(self.chat_markdown) - 1)
         self._start_response()

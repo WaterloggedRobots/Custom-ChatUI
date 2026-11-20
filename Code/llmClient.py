@@ -78,6 +78,19 @@ TOOLS_NOTE = "[Note from the app, not the user: your previous reply used these t
 FAKE_TOOLS_NOTE = re.compile(r"^\s*\[Tools used for this answer:[^\]]*\]\s*")
 
 
+# Asked of a project chat's reply that handed out no work: does it say a session gets a task anyway?
+PROMISE_PROMPT = (
+    "You check a project manager's reply. The manager can only give a session (a worker chat) a task by calling a "
+    "tool, and in this reply it called none. Read the reply and answer whether it tells the user that a session has "
+    "been given, is getting, or will now get a new task from this reply (for example 'I've passed this to X', 'I'll "
+    "have X do Y', 'X is now working on Y'). Talking about work a session already finished, asking the user a "
+    "question first, or suggesting what could be done next if the user agrees is not a promise. "
+    'Answer with JSON: {"promised": true or false, "sessions": [names it promised work to]}.')
+PROMISE_SCHEMA = {"type": "object", "required": ["promised", "sessions"],
+                  "properties": {"promised": {"type": "boolean"},
+                                 "sessions": {"type": "array", "items": {"type": "string"}}}}
+
+
 def strip_fake_tools_note(text: str):
     """`text` without a tool note the model wrote itself; and whether there was one."""
     if not isinstance(text, str):
@@ -119,6 +132,7 @@ class LLMClient(QObject):
     # A picture is ready: {"path", "prompt", "negative_prompt", "workflow"}, or {"error", "prompt", ...}
     image = Signal(dict)
     chat_summarized = Signal(str, int, str)   # a linked chat's name, the messages covered and its one-line summary
+    promise_checked = Signal(str, list)   # a project chat, and the sessions its reply promised work to
 
     def __init__(self):
         super().__init__()
@@ -438,6 +452,33 @@ class LLMClient(QObject):
                 return
             if text:
                 self.chat_summarized.emit(chat, count, text)
+
+        threading.Thread(target=job, daemon=True).start()
+
+    def check_promise(self, chat: str, reply: str, sessions):
+        """Whether a project chat's reply, which called no tool, says a session gets a task anyway. In the
+        background, on the same model (so nothing reloads); emits promise_checked when it promised some."""
+        model = self.model_name
+        if not model or not reply.strip():
+            return
+
+        def job():
+            prompt = [{"role": "system", "content": PROMISE_PROMPT},
+                      {"role": "user", "content": f"Sessions: {', '.join(sessions) or '(none yet)'}\n\n"
+                                                  f"The reply:\n{reply[:6000]}"}]
+            try:
+                r = requests.post(f"{self.base_url}/v1/chat/completions", json={
+                    "model": model, "messages": prompt, "think": False, "temperature": 0, "max_tokens": 200,
+                    "stream": False, "response_format": {"type": "json_schema",
+                                                         "json_schema": {"schema": PROMISE_SCHEMA}}}, timeout=300)
+                r.raise_for_status()
+                answer = json.loads(r.json()["choices"][0]["message"]["content"])
+            except (requests.RequestException, ValueError, LookupError, TypeError) as e:
+                print(f"Could not check {chat}'s reply: {e}")
+                return
+            if isinstance(answer, dict) and answer.get("promised") is True:
+                names = [str(n) for n in answer.get("sessions") or [] if isinstance(n, str)]
+                self.promise_checked.emit(chat, names)
 
         threading.Thread(target=job, daemon=True).start()
 

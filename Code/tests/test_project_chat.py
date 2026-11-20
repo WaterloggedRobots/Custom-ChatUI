@@ -44,6 +44,7 @@ def main(tmp_path, monkeypatch):
     monkeypatch.setattr(llmClient.LLMClient, "list_models", lambda self: MODELS)
     monkeypatch.setattr(llmClient.LLMClient, "generate", answer)
     monkeypatch.setattr(llmClient.LLMClient, "summarize_chat", lambda self, chat, history: None)   # no real server
+    monkeypatch.setattr(llmClient.LLMClient, "check_promise", lambda self, chat, reply, sessions: None)
     from Widgets import chatMain
     window = chatMain.ChatMain()
     window.refresh_models()
@@ -348,15 +349,31 @@ def test_tool_use_reaches_the_model_on_the_next_message_not_in_its_own_words():
                                                                                   False)
 
 
-def test_a_made_up_hand_off_is_flagged_and_not_kept(main, monkeypatch):
+def test_a_promised_hand_off_without_a_tool_call_gets_one_reminder(main, monkeypatch):
     main.open_project_chat("Work")
-    monkeypatch.setattr(llmClient.LLMClient, "generate", lambda self, history: self.done.emit({
-        "content": "[Tools used for this answer:\n- Hand b a task (ok)]\n\nI've passed it to b.", "tools": [],
-        "aborted": False}))
+    replies = iter(["[Tools used for this answer:\n- Hand b a task (ok)]\n\nI've passed it to b.",
+                    "I'll have b check them.", "Waiting for you.", "Done it."])
+    asked = []
+
+    def reply(self, history):
+        asked.append(list(history))
+        self.done.emit({"content": next(replies), "tools": [], "aborted": False})
+    monkeypatch.setattr(llmClient.LLMClient, "generate", reply)
+    checked = []
+    monkeypatch.setattr(llmClient.LLMClient, "check_promise", lambda self, chat, text, sessions: checked.append(text))
     main.input.setPlainText("Give b the numbers")
     main.sendMessage(from_key=True)
-    assert saved("Work")[-1]["content"] == "I've passed it to b."
-    assert main.status_label.text().startswith("⚠ It said it handed out work but called no tool")
+    QApplication.processEvents()                       # a made-up tool note is a promise without asking
+    assert saved("Work")[1]["content"] == "I've passed it to b."
+    note = saved("Work")[2]
+    assert note["app_note"] and "you called no tool" in note["content"] and asked[1][-1] is not None
+    assert checked == ["I'll have b check them."]       # the reminded answer is checked like any other
+    main.on_promise_checked("Work", ["b"])               # it promised again: once is enough, you're told
+    assert len(asked) == 2 and main.status_label.text().startswith("⚠ Work said b would get a task")
+    main.input.setPlainText("Try again")
+    main.sendMessage(from_key=True)                      # your next message: it can be reminded again
+    main.on_promise_checked("Work", ["b"])
+    assert len(asked) == 4 and saved("Work")[-2]["app_note"]
 
 
 def test_enter_mid_answer_queues_your_message_instead_of_stopping(main, monkeypatch):

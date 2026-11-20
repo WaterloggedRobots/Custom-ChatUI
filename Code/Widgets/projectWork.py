@@ -245,7 +245,8 @@ class SessionRunner(QObject):
         chat = self.current
         if chat is None or self.in_place:
             return
-        msg = llmClient.reply_message(result, result.get("content", ""), self.started)
+        msg = llmClient.reply_message(result, llmClient.strip_fake_tools_note(result.get("content", ""))[0],
+                                      self.started)
         path = paths.CHAT_DIR / f"{chat}.json"
         data = _read(path)
         if data:

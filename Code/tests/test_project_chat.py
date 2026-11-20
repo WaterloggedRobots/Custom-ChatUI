@@ -43,6 +43,7 @@ def main(tmp_path, monkeypatch):
             "Chat": [{"role": "user", "content": f"hello from {chat}"}]}), encoding="utf-8")
     monkeypatch.setattr(llmClient.LLMClient, "list_models", lambda self: MODELS)
     monkeypatch.setattr(llmClient.LLMClient, "generate", answer)
+    monkeypatch.setattr(llmClient.LLMClient, "summarize_chat", lambda self, chat, history: None)   # no real server
     from Widgets import chatMain
     window = chatMain.ChatMain()
     window.refresh_models()
@@ -325,3 +326,56 @@ def test_the_bottom_bar_and_list_show_what_sessions_do(main, monkeypatch):
     assert main.sessions_text().startswith("⏳ a working")
     answer(waiting[1], saved("a"))
     assert main.sessions_text() == "" and main.sessions_button.isHidden()
+
+
+def test_tool_use_reaches_the_model_on_the_next_message_not_in_its_own_words():
+    client = llmClient.LLMClient()
+    client.model_name = "gemma4:31b"
+    history = [{"role": "user", "content": "Plan it"},
+               {"role": "assistant", "content": "Handed it out.",
+                "tools": [{"name": "assign_task", "summary": "Hand Game Designer a task", "state": "ok"}]},
+               {"role": "user", "content": "And now?"},
+               {"role": "assistant", "content": "[Tools used for this answer:\n- Hand Game Designer a task (ok)]\n\n"
+                                                "Passed it on."},                     # one the model made up
+               {"role": "user", "content": "Did it go?"}]
+    sent = [m for m in client.build_messages(history, None) if m["role"] != "system"]
+    assert [m["content"] for m in sent if m["role"] == "assistant"] == ["Handed it out.", "Passed it on."]
+    assert sent[2]["content"].startswith("[Note from the app, not the user: your previous reply used these tools:\n"
+                                         "- Hand Game Designer a task (ok)]")
+    assert sent[4]["content"] == "Did it go?"           # a made-up note isn't passed on as tool use
+    assert llmClient.strip_fake_tools_note("[Tools used for this answer:\n- x (ok)]\n\nHi") == ("Hi", True)
+    assert llmClient.strip_fake_tools_note("Hi [Tools used for this answer:]") == ("Hi [Tools used for this answer:]",
+                                                                                  False)
+
+
+def test_a_made_up_hand_off_is_flagged_and_not_kept(main, monkeypatch):
+    main.open_project_chat("Work")
+    monkeypatch.setattr(llmClient.LLMClient, "generate", lambda self, history: self.done.emit({
+        "content": "[Tools used for this answer:\n- Hand b a task (ok)]\n\nI've passed it to b.", "tools": [],
+        "aborted": False}))
+    main.input.setPlainText("Give b the numbers")
+    main.sendMessage(from_key=True)
+    assert saved("Work")[-1]["content"] == "I've passed it to b."
+    assert main.status_label.text().startswith("⚠ It said it handed out work but called no tool")
+
+
+def test_enter_mid_answer_queues_your_message_instead_of_stopping(main, monkeypatch):
+    main.open_project_chat("Work")
+    asked = []
+    monkeypatch.setattr(llmClient.LLMClient, "generate", lambda self, history: asked.append(list(history)))
+    main.input.setPlainText("First")
+    main.sendMessage(from_key=True)
+    assert main.is_answering()
+    stopped = []
+    monkeypatch.setattr(main.client, "abort_generation", lambda: stopped.append(1))
+    main.input.setPlainText("Second")
+    main.sendMessage(from_key=True)                       # Enter while it answers: queued, not a Stop
+    assert not stopped and main.status_label.text().startswith("📨") and main.input.toPlainText() == ""
+    assert len(asked) == 1
+    answer(main.client, asked[0])                         # the answer ends: yours goes out
+    assert asked[1][-1]["content"] == "Second" and [m["content"] for m in asked[1][-3:]] == [
+        "First", "Done: First", "Second"]
+    main.sendMessage()                                    # the button, which reads Stop, still stops it
+    assert stopped == [1]
+    answer(main.client, asked[1])
+    assert saved("Work")[-1]["content"] == "Done: Second"

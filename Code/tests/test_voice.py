@@ -142,7 +142,7 @@ def test_auto_send_and_language(gui, monkeypatch):
     QSettings().setValue("voice/autoSend", True)
     QSettings().setValue("voice/language", "yue")
     sent = []
-    monkeypatch.setattr(main, "sendMessage", lambda: sent.append(main.input.toPlainText()))
+    monkeypatch.setattr(main, "sendMessage", lambda **k: sent.append(main.input.toPlainText()))
     clips = _speak(main, monkeypatch, "你好")
     assert clips[0][1] == "yue"
     assert sent == ["你好"]

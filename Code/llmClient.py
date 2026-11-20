@@ -29,6 +29,7 @@ builds its message list from it here:
 import base64
 import json
 import mimetypes
+import re
 import threading
 import time
 import uuid
@@ -70,6 +71,21 @@ SUMMARY_PROMPT = (
     "'Done or dropped' in a few words, and keep under 'Still open' only what nobody has finished or cancelled. "
     "Keep facts, names, numbers, file paths, decisions and the user's preferences. Write short notes under "
     "these headings: 'Done or dropped', 'Still open', 'Facts and preferences'. Under 500 words.")
+# How earlier tool use reaches the model: on the message after that reply, as a note from the app. Put in the
+# reply's own text, the model took it for how its answers start and wrote it instead of calling the tools.
+TOOLS_NOTE = "[Note from the app, not the user: your previous reply used these tools:\n{used}]\n\n"
+# What older versions put there, and what a model copying it writes: never a real record of tool use.
+FAKE_TOOLS_NOTE = re.compile(r"^\s*\[Tools used for this answer:[^\]]*\]\s*")
+
+
+def strip_fake_tools_note(text: str):
+    """`text` without a tool note the model wrote itself; and whether there was one."""
+    if not isinstance(text, str):
+        return text, False
+    cleaned = FAKE_TOOLS_NOTE.sub("", text, count=1)
+    return cleaned, cleaned != text
+
+
 SUMMARY_INTRO = (
     "Notes on the older part of this conversation, which no longer fits (background only, and it may be out "
     "of date). The messages after this are newer: answer the user's latest message, and where it differs from "
@@ -305,16 +321,24 @@ class LLMClient(QObject):
         full = set(user_idx[-ATTACHMENT_TURNS:])
         if self.tools_enabled:
             messages.append({"role": "system", "content": self.toolbox.system_note()})
+        used = ""                   # the tools of the last reply, for the message after it
         for i, m in enumerate(recent):
             if m["role"] not in ("user", "assistant"):
                 continue
             content = self._content(m, i in full)
+            if m["role"] == "assistant":
+                content = strip_fake_tools_note(content)[0]
             if stage and m.get("acts") and isinstance(content, str):
                 content = avatar.with_tags(content, m["acts"])
-            if m.get("tools"):
+            if m["role"] == "user" and used:
                 # Earlier tool use, in one line each, so follow-up questions have the context.
-                used = "\n".join(f"- {t['summary'].splitlines()[0]} ({t['state']})" for t in m["tools"])
-                content = f"[Tools used for this answer:\n{used}]\n\n{content}"
+                note = TOOLS_NOTE.format(used=used)
+                if isinstance(content, list):
+                    content[0]["text"] = note + content[0]["text"]
+                else:
+                    content = note + content
+            used = ("\n".join(f"- {t['summary'].splitlines()[0]} ({t['state']})" for t in m["tools"])
+                    if m["role"] == "assistant" and m.get("tools") else "")
             drawn = [i["prompt"] for i in m.get("images") or [] if i.get("path") and i.get("prompt")]
             if drawn and isinstance(content, str):
                 # So the model knows what it already showed, and can keep the looks the same.

@@ -109,8 +109,8 @@ class ShiftEnterFilter(QObject):
                 self.input_widget.insertPlainText("\n")
                 return True            # stop further processing
 
-            # Plain Enter → send the message
-            self.chat_main.sendMessage()
+            # Plain Enter → send the message (queued if it's answering; Enter never stops it)
+            self.chat_main.sendMessage(from_key=True)
             return True                # stop further processing
 
         return False                    # let Qt process other events
@@ -243,6 +243,7 @@ class ChatMain(QMainWindow):
         self.runner = projectWork.SessionRunner(self)
         self.runner.changed.connect(self._show_runner_state)
         self._pending_messages = []      # for the open chat, waiting for its answer to finish
+        self._queued_sends = []          # your messages sent with Enter mid-answer: they go out when it ends
         self._follow_ups = {}            # project chat -> times it answered its reports since your last message
         self.handover = projectWork.Handover(self)        # writes context.md when a project chat starts fresh
         self.handover.done.connect(self._on_handover)
@@ -440,7 +441,7 @@ class ChatMain(QMainWindow):
         """Connect button signals to functions"""
         self.ui.pushButton.clicked.connect(self.toggle_graphics_view)
         self.ui.pushButton_2.clicked.connect(self.toggle_chat_list)
-        self.ui.pushButton_5.clicked.connect(self.sendMessage)
+        self.ui.pushButton_5.clicked.connect(lambda: self.sendMessage())
         self.ui.pushButton_3.clicked.connect(self.on_file_button)
         self.mic_button.clicked.connect(self.toggle_voice)
         QShortcut(QKeySequence("Ctrl+M"), self, self.toggle_voice)
@@ -997,8 +998,8 @@ class ChatMain(QMainWindow):
         cursor.insertText(text)
         self.input.setTextCursor(cursor)
         self.input.setFocus()
-        if self._voice_setting("autoSend", False) and not self.client.busy:
-            self.sendMessage()
+        if self._voice_setting("autoSend", False):
+            self.sendMessage(from_key=True)
 
     def on_voice_failed(self, err):
         print(f"Voice: {err}")
@@ -1270,6 +1271,7 @@ class ChatMain(QMainWindow):
 
     def on_done(self, result: dict):
         if self.response_start_pos is None:
+            self._send_queued()
             return
         if result.get("aborted") and not result.get("content"):
             self._clear_streamed()
@@ -1280,7 +1282,8 @@ class ChatMain(QMainWindow):
             return
 
         end_time = time.time()
-        content, acts = result.get("content", ""), []
+        content, faked = llmClient.strip_fake_tools_note(result.get("content", ""))
+        acts = []
         if self.settings["Avatar"]:
             content, acts = avatar.strip_tags(content)
         msg = llmClient.reply_message(
@@ -1306,6 +1309,10 @@ class ChatMain(QMainWindow):
         if s["TTS"] and (s["TTS Auto Play"] or s["Avatar"]) and msg["content"].strip() \
                 and not result.get("aborted"):
             self.speak(len(self.chat_markdown) - 1, reacted=self._reacted)
+        if faked and self.is_lead() and not any(t.get("name") in ("start_session", "assign_task")
+                                                for t in result.get("tools") or []):
+            self.status_label.setText("⚠ It said it handed out work but called no tool, so no session got a task. "
+                                      "Ask it again to give the task to a session.")
         self._after_answer(msg["content"] if not result.get("aborted") else None, "it was stopped")
 
     # ------------------------------------------------------------------
@@ -1383,6 +1390,7 @@ class ChatMain(QMainWindow):
         print(f"LLM error: {err}")
         if self.response_start_pos is None:
             self.on_status(err)
+            self._send_queued()
             return
         cursor = self._clear_streamed()
         cursor.insertHtml(f"<div style='color:#ff6b6b'>⚠ {html.escape(err)}</div>"
@@ -1397,7 +1405,7 @@ class ChatMain(QMainWindow):
                 if event.modifiers() & Qt.ShiftModifier:
                     self.input.insertPlainText("\n")
                 else:
-                    self.sendMessage()
+                    self.sendMessage(from_key=True)
                 return
         super().keyPressEvent(event)
 
@@ -1515,6 +1523,10 @@ class ChatMain(QMainWindow):
         if self.chat_path and path and Path(path).resolve() != Path(self.chat_path).resolve():
             self.rename_from_header()       # a name still being typed in the header counts before switching
         self._flush_pending()
+        if self._queued_sends and self.chat_path:   # kept in the chat they were typed in, for Reload Text
+            self.chat_markdown += self._queued_sends
+            self.save_chat()
+        self._queued_sends = []
         self.runner.give_back(self.chat_name())
 
         if path == "":
@@ -1906,12 +1918,16 @@ class ChatMain(QMainWindow):
         return True
 
     def _after_answer(self, content, why):
-        """An answer in the main window ended: deliver what waited for it, and let the sessions go on."""
+        """An answer in the main window ended: deliver what waited for it, send what you queued,
+        and let the sessions go on."""
         chat = self.chat_name()
         self._flush_pending()
-        if self.runner.in_place and self.runner.current == chat:
+        in_place = self.runner.in_place and self.runner.current == chat
+        if in_place:
             self.runner.finished_in_place(chat, content, why)
-        else:
+        if self._send_queued():
+            return
+        if not in_place:
             self.runner.kick()
             self._follow_up()
 
@@ -2295,9 +2311,11 @@ class ChatMain(QMainWindow):
     # Sending, editing, regenerating
     # ------------------------------------------------------------------
 
-    def sendMessage(self):
-        if self.client.busy:
-            self.client.abort_generation()       # the Send button is "Stop" while answering
+    def sendMessage(self, from_key=False):
+        """Send what's typed. The button is "Stop" while answering and stops it; Enter never stops anything:
+        mid-answer (often one the project chat started by itself for a report), it queues your message."""
+        if self.response_start_pos is not None and not from_key:
+            self.client.abort_generation()
             return
 
         text = self.input.toPlainText().strip()
@@ -2306,14 +2324,38 @@ class ChatMain(QMainWindow):
         self.input.clear()
 
         msg = {"role": "user", "content": text, "ts": self.now_ts()}
-        self._follow_ups.pop(self.chat_name(), None)
         if self.pending_attachments:
             msg["attachments"] = self.pending_attachments
-        self.chat_markdown.append(msg)
         self.clear_attachments()
+        if self.is_answering():
+            self._queued_sends.append(msg)
+            self.status_label.setText("📨 Your message goes out when this answer ends. Click Stop to send it now.")
+            return
+        self._send(msg)
 
+    def _send(self, msg):
+        self._follow_ups.pop(self.chat_name(), None)
+        self.chat_markdown.append(msg)
         self._append_message(msg, len(self.chat_markdown) - 1)
         self._start_response()
+
+    def _send_queued(self) -> bool:
+        """Send the messages you queued with Enter, once nothing is answering. True if they went."""
+        if not self._queued_sends:
+            return False
+        if self.is_answering():
+            if self.response_start_pos is None:     # only the last request's thread still closing
+                QTimer.singleShot(100, self._send_queued)
+            return False
+        *earlier, last = self._queued_sends
+        self._queued_sends = []
+        for msg in earlier:
+            self.chat_markdown.append(msg)
+            self._append_message(msg, len(self.chat_markdown) - 1)
+        if self.status_label.text().startswith("📨"):
+            self.status_label.setText("")
+        self._send(last)
+        return True
 
     def render_markdown(self, text: str) -> str:
         html_text = markdown.markdown(

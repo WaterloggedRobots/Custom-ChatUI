@@ -270,3 +270,58 @@ def test_a_fenced_handover_is_unwrapped():
     from Widgets.projectWork import unfence
     assert unfence("```markdown\n## Goal\nShip it\n```\n") == "## Goal\nShip it"
     assert unfence("## Goal\n```py\nx\n```") == "## Goal\n```py\nx\n```"
+
+
+def test_a_brief_given_while_a_session_works_is_answered_next(main, monkeypatch):
+    main.open_project_chat("Work")
+    waiting = []
+    monkeypatch.setattr(llmClient.LLMClient, "generate", lambda self, history: waiting.append(list(history)))
+    main.desk.assign("b", "First task")
+    main.desk.assign("b", "Second task")                 # the manager adds a task while b works on the first
+    assert main.runner.state_of("b") == "working" and main.runner.queue == ["b"]
+    answer(main.runner.client, waiting[0])
+    contents = [m["content"] for m in saved("b")]
+    assert contents[-3:] == ["First task", "Done: First task", "Second task"]   # its answer went before the brief
+    assert waiting[1][-1]["content"] == "Second task"     # so the second one is what it works on now
+    answer(main.runner.client, waiting[1])
+    assert saved("b")[-1]["content"] == "Done: Second task"
+    reports = [m["content"] for m in saved("Work") if m.get("report")]
+    assert any("Done: First task" in r for r in reports) and any("Done: Second task" in r for r in reports)
+
+
+def test_a_session_with_nothing_to_answer_still_reports(main):
+    main.open_project_chat("Work")
+    cl.add_link(main.links, cl.node(cl.CHAT, "b"), cl.node(cl.PROJECT, "Work"), cl.MEMBER)
+    data = json.loads((paths.CHAT_DIR / "b.json").read_text(encoding="utf-8"))
+    data["Chat"].append({"role": "assistant", "content": "Already answered"})
+    (paths.CHAT_DIR / "b.json").write_text(json.dumps(data), encoding="utf-8")
+    main.runner.add("b", "Work")
+    assert main.runner.state_of("b") == "idle"
+    assert any("Session b couldn't finish its task: its chat had no new task" in m["content"]
+               for m in main.chat_markdown + saved("Work"))
+
+
+def test_the_bottom_bar_and_list_show_what_sessions_do(main, monkeypatch):
+    main.open_project_chat("Work")
+    waiting = []
+    monkeypatch.setattr(llmClient.LLMClient, "generate", lambda self, history: waiting.append(self))
+    assert main.sessions_text() == "" and main.sessions_button.isHidden()
+    main.desk.assign("b", "Slow task")
+    main.desk.assign("a", "Next task")
+    assert main.sessions_text().startswith("⏳ b working in the background 0:0")
+    assert main.sessions_text().endswith("· 🕓 1 queued") and not main.sessions_button.isHidden()
+    tree = main.chat_list
+    rows = {tree.topLevelItem(i).data(0, 0x0100)[1]: tree.topLevelItem(i) for i in range(tree.topLevelItemCount())}
+    project = rows["Work"]
+    kids = {project.child(k).text(0): project.child(k) for k in range(project.childCount())}
+    assert tree.state_of_row(kids["b"]) == "working" and tree.state_of_row(kids["a"]) == "queued"
+    assert tree.state_of_row(project) == "working"         # seen with the group closed too
+    main.runner.set_waiting(True)                          # its command waits for your OK
+    assert main.sessions_text().startswith("✋ b needs your OK") and tree.state_of_row(kids["b"]) == "waiting"
+    main.runner.set_waiting(False)
+    main._open_working_session()
+    assert main.chat_name() == "b"
+    answer(waiting[0], saved("b"))
+    assert main.sessions_text().startswith("⏳ a working")
+    answer(waiting[1], saved("a"))
+    assert main.sessions_text() == "" and main.sessions_button.isHidden()

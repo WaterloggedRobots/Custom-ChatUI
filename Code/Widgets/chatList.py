@@ -6,7 +6,9 @@ sections and the projects' links, so chats keep their most-recently-used order
 inside each group. A project's chats can't be dragged out of it, but the project
 can be dragged into a section. Clicking a project opens its own chat, where its
 work is handed out; its arrow opens and closes the group. The row under the
-cursor shows an x on its right that deletes it, once ChatMain has asked.
+cursor shows an x on its right that deletes it, once ChatMain has asked. A session
+that's working, queued or waiting for your OK says so on its right, and so does its
+project, so you see it with the group closed.
 """
 
 import chat_sections
@@ -22,6 +24,8 @@ ROW = Qt.UserRole                       # each row's (kind, name); kind is "new 
                                         # "section", "project" or "chat"
 DELETABLE = ("section", "project", "chat")
 X_WIDTH = 22                            # the delete x's box at the right of the hovered row
+STATES = {"working": ("⏳ working", QColor(120, 200, 140)), "waiting": ("✋ needs OK", QColor(235, 170, 80)),
+          "queued": ("🕓 queued", QColor(150, 150, 150))}
 
 
 class _RowDelegate(QStyledItemDelegate):
@@ -33,15 +37,28 @@ class _RowDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index):
         item = self.tree.itemFromIndex(index)
-        if item is None or item is not self.tree.hovered or item.data(0, ROW)[0] not in DELETABLE:
+        hovered = item is not None and item is self.tree.hovered and item.data(0, ROW)[0] in DELETABLE
+        state = self.tree.state_of_row(item) if item is not None else None
+        if not hovered and not state:
             super().paint(painter, option, index)
             return
+        right = self.tree.x_rect(option.rect).left() - 2 if hovered else self.tree.viewport().width() - 4
+        state_rect = None
+        if state:
+            text, color = STATES[state]
+            width = painter.fontMetrics().horizontalAdvance(text) + 6
+            state_rect = QRect(right - width, option.rect.top(), width, option.rect.height())
+            right = state_rect.left() - 2
         opt = QStyleOptionViewItem(option)
-        opt.rect.setRight(min(opt.rect.right(), self.tree.x_rect(option.rect).left() - 2))
+        opt.rect.setRight(min(opt.rect.right(), right))
         super().paint(painter, opt, index)
         painter.save()
-        painter.setPen(QColor(235, 110, 110) if self.tree.on_x else QColor(170, 170, 170))
-        painter.drawText(self.tree.x_rect(option.rect), Qt.AlignCenter, "✕")
+        if state_rect is not None:
+            painter.setPen(color)
+            painter.drawText(state_rect, Qt.AlignVCenter | Qt.AlignRight, text)
+        if hovered:
+            painter.setPen(QColor(235, 110, 110) if self.tree.on_x else QColor(170, 170, 170))
+            painter.drawText(self.tree.x_rect(option.rect), Qt.AlignCenter, "✕")
         painter.restore()
 
 
@@ -60,6 +77,7 @@ class ChatList(QTreeWidget):
         self.sections = []
         # [(project, its own chat or None, its other chats)], in the links' order (ChatMain sets it)
         self.project_groups = lambda: []
+        self.chat_state = lambda chat: "idle"   # a session's "working", "waiting", "queued" or "idle" (ChatMain sets it)
         self._closed_projects = set()
         self._press_x = None            # where the last click went down, to tell a project's arrow from its name
         self.hovered = None             # the row under the cursor, which shows the delete x
@@ -176,6 +194,17 @@ class ChatList(QTreeWidget):
     # ------------------------------------------------------------------
     # The delete x on the hovered row
     # ------------------------------------------------------------------
+
+    def state_of_row(self, item):
+        """What a row shows on its right: its session's state, or for a project the busiest of its chats'. None if idle."""
+        kind, name = item.data(0, ROW)
+        if kind == "chat":
+            states = [self.chat_state(name)]
+        elif kind == "project":
+            states = [self.chat_state(item.child(k).data(0, ROW)[1]) for k in range(item.childCount())]
+        else:
+            return None
+        return next((s for s in STATES if s in states), None)
 
     def x_rect(self, row_rect):
         """Where the x goes on a row: the right of the list, wherever the row's own text ends."""

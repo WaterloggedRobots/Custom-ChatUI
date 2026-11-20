@@ -135,6 +135,9 @@ class SessionRunner(QObject):
         self.current = None          # the chat being answered
         self.in_place = False        # it's answered in the main window
         self.started = 0.0
+        self.answer_at = 0           # where its answer goes in its chat: after the brief it's answering, before
+                                     # any brief that came while it worked
+        self.waiting = False         # its change or command is waiting for your OK
         self.client = llmClient.LLMClient()
         self.client.done.connect(self._on_done)
         self.client.error.connect(self._on_error)
@@ -143,9 +146,14 @@ class SessionRunner(QObject):
         self.client.chat_summarized.connect(self.main.on_chat_summarized)
 
     def state_of(self, chat) -> str:
+        """"waiting" (for your OK), "working", "queued" or "idle"."""
         if chat == self.current:
-            return "working"
+            return "waiting" if self.waiting else "working"
         return "queued" if chat in self.queue else "idle"
+
+    def set_waiting(self, waiting: bool):
+        self.waiting = waiting
+        self.changed.emit()
 
     def busy_with(self, chat) -> bool:
         """It's being answered in the background, so the main window mustn't change it."""
@@ -193,7 +201,7 @@ class SessionRunner(QObject):
                 if main.is_answering():
                     continue             # its own answer first; on_done kicks again
                 self.queue.remove(chat)
-                self.current, self.in_place = chat, True
+                self.current, self.in_place, self.started = chat, True, time.time()
                 self.changed.emit()
                 if not main.answer_open_chat():
                     self._finish(chat, None, "it had nothing to answer")
@@ -202,8 +210,11 @@ class SessionRunner(QObject):
             data = _read(path)
             history = data.get("Chat") or []
             if not history or history[-1].get("role") != "user":
+                # Say so, rather than leave its project's chat waiting for a report that never comes.
+                self.main.session_finished(chat, None, "its chat had no new task to answer")
                 continue
             self.current, self.in_place, self.started = chat, False, time.time()
+            self.answer_at = len(history)
             self._configure(chat, data)
             self.changed.emit()
             self.client.generate(history)
@@ -238,7 +249,9 @@ class SessionRunner(QObject):
         path = paths.CHAT_DIR / f"{chat}.json"
         data = _read(path)
         if data:
-            data.setdefault("Chat", []).append(msg)
+            # A brief that came while it worked stays last, so the next run answers it.
+            history = data.setdefault("Chat", [])
+            history.insert(min(self.answer_at, len(history)), msg)
             if self.client.summary:
                 data["Summary"] = self.client.summary
             _write(path, data)
@@ -257,7 +270,7 @@ class SessionRunner(QObject):
             self._finish(chat, content, why)
 
     def _finish(self, chat, content, why):
-        self.current, self.in_place = None, False
+        self.current, self.in_place, self.waiting = None, False, False
         self.main.session_finished(chat, content, why)
         self.changed.emit()
         self.kick()

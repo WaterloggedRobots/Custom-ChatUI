@@ -299,6 +299,7 @@ class ChatMain(QMainWindow):
                 self.ui.lineEdit.editingFinished.connect(self.rename_from_header)
                 self.chat_list.sections_changed.connect(self.save_sections)
                 self.chat_list.project_groups = self._project_groups
+                self.chat_list.chat_state = self.runner.state_of
                 self.chat_list.fresh_requested.connect(self.ask_start_fresh)
                 self.chat_list.delete_requested.connect(self.ask_delete)
                 self.chat_list.project_clicked.connect(self.open_project_chat)
@@ -327,6 +328,16 @@ class ChatMain(QMainWindow):
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(f"color:{MUTED}")
         bottom.insertWidget(0, self.status_label, 1)
+        # What the project sessions are doing, whichever chat is open; click it to open the one working.
+        self.sessions_button = QPushButton("")
+        self.sessions_button.setFlat(True)
+        self.sessions_button.setStyleSheet(f"color:{MUTED};text-align:left;padding:0 6px")
+        self.sessions_button.clicked.connect(self._open_working_session)
+        self.sessions_button.hide()
+        bottom.insertWidget(1, self.sessions_button)
+        self.sessions_timer = QTimer(self)          # counts the working session's time up
+        self.sessions_timer.setInterval(1000)
+        self.sessions_timer.timeout.connect(self._show_sessions)
 
         # The row above the input (Reload Text / Reload Image). Keep its image-panel spacer by
         # reference, since the controls below are inserted in front of it.
@@ -858,7 +869,14 @@ class ChatMain(QMainWindow):
         box.setDefaultButton(deny)
         box.setEscapeButton(deny)
         self.status_label.setText("Waiting for your OK…")
-        box.exec()
+        background = client is self.runner.client
+        if background:
+            self.runner.set_waiting(True)
+        try:
+            box.exec()
+        finally:
+            if background:
+                self.runner.set_waiting(False)
         clicked = box.clickedButton()
         client.answer_approval("allow" if clicked is allow else "always" if clicked is always else "deny")
 
@@ -1941,7 +1959,9 @@ class ChatMain(QMainWindow):
                 self.chat_markdown = saved
                 self.client.summary = projectWork._read(paths.CHAT_DIR / f"{chat}.json").get("Summary")
                 self._rebuild_chat_ui()
-        project = self.runner.origin.pop(chat, None)
+        # Kept while it's queued again for a brief that came meanwhile: that one reports back too.
+        origin = self.runner.origin
+        project = origin.get(chat) if chat in self.runner.queue else origin.pop(chat, None)
         lead = chat_links.lead_of(self.links, project) if project else None
         if lead:
             self.append_message(lead, projectWork.report_message(chat, content, why))
@@ -1958,6 +1978,39 @@ class ChatMain(QMainWindow):
             self.status_label.setText("⏳ Working on its task in the background…")
         elif self.status_label.text().startswith("⏳"):
             self.status_label.setText("")
+        self._show_sessions()
+        self.chat_list.viewport().update()     # its rows show each session's state
+
+    def sessions_text(self) -> str:
+        """The bottom bar's line about the sessions: who works and for how long, who waits. "" when all are idle."""
+        runner = self.runner
+        parts = []
+        if runner.current:
+            if runner.waiting:
+                parts.append(f"✋ {runner.current} needs your OK")
+            else:
+                secs = int(time.time() - runner.started) if runner.started else 0
+                where = "here" if runner.in_place and runner.current == self.chat_name() else "in the background"
+                parts.append(f"⏳ {runner.current} working {where} {secs // 60}:{secs % 60:02d}")
+        if runner.queue:
+            parts.append(f"🕓 {len(runner.queue)} queued")
+        return " · ".join(parts)
+
+    def _show_sessions(self):
+        text = self.sessions_text()
+        self.sessions_button.setText(text)
+        self.sessions_button.setVisible(bool(text))
+        self.sessions_button.setToolTip(
+            "Project sessions. Waiting: " + ", ".join(self.runner.queue) + ". Click to open the one working."
+            if self.runner.queue else "Project sessions. Click to open the one working.")
+        if self.runner.current and not self.sessions_timer.isActive():
+            self.sessions_timer.start()
+        elif not self.runner.current:
+            self.sessions_timer.stop()
+
+    def _open_working_session(self):
+        if self.runner.current and self.runner.current != self.chat_name():
+            self.qs_chat(self.runner.current)
 
     def _brief(self, project, brief) -> dict:
         return {"role": "user", "content": brief, "ts": self.now_ts(), "from": project}
